@@ -12,12 +12,47 @@ explicitly rather than displayed as off. “Running model” means loaded in mem
 not necessarily generating tokens right now.
 
 **Try a model** is collapsed by default. The downloaded-models card has a bounded
-height and scrollable inventory. Dashboard controls and backend load jobs require
-unloading the current model before loading another; this does not intercept
+height and scrollable inventory. Dashboard controls and backend load jobs permit
+one loaded model per CPU/GPU slot; unload a slot's model before reusing it. This does not intercept
 independent requests sent directly to the local Ollama API. Lifecycle events show
 up to ten single-line entries at once, with vertical scrolling for older events
 and horizontal scrolling for long details. Refresh preserves the event scroll
 position.
+
+### Per-device runtimes
+
+Select a free device above the downloaded-models list before pressing Load/start.
+There is one CPU slot (all logical cores), plus one slot per safely identifiable
+NVIDIA GPU UUID or AMD render device. Intel/unidentified GPUs are shown but cannot
+be selected. Hardware cards show assigned models, free VRAM and utilization when
+available. “Free” means unassigned by Llameros, not exclusive of other programs.
+Each running-model row includes a **■ Stop model** button on its right; it unloads
+that model without stopping other models or the Ollama services.
+
+Each GPU gets its own managed container, device restriction, and loopback port.
+CPU uses `ollama_port`; GPU ports are allocated above it, skipping the dashboard
+port, and persisted in `state_dir/runtime-slots.json`. Port collisions with other
+programs fail visibly rather than changing endpoints. Model files are shared;
+startup pruning is disabled. Access examples and playground selections include
+hardware and route to the selected runtime, even for the same model on two GPUs.
+The legacy `gpu` configuration controls catalogue estimates, not runtime placement.
+AMD uses the ROCm image when the configured image is the default Ollama image;
+custom images must support the selected device. Compatible host drivers and
+container GPU support remain prerequisites.
+
+Loads require available system RAM and, for GPU slots, estimated VRAM fit. A GPU
+load reporting no VRAM use is unloaded and reported as an error, not labelled GPU
+execution. GPU models may still use CPU resources; this is device assignment,
+not exclusive CPU affinity. Dashboard lifecycle/inference jobs remain globally
+serialized, but models on different slots can stay loaded simultaneously and
+their direct API endpoints can be used independently.
+
+**Existing-container migration:** older containers lack the new hardware-assignment
+label and will be refused for model operations. Stop Ollama, open Configuration,
+confirm and reapply the current model-storage selection, then start Ollama again.
+This recreates managed containers only; model files are never moved or deleted.
+Stop Ollama stops all registered runtimes. Stopping a model alone leaves its slot
+service ready for reuse. Do not delete the runtime registry while containers exist.
 
 The **Ollama runtime → Access model** dropdown shows the configured loopback API
 base URL and OpenAI-compatible `/v1` base URL. Select a loaded model and choose
@@ -124,7 +159,7 @@ are not supported by this streaming download path.
    without relying on GPU memory. The same filter applies to recommendations.
    Unknown/oversized variants are hidden while checked; clear it to inspect them.
    This is a discovery filter, not a change to the configured execution mode:
-   use `gpu = "cpu"` in configuration to run the container without GPU devices.
+   select **CPU · all cores** when loading to run without GPU devices.
    Small local models are not a separate CPU-only model category. Changing the
    checkbox or submitting search refreshes memory estimates.
    Catalogue badges use rounded download sizes with rounding headroom and the
@@ -195,13 +230,15 @@ expanded for the user running Llameros.
 | `retention_days` | `30` | History retention, pruned during sampling |
 | `ollama_port` | `11435` | Ollama API, published only on IPv4 loopback |
 | `ollama_image` | `ollama/ollama:latest` | Image; pin a tested tag/digest for reproducibility |
-| `gpu` | `cpu` | `cpu`, `nvidia`, or `amd`; AMD defaults to the ROCm image |
+| `gpu` | `cpu` | Catalogue estimate preference: `cpu`, `nvidia`, or `amd`; execution is selected per model |
 | `context_length` | `4096` | Runtime context length |
 | `allow_rootful_docker` | `false` | Explicit rootful daemon risk acceptance |
 
-Configuration changes to an existing container do not recreate it. Stop it and
-remove the **container only** with `docker rm llameros-$(id -u)` before restarting
-to apply image/GPU/port changes. Keep the model volume to preserve downloads.
+Configuration changes to existing containers do not recreate them. Stop all
+runtimes and confirm/reapply model storage to recreate them for image changes.
+Keep the model volume to preserve downloads. Runtime ports are persisted in
+`runtime-slots.json`; changing `ollama_port` after creating slots requires a
+deliberate stopped-container/registry migration, not merely editing TOML.
 Only one Llameros instance per Linux UID and Docker daemon is supported.
 
 ## Security model and limitations

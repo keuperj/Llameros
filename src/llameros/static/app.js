@@ -7,11 +7,17 @@ let loadedCatalogueQuery = '';
 let busy = false, jobTimer = null, pollingJob = false;
 let runtimeState = null, infoVersion = 0;
 let accessConfig = null, accessContext = 4096;
+const modelKey = model => model.target ? JSON.stringify([model.name || model.model, model.target]) : (model.name || model.model);
+function selectedModel(value) { if (value.startsWith('[')) { const [model, target] = JSON.parse(value); return {model, target}; } return {model: value}; }
+function loadedChoices() { return runtimeState && runtimeState.running && !runtimeState.error ? (runtimeState.loaded || []) : []; }
 function renderAccessExample() {
-  const model = $('access-active-model').value;
+  const choice = selectedModel($('access-active-model').value), model = choice.model;
+  const loaded = loadedChoices().find(item => modelKey(item) === $('access-active-model').value);
+  const baseUrl = loaded && loaded.base_url || (accessConfig && accessConfig.base_url);
+  if (baseUrl) { $('access-url').value = baseUrl; $('access-openai-url').value = baseUrl + '/v1'; }
   const active = JobProgress.controls(runtimeState, false).active;
   const example = active.includes(model) && accessConfig
-    ? ModelAccess.example($('access-framework').value, model, accessConfig.base_url, accessContext) : null;
+    ? ModelAccess.example($('access-framework').value, model, baseUrl, accessContext) : null;
   for (const [id, value] of [['access-install', example ? example.install : ''], ['access-code', example ? example.code : '']]) {
     if ($(id).value !== value) $(id).value = value;
   }
@@ -20,13 +26,14 @@ function renderAccessExample() {
 function renderAccess() {
   $('access-url').value = accessConfig ? accessConfig.base_url : '';
   $('access-openai-url').value = accessConfig ? accessConfig.openai_url : '';
-  const active = JobProgress.controls(runtimeState, false).active;
+  const active = loadedChoices().map(modelKey);
   const select = $('access-active-model'), previous = select.value;
   // Preserve selection/focus and code selection across five-second refreshes.
   if (JSON.stringify([...select.options].map(option => option.value).filter(Boolean)) !== JSON.stringify(active)) {
     options(select, active, active.length ? null : 'Load a model first');
     if (active.includes(previous)) select.value = previous;
   }
+  for (const option of select.options) { const model = loadedChoices().find(item => modelKey(item) === option.value); if (model) option.textContent = `${model.name || model.model}${model.hardware ? ' · ' + model.hardware : ''}`; }
   select.disabled = !active.length;
   $('access-state').textContent = runtimeState && runtimeState.running && !runtimeState.error
     ? (active.length ? 'Select an active model and copy an example below.' : 'Ollama is running. Load a downloaded model to see its example.')
@@ -54,13 +61,14 @@ function updateControls() {
   $('container-start').disabled = !state.start;
   $('container-stop').disabled = !state.stop;
   $('generate-model').disabled = busy || !state.active.length;
-  $('generate-form').querySelector('button').disabled = busy || !state.active.includes($('generate-model').value);
+  $('generate-form').querySelector('button').disabled = busy || !loadedChoices().some(model => modelKey(model) === $('generate-model').value);
   $('storage-save').disabled = busy || !runtimeState || runtimeState.running || !!runtimeState.error;
   document.querySelectorAll('#installed button[data-action]').forEach(button => {
     const controls = JobProgress.modelControls(runtimeState, busy, button.dataset.model);
     button.disabled = !controls[button.dataset.action];
-    button.title = button.dataset.action === 'load' && state.active.length ? 'Unload the running model before starting another.' : '';
+    button.title = button.dataset.action === 'load' && !controls.load ? 'Select a free hardware slot, or stop a running model first.' : '';
   });
+  document.querySelectorAll('#runtime-models button').forEach(button => { button.disabled = busy; });
 }
 function progressBar(label, value) {
   const wrapper = element('div', '', 'progress-row');
@@ -259,7 +267,7 @@ $('pull').addEventListener('click', safe(async () => {
   await api('/api/models/pull', {model: selectedFit.model}); await refresh();
 }));
 $('generate-form').addEventListener('submit', safe(async () => {
-  await api('/api/generate', {model: $('generate-model').value, prompt: $('prompt').value, max_tokens: 256});
+  await api('/api/generate', {...selectedModel($('generate-model').value), prompt: $('prompt').value, max_tokens: 256});
   $('output').textContent = 'Generating…'; await refresh();
 }));
 async function refresh() {
@@ -279,10 +287,32 @@ async function refresh() {
       ['GPU', hw.gpus.length ? hw.gpus.map(g => g.vendor).join(', ') : 'CPU mode', hw.gpus.map(g => `${g.name}: ${bytes(g.free)} free`).join(' · ') || 'No supported GPU detected'],
       ['RUNTIME', data.ollama.running ? 'Online' : 'Offline', `${data.gpu_mode} · ${data.context_length} context`],
     ]) { const card = element('div', '', 'metric'); card.append(element('small', label), element('strong', value), element('small', detail)); $('hardware').append(card); }
+    for (const slot of data.ollama.slots || []) {
+      const card = element('div', '', 'metric');
+      const names = (slot.loaded || []).map(model => model.name || model.model);
+      card.append(element('small', slot.label), element('strong', slot.error ? 'Unavailable' : names.length ? 'Model running' : 'Free'), element('small', slot.error || names.join(', ') || 'No model assigned by Llameros'));
+      if (slot.vendor !== 'cpu') card.append(element('small', `${bytes(slot.free)} free / ${bytes(slot.total)} VRAM · ${slot.utilization == null ? 'utilization unknown' : slot.utilization + '% utilization'}`));
+      $('hardware').append(card);
+    }
+    const targetPrevious = $('load-target').value;
+    const freeSlots = (data.ollama.slots || []).filter(slot => slot.available);
+    options($('load-target'), freeSlots.map(slot => slot.id), freeSlots.length ? null : 'No free hardware');
+    for (const option of $('load-target').options) { const slot = freeSlots.find(slot => slot.id === option.value); if (slot) option.textContent = slot.label; }
+    if (freeSlots.some(slot => slot.id === targetPrevious)) $('load-target').value = targetPrevious;
+    $('load-target').disabled = busy || !freeSlots.length;
     const runtimeStatus = JobProgress.runtimeState(data.ollama);
     $('runtime').textContent = runtimeStatus.text; $('runtime').dataset.state = runtimeStatus.state;
+    $('runtime-models').replaceChildren();
+    for (const model of data.ollama.loaded || []) {
+      const row = element('div', '', 'runtime-model-row');
+      row.append(element('strong', `Model running — ${model.name || model.model}${model.hardware ? ' · ' + model.hardware : ''}`));
+      const stop = element('button', '■ Stop model'); stop.type = 'button';
+      stop.setAttribute('aria-label', `Stop ${model.name || model.model}${model.hardware ? ' on ' + model.hardware : ''}`);
+      stop.addEventListener('click', safe(async () => { await api('/api/models/unload', {model: model.name || model.model, target: model.target || ''}); await refresh(); }));
+      row.append(stop); $('runtime-models').append(row);
+    }
     const resource = data.ollama.resources;
-    $('runtime-detail').textContent = data.ollama.error || (resource ? `Container CPU ${resource.CPUPerc} · memory ${resource.MemUsage} · network ${resource.NetIO}` : 'Start the managed container to download or run models.');
+    $('runtime-detail').textContent = data.ollama.error || data.ollama.legacy_error || (resource ? `Container CPU ${resource.CPUPerc} · memory ${resource.MemUsage} · network ${resource.NetIO}` : 'Start the managed container to download or run models.');
     const available = JobProgress.availability(data.ollama);
     $('image-availability').textContent = available.text; $('image-availability').title = available.detail; $('image-availability').dataset.state = available.state;
     const job = data.job;
@@ -298,15 +328,23 @@ async function refresh() {
     const models = inventory.models || [], loaded = data.ollama.loaded || [];
     $('model-count').textContent = models.length;
     $('inventory-detail').textContent = `${inventory.source === 'live' ? 'Live Ollama inventory' : inventory.source === 'disk' ? 'Read from model directory; blob sizes checked (not checksums)' : inventory.source === 'cache' ? 'Last known inventory from ' + new Date(inventory.cached_at * 1000).toLocaleString() + ' — start Ollama to refresh' : 'Inventory unavailable until Ollama starts'}. ${(inventory.warnings || []).join(' ')}`;
-    const activeNames = JobProgress.controls(runtimeState, busy).active;
+    const activeNames = loadedChoices().map(modelKey);
     const current = $('generate-model').value; options($('generate-model'), activeNames, activeNames.length ? null : 'Load a model first'); if (activeNames.includes(current)) $('generate-model').value = current;
+    for (const option of $('generate-model').options) { const model = loadedChoices().find(item => modelKey(item) === option.value); if (model) option.textContent = `${model.name || model.model}${model.hardware ? ' · ' + model.hardware : ''}`; }
     $('installed').replaceChildren();
     if (!models.length) $('installed').append(element('p', ['unknown', 'unavailable'].includes(inventory.source) ? 'No inventory available. Start Ollama to check this storage location.' : 'No downloaded models found in the selected storage location.'));
     models.forEach(model => {
-      const row = element('div', '', 'model'), active = loaded.some(m => m.name === model.name);
-      row.append(element('strong', model.name), element('small', `${bytes(model.size)}${active ? ' · loaded' : ' · downloaded'}${model.modified_at ? ' · ' + new Date(model.modified_at).toLocaleDateString() : ''}`));
+      const row = element('div', '', 'model'), active = loaded.filter(m => m.name === model.name);
+      row.append(element('strong', model.name), element('small', `${bytes(model.size)}${active.length ? ' · loaded: ' + active.map(item => item.hardware || 'default runtime').join(', ') : ' · downloaded'}${model.modified_at ? ' · ' + new Date(model.modified_at).toLocaleDateString() : ''}`));
       const actions = element('div', '', 'actions');
-      for (const action of ['load', 'unload']) { const button = element('button', action === 'load' ? 'Load / start' : 'Unload / stop'); button.dataset.action = action; button.dataset.model = model.name; button.addEventListener('click', safe(async () => { await api('/api/models/' + action, {model: model.name}); await refresh(); })); actions.append(button); }
+      for (const action of ['load', 'unload']) {
+        const targets = action === 'unload' && active.length ? active : [{target: ''}];
+        for (const target of targets) {
+          const button = element('button', action === 'load' ? 'Load / start' : '■ Stop' + (target.hardware ? ' · ' + target.hardware : ''));
+          button.dataset.action = action; button.dataset.model = model.name;
+          button.addEventListener('click', safe(async () => { await api('/api/models/' + action, {model: model.name, target: action === 'load' ? $('load-target').value : target.target || ''}); await refresh(); })); actions.append(button);
+        }
+      }
       row.append(actions); $('installed').append(row);
     });
     $('usage').replaceChildren();

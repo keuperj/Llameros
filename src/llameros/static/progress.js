@@ -8,7 +8,7 @@ const JobProgress = {
   modelControls(runtime, busy, model) {
     const active = this.controls(runtime, busy).active;
     const ready = !busy && !!runtime && runtime.running === true && !runtime.error;
-    return {load: ready && active.length === 0, unload: ready && active.includes(model)};
+    return {load: ready && (runtime.slots ? runtime.slots.some(slot => slot.available) : active.length === 0), unload: ready && active.includes(model)};
   },
   runtimeState(runtime) {
     if (!runtime || runtime.error || typeof runtime.running !== 'boolean') return {state: 'unknown', text: 'Ollama status unavailable'};

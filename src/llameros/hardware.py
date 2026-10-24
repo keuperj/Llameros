@@ -11,11 +11,12 @@ GIB = 1024**3
 
 
 def gpu_info() -> list[dict]:
+    devices = []
     try:
         result = subprocess.run(
             [
                 "nvidia-smi",
-                "--query-gpu=name,memory.total,memory.free,utilization.gpu",
+                "--query-gpu=name,memory.total,memory.free,utilization.gpu,uuid",
                 "--format=csv,noheader,nounits",
             ],
             capture_output=True,
@@ -23,24 +24,27 @@ def gpu_info() -> list[dict]:
             timeout=4,
             check=True,
         )
-        return [
+        devices = [
             {
                 "name": row[0].strip(),
                 "vendor": "nvidia",
                 "total": int(row[1]) * 1024**2,
                 "free": int(row[2]) * 1024**2,
                 "utilization": float(row[3]),
+                "id": row[4].strip(),
             }
             for row in csv.reader(result.stdout.splitlines())
-            if len(row) == 4
+            if len(row) == 5
         ]
     except (OSError, subprocess.SubprocessError, ValueError):
         pass
-    devices = []
+    nvidia_detected = bool(devices)
     for device in Path("/sys/class/drm").glob("card[0-9]*/device"):
         try:
             vendor = (device / "vendor").read_text().strip()
             if vendor not in {"0x1002", "0x8086", "0x10de"}:
+                continue
+            if vendor == "0x10de" and nvidia_detected:
                 continue
             total_file = device / "mem_info_vram_total"
             used_file = device / "mem_info_vram_used"
@@ -48,13 +52,19 @@ def gpu_info() -> list[dict]:
             used = int(used_file.read_text()) if used_file.exists() else None
             devices.append(
                 {
+                    "id": str(device.resolve()),
+                    "render_device": next(
+                        (f"/dev/dri/{node.name}" for node in (device / "drm").glob("renderD*")), ""
+                    ),
                     "name": f"{device.parent.name} ({vendor})",
                     "vendor": {"0x1002": "amd", "0x8086": "intel", "0x10de": "nvidia"}[vendor],
                     "total": total,
                     "free": max(0, total - used)
                     if total is not None and used is not None
                     else None,
-                    "utilization": None,
+                    "utilization": float((device / "gpu_busy_percent").read_text())
+                    if (device / "gpu_busy_percent").exists()
+                    else None,
                 }
             )
         except (OSError, ValueError):

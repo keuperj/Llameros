@@ -65,6 +65,17 @@ test('copy buttons write the displayed value or select it for manual copying', a
   assert.match(fallback.get('access-feedback').textContent, /Ctrl\+C/);
 });
 
+test('same model on two devices selects the corresponding endpoint and hardware', () => {
+  const ui = panel();
+  ui.run('accessConfig = {base_url: "http://127.0.0.1:11435", openai_url: "http://127.0.0.1:11435/v1"}; runtimeState = {running: true, loaded: [{name: "one:latest", target: "cpu", hardware: "CPU", base_url: "http://127.0.0.1:11435"}, {name: "one:latest", target: "gpu-test", hardware: "GPU 1", base_url: "http://127.0.0.1:11436"}]}; renderAccess();');
+  assert.equal(ui.get('access-active-model').options.length, 2);
+  ui.get('access-active-model').value = JSON.stringify(['one:latest', 'gpu-test']);
+  ui.get('access-active-model').handlers.change();
+  assert.equal(ui.get('access-url').value, 'http://127.0.0.1:11436');
+  assert.match(ui.get('access-code').value, /11436/);
+  assert.match(ui.get('access-code').value, /one:latest/);
+});
+
 test('each framework uses the configured host endpoint, active model and valid Python', () => {
   for (const framework of Object.keys(Access.frameworks)) {
     const example = Access.example(framework, 'gemma3:270m', 'http://127.0.0.1:12567/', 2048);

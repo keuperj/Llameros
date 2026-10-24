@@ -19,8 +19,9 @@ from starlette.concurrency import run_in_threadpool
 from .auth import COOKIE, Sessions, verify_password
 from .catalog import Catalog, validate_model
 from .config import Settings, current_user
-from .docker import Docker, DockerError
+from .docker import DockerError
 from .hardware import assess_fit, snapshot
+from .runtimes import Runtimes
 from .storage import Store
 
 log = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ class Login(BaseModel):
 
 class ModelRequest(BaseModel):
     model: str = Field(min_length=1, max_length=210)
+    target: str = Field(default="", max_length=80, pattern=r"^[a-z0-9-]*$")
 
 
 class GenerateRequest(ModelRequest):
@@ -118,17 +120,23 @@ def create_app(
     cfg = settings or Settings()
     cfg.prepare()
     store = Store(cfg.state_dir / "history.sqlite3")
-    docker = docker or Docker(cfg)
+    supplied_docker = docker
     catalog = catalog or Catalog()
     authenticate = authenticator or verify_password
     hardware = hardware_provider or snapshot
+    runtimes = Runtimes(cfg, hardware) if supplied_docker is None else None
+    docker = supplied_docker or runtimes.client("cpu", register=True)
+
+    def runtime_status():
+        return runtimes.status() if runtimes else docker.status()
+
     sessions = Sessions(cfg.session_seconds)
     jobs = Jobs(store)
 
     def sample_once():
         data = {"hardware": hardware()}
         try:
-            data["ollama"] = docker.status()
+            data["ollama"] = runtime_status()
         except Exception as exc:
             data["ollama"] = {"running": False, "error": str(exc)[:2000]}
         store.sample(data, cfg.retention_days)
@@ -247,7 +255,7 @@ def create_app(
     @app.get("/api/status", dependencies=protected)
     def status():
         try:
-            runtime = docker.status()
+            runtime = runtime_status()
         except (DockerError, httpx.HTTPError) as exc:
             runtime = {"running": False, "error": str(exc)}
         return {
@@ -310,7 +318,11 @@ def create_app(
     def configure_storage(body: StorageRequest):
         def work(progress):
             progress({"status": "Validating storage directory and reconfiguring stopped container"})
-            return docker.configure_storage(body.directory, body.confirmed)
+            return (
+                runtimes.configure_storage(body.directory, body.confirmed)
+                if runtimes
+                else docker.configure_storage(body.directory, body.confirmed)
+            )
 
         return jobs.submit(
             "storage-change",
@@ -357,7 +369,7 @@ def create_app(
             raise HTTPException(404, "Unknown container action")
 
         def work(progress):
-            running = docker.status()["running"]
+            running = runtime_status()["running"]
             if running == (action == "start"):
                 raise ValueError(
                     "Ollama is already running" if running else "Ollama is already stopped"
@@ -365,7 +377,7 @@ def create_app(
             if action == "start":
                 return docker.start(progress=progress)
             progress({"status": "Stopping Ollama container (up to 20 seconds grace period)"})
-            return docker.stop()
+            return runtimes.stop() if runtimes else docker.stop()
 
         return jobs.submit(f"container-{action}", "", work)
 
@@ -404,7 +416,17 @@ def create_app(
                 check_fit(catalog.size(name))
                 docker.pull(name, progress)
                 return {"message": "Model downloaded"}
+            if runtimes and action == "unload":
+                client = runtimes.model_client(name, body.target)
+                progress({"status": "Unloading model from selected hardware"})
+                return client.api(
+                    "POST", "/api/generate", {"model": name, "stream": False, "keep_alive": 0}
+                )
             info = installed(name)
+            if runtimes and action == "load":
+                return runtimes.load(
+                    name, info["size"], body.target or "cpu", cfg.context_length, progress
+                )
             active = is_loaded(name)
             if active == (action == "load"):
                 raise ValueError(
@@ -441,22 +463,27 @@ def create_app(
         name = validate_model(body.model)
 
         def work(progress):
-            installed(name)
-            if not is_loaded(name):
+            if not runtimes:
+                installed(name)
+            client = runtimes.model_client(name, body.target) if runtimes else docker
+            if not runtimes and not is_loaded(name):
                 raise ValueError("Load the model before using the inference playground")
             progress(
                 {
                     "status": "Generating response; duration and token counts will be available on completion"
                 }
             )
-            result = docker.api(
+            options = {"num_ctx": cfg.context_length, "num_predict": body.max_tokens}
+            if runtimes and client.target["id"] == "cpu":
+                options.update(num_gpu=0, num_thread=hardware()["logical_cores"])
+            result = client.api(
                 "POST",
                 "/api/generate",
                 {
                     "model": name,
                     "prompt": body.prompt,
                     "stream": False,
-                    "options": {"num_ctx": cfg.context_length, "num_predict": body.max_tokens},
+                    "options": options,
                     "keep_alive": "5m",
                 },
             )

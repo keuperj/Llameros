@@ -34,6 +34,14 @@ test('single-model controls block every load while a model is active, but allow 
   assert.deepEqual(Progress.modelControls(running, true, 'one:latest'), {load: false, unload: false});
 });
 
+test('multi-slot controls permit another model only when a hardware slot is free', () => {
+  const runtime = {running: true, loaded: [{name: 'one:latest', target: 'cpu'}], slots: [{id: 'cpu', available: false}, {id: 'gpu-one', available: true}]};
+  assert.equal(Progress.modelControls(runtime, false, 'two:latest').load, true);
+  assert.equal(Progress.modelControls(runtime, false, 'one:latest').unload, true);
+  runtime.slots[1].available = false;
+  assert.equal(Progress.modelControls(runtime, false, 'two:latest').load, false);
+});
+
 test('runtime prominently distinguishes off, running, and named active models without guessing on errors', () => {
   assert.equal(Progress.runtimeState({running: false}).text, 'Ollama off');
   assert.equal(Progress.runtimeState({running: true, loaded: []}).text, 'Ollama running');

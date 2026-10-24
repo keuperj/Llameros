@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import time
+from pathlib import Path
 
 import httpx
 
@@ -17,9 +18,11 @@ class DockerError(RuntimeError):
 
 
 class Docker:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, target=None, name=None, storage=None):
         self.settings = settings
-        self.storage = ModelStorage(settings)
+        self.target = target
+        self.name = name or settings.container_name
+        self.storage = storage or ModelStorage(settings)
 
     def storage_info(self) -> dict:
         return self.storage.info()
@@ -120,7 +123,7 @@ class Docker:
         self.storage.save(target)
         try:
             if data:
-                self.command("rm", self.settings.container_name)
+                self.command("rm", self.name)
         except Exception:
             self.storage.save(previous)
             raise
@@ -157,12 +160,16 @@ class Docker:
     def inspect(self) -> dict | None:
         # Listing first distinguishes a missing container from daemon/permission failures.
         names = self.command("container", "ls", "-a", "--format", "{{.Names}}").splitlines()
-        if self.settings.container_name not in names:
+        if self.name not in names:
             return None
-        data = json.loads(self.command("inspect", self.settings.container_name))[0]
+        data = json.loads(self.command("inspect", self.name))[0]
         labels = data.get("Config", {}).get("Labels") or {}
         if labels.get("io.llameros.owner") != str(os.getuid()):
             raise DockerError("Refusing to manage a container without the expected ownership label")
+        if self.target and labels.get("io.llameros.target") != self.target["id"]:
+            raise DockerError(
+                "Legacy or differently assigned container found. Stop Ollama and reapply model storage to recreate it safely; model files are retained."
+            )
         return data
 
     def run_args(self) -> list[str]:
@@ -181,7 +188,7 @@ class Docker:
             "run",
             "-d",
             "--name",
-            cfg.container_name,
+            self.name,
             "--label",
             f"io.llameros.owner={os.getuid()}",
             "--security-opt",
@@ -204,16 +211,38 @@ class Docker:
             "-e",
             "OLLAMA_NO_CLOUD=1",
             "-e",
+            "OLLAMA_NOPRUNE=1",
+            "-e",
             "OLLAMA_MAX_LOADED_MODELS=1",
             "-e",
             "OLLAMA_NUM_PARALLEL=1",
             "-e",
             f"OLLAMA_CONTEXT_LENGTH={cfg.context_length}",
         ]
-        if cfg.gpu == "nvidia":
+        if self.target:
+            args += ["--label", f"io.llameros.target={self.target['id']}"]
+        if cfg.gpu == "nvidia" and self.target:
+            args += ["--gpus", f"device={self.target['device']}"]
+        elif cfg.gpu == "amd" and self.target:
+            device = self.target["device"]
+            if not re.fullmatch(r"/dev/dri/renderD\d+", device):
+                raise DockerError("Invalid AMD render device")
+            args += ["--device", "/dev/kfd", "--device", device]
+            for path in ("/dev/kfd", device):
+                args += ["--group-add", str(Path(path).stat().st_gid)]
+        elif cfg.gpu == "nvidia":
             args += ["--gpus", "all"]
         elif cfg.gpu == "amd":
             args += ["--device", "/dev/kfd", "--device", "/dev/dri"]
+        if self.target and cfg.gpu == "cpu":
+            args += [
+                "-e",
+                "CUDA_VISIBLE_DEVICES=-1",
+                "-e",
+                "ROCR_VISIBLE_DEVICES=-1",
+                "-e",
+                "NVIDIA_VISIBLE_DEVICES=void",
+            ]
         return [*args, self.image]
 
     def start(self, progress=lambda value: None):
@@ -238,7 +267,7 @@ class Docker:
             self.command(*self.run_args(), timeout=60)
         elif not data["State"]["Running"]:
             progress({"status": "Starting existing Ollama container", "phase": "container"})
-            self.command("start", self.settings.container_name)
+            self.command("start", self.name)
         progress({"status": "Waiting for Ollama API readiness", "phase": "readiness"})
         for _ in range(60):
             try:
@@ -252,7 +281,7 @@ class Docker:
         self.check_daemon()
         data = self.inspect()
         if data and data["State"]["Running"]:
-            self.command("stop", "--time", "20", self.settings.container_name, timeout=30)
+            self.command("stop", "--time", "20", self.name, timeout=30)
 
     def ensure_running(self):
         self.check_daemon()
@@ -308,7 +337,7 @@ class Docker:
             "running": running,
             "models": [],
             "loaded": [],
-            "container": self.settings.container_name,
+            "container": self.name,
         }
         if running:
             result["models"] = self.api("GET", "/api/tags", timeout=5).get("models", [])
@@ -319,7 +348,7 @@ class Docker:
                 "--no-stream",
                 "--format",
                 "{{json .}}",
-                self.settings.container_name,
+                self.name,
                 timeout=10,
             )
             result["resources"] = json.loads(raw) if raw else {}

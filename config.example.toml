@@ -18,7 +18,9 @@ ollama_port = 11435
 ollama_image = "ollama/ollama:latest"
 context_length = 4096
 
-# cpu, nvidia, or amd. GPU drivers/container runtime must already be configured.
+# cpu, nvidia, or amd: catalogue-fit estimate preference. Runtime placement is
+# selected per model in the GUI; supported GPUs are isolated into separate slots.
+# GPU drivers/container runtime must already be configured.
 gpu = "cpu"
 
 # Prefer rootless Docker. Setting true explicitly accepts root-equivalent
