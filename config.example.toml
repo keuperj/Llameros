@@ -1,0 +1,26 @@
+# Copy to ~/.config/llameros/config.toml and edit as needed.
+host = "127.0.0.1"
+port = 8443
+# The leading ~ is expanded to the current user's home directory.
+state_dir = "~/.local/share/llameros"
+# Choose the model directory in the GUI's Model storage panel. Its preference
+# is persisted separately inside state_dir; empty GUI path uses a Docker volume.
+
+# Leave both empty to generate a self-signed certificate.
+cert_file = ""
+key_file = ""
+
+pam_service = "login"
+session_seconds = 3600
+sample_seconds = 15
+retention_days = 30
+ollama_port = 11435
+ollama_image = "ollama/ollama:latest"
+context_length = 4096
+
+# cpu, nvidia, or amd. GPU drivers/container runtime must already be configured.
+gpu = "cpu"
+
+# Prefer rootless Docker. Setting true explicitly accepts root-equivalent
+# access to a rootful Docker daemon. This is not a privilege boundary.
+allow_rootful_docker = false

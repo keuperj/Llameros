@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Llameros · Local model caravan</title>
+  <link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header><div><span class="eyebrow">YOUR LOCAL MODEL CARAVAN</span><h1>Llameros<span>●</span></h1></div><div id="identity"></div><button id="logout" hidden>Sign out</button></header>
+  <main>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <section id="login-panel" class="card login">
+      <span class="eyebrow">LINUX AUTHENTICATION</span><h2>Welcome home.</h2>
+      <p>Sign in with the Linux account that started Llameros. Your password is checked by PAM and never stored.</p>
+      <form id="login-form"><label>Linux username<input id="username" autocomplete="username" required></label><label>Password<input id="password" type="password" autocomplete="current-password" required></label><button class="primary">Sign in securely</button></form>
+    </section>
+    <div id="dashboard" hidden>
+      <section class="intro"><div><span class="eyebrow">HOST OVERVIEW</span><h2>Local intelligence.<br>Under your control.</h2></div><div class="actions"><button id="container-start" class="primary">Start Ollama</button><button id="container-stop">Stop Ollama</button><button id="refresh">Refresh</button></div></section>
+      <div id="hardware" class="metrics"></div>
+      <section class="card"><div class="section-head"><h3>Ollama runtime</h3><span id="runtime" class="badge"></span></div><p id="runtime-detail"></p><div id="job" role="status"></div></section>
+      <section class="card"><span class="eyebrow">PREFERENCES</span><h3>Model storage</h3><p id="storage-current"></p><p>Choose a dedicated Ollama models directory (containing blobs and manifests), or leave the path empty to use the Docker-managed volume. Stop Ollama first. Switching locations does not copy, move, or delete existing models.</p><form id="storage-form"><label>Host models directory<input id="storage-directory" placeholder="Empty = Docker-managed volume" maxlength="4096"></label><label><input id="storage-confirm" type="checkbox" required> I understand that existing models stay in their original location and the stopped container will be recreated on next start.</label><button id="storage-save">Save storage location</button></form><p id="storage-feedback" role="status"></p></section>
+      <div class="columns">
+        <section class="card"><span class="eyebrow">DISCOVER</span><h3>Model catalogue</h3><p>Live official library. Select a tag, check its memory estimate, then download.</p><form id="search-form" class="inline"><input id="search" placeholder="Filter model families" aria-label="Filter model families"><button>Search</button></form><label>Model family<select id="families"><option value="">Select a family</option></select></label><label>Variant / tag<select id="tags"><option value="">Select a variant</option></select></label><div id="fit" class="muted">Compatibility estimates include runtime headroom, but are not guarantees.</div><button id="pull" class="primary" disabled>Download model</button></section>
+        <section class="card"><span class="eyebrow">ON THIS HOST</span><h3>Downloaded models <span id="model-count" class="badge">0</span></h3><p id="inventory-detail"></p><div id="installed"><p>Reading model inventory…</p></div></section>
+      </div>
+      <section class="card"><span class="eyebrow">TRY A MODEL</span><h3>Inference playground</h3><p>Requests through this panel record token counts and timing, not prompt or response content.</p><form id="generate-form"><label>Installed model<select id="generate-model" required></select></label><label>Prompt<textarea id="prompt" rows="3" maxlength="32000" required placeholder="What would you like to explore?"></textarea></label><button class="primary">Generate · up to 256 tokens</button></form><pre id="output" aria-live="polite"></pre></section>
+      <section class="card"><div class="section-head"><div><span class="eyebrow">OBSERVABILITY</span><h3>Usage history</h3></div><span class="muted">Latest 240 samples · 30-day default retention</span></div><p>Host CPU and RAM samples, plus per-model inference totals. Container usage and loaded-model snapshots are retained in the history API. Requests sent directly to Ollama are not included in token totals.</p><canvas id="chart" width="1100" height="180" role="img" aria-label="Historical CPU and RAM usage percentages"></canvas><div class="legend">● CPU <span>● RAM</span></div><div class="table-wrap"><table><thead><tr><th>Model</th><th>Requests</th><th>Input tokens</th><th>Output tokens</th><th>Tokens/s</th><th>Total seconds</th></tr></thead><tbody id="usage"></tbody></table></div><h4>Lifecycle events</h4><div id="events"></div></section>
+    </div>
+  </main><footer>LLAMEROS · USER-SPACE CONTROL · LOCAL-FIRST</footer>
+</body></html>
