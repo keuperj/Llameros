@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Llameros · Local model caravan</title>
+  <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script>
 </head>
 <body>
-  <header><div><span class="eyebrow">YOUR LOCAL MODEL CARAVAN</span><h1>Llameros<span>●</span></h1></div><div id="identity"></div><button id="logout" hidden>Sign out</button></header>
+  <header><div class="brand"><img class="brand-logo" src="/static/logo.svg" alt="Llameros llama and circuit saddle logo" width="72" height="72"><div><span class="eyebrow">YOUR LOCAL MODEL CARAVAN</span><h1>Llameros<span>●</span></h1></div></div><div id="identity"></div><button id="logout" hidden>Sign out</button></header>
   <main>
     <div id="notice" role="status" aria-live="polite"></div>
     <section id="login-panel" class="card login">
@@ -26,5 +27,5 @@
       <section class="card"><span class="eyebrow">TRY A MODEL</span><h3>Inference playground</h3><p>Requests through this panel record token counts and timing, not prompt or response content.</p><form id="generate-form"><label>Installed model<select id="generate-model" required></select></label><label>Prompt<textarea id="prompt" rows="3" maxlength="32000" required placeholder="What would you like to explore?"></textarea></label><button class="primary">Generate · up to 256 tokens</button></form><pre id="output" aria-live="polite"></pre></section>
       <section class="card"><div class="section-head"><div><span class="eyebrow">OBSERVABILITY</span><h3>Usage history</h3></div><span class="muted">Latest 240 samples · 30-day default retention</span></div><p>Host CPU and RAM samples, plus per-model inference totals. Container usage and loaded-model snapshots are retained in the history API. Requests sent directly to Ollama are not included in token totals.</p><canvas id="chart" width="1100" height="180" role="img" aria-label="Historical CPU and RAM usage percentages"></canvas><div class="legend">● CPU <span>● RAM</span></div><div class="table-wrap"><table><thead><tr><th>Model</th><th>Requests</th><th>Input tokens</th><th>Output tokens</th><th>Tokens/s</th><th>Total seconds</th></tr></thead><tbody id="usage"></tbody></table></div><h4>Lifecycle events</h4><div id="events"></div></section>
     </div>
-  </main><footer>LLAMEROS · USER-SPACE CONTROL · LOCAL-FIRST</footer>
+  </main><footer><span>LLAMEROS · USER-SPACE CONTROL · LOCAL-FIRST</span><a href="https://github.com/keuperj/Llameros" target="_blank" rel="noopener noreferrer">View on GitHub <span aria-hidden="true">↗</span></a></footer>
 </body></html>

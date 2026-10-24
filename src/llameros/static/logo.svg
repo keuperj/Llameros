@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Llameros logo</title>
+  <desc id="desc">A lime llama carrying a circuit-patterned saddle in front of Andean peaks on a dark forest-green tile.</desc>
+  <rect x="4" y="4" width="152" height="152" rx="36" fill="#19211d" stroke="#303e35" stroke-width="2"/>
+  <path d="m22 102 30-40 23 27 24-33 39 46" stroke="#526c5b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="m44 73 8-11 9 11m30-6 8-11 10 14" stroke="#a1b2a6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M40 90 30 80M44 105v25h12l5-22h27l7 22h12V82l15-5a9 9 0 0 0 6-9V58l-13-5-2-23c-8 2-11 10-11 22h-6l-6-19c-7 5-7 16-4 28v24H49a10 10 0 0 0-9 10c0 4 1 7 4 10Z" fill="#bcf48c" stroke="#101513" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M60 85h28v25H60z" fill="#ffbc86" stroke="#101513" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M66 85v10h15v15m-7-15v9" stroke="#19211d" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="74" cy="104" r="3" fill="#19211d"/>
+  <circle cx="113" cy="63" r="3" fill="#101513"/>
+  <path d="M29 135h102" stroke="#526c5b" stroke-width="3" stroke-linecap="round"/>
+</svg>

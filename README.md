@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="src/llameros/static/logo.svg" alt="Llameros — a llama carrying a circuit-patterned saddle against Andean peaks" width="160" height="160">
+</p>
+
 # Llameros
 
 A Python, local-first web interface for Ollama on Linux. Manage a dedicated Ollama

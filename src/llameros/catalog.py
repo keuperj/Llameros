@@ -8,6 +8,8 @@ from html.parser import HTMLParser
 
 import httpx
 
+from .hardware import assess_fit
+
 MODEL = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}(?::[A-Za-z0-9][A-Za-z0-9._-]{0,127})?$")
 
 
@@ -21,15 +23,36 @@ class Links(HTMLParser):
     def __init__(self):
         super().__init__()
         self.names: list[str] = []
+        self.sizes: dict[str, int] = {}
+        self.active = ""
+        self.text: list[str] = []
 
     def handle_starttag(self, tag, attrs):
         if tag != "a":
             return
+        self.active = ""
+        self.text = []
         href = dict(attrs).get("href", "")
         if href.startswith("/library/"):
             name = href.removeprefix("/library/")
             if MODEL.fullmatch(name) and name not in self.names:
                 self.names.append(name)
+            if MODEL.fullmatch(name):
+                self.active = name
+
+    def handle_data(self, data):
+        if self.active:
+            self.text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self.active:
+            text = " ".join(self.text)
+            match = re.search(r"\b(\d+(?:\.\d+)?)\s*(KB|MB|GB|TB)\b", text)
+            if match and not re.search(r"\bcloud\b", self.active, re.I):
+                # Page sizes are rounded decimal units; add headroom for rounding.
+                self.sizes[self.active] = int(float(match[1]) * 1000 ** ({"KB": 1, "MB": 2, "GB": 3, "TB": 4}[match[2]]) * 1.01)
+            self.active = ""
+            self.text = []
 
 
 class Catalog:
@@ -49,7 +72,7 @@ class Catalog:
 
     def list(self, query: str = "") -> list[str]:
         parser = Links()
-        parser.feed(self._get("https://ollama.com/library"))
+        parser.feed(self._get("https://ollama.com/library?sort=popular"))
         return [name for name in parser.names if ":" not in name and query.lower() in name.lower()]
 
     def tags(self, family: str) -> list[str]:
@@ -73,3 +96,19 @@ class Catalog:
                 "This model does not expose downloadable weights (cloud-only or unsupported manifest)"
             )
         return sum(sizes)
+
+    def variants(self, family: str, hardware: dict, gpu_mode: str) -> list[dict]:
+        validate_model(family)
+        if ":" in family:
+            raise ValueError("Choose a model family without a tag")
+        parser = Links()
+        parser.feed(self._get(f"https://ollama.com/library/{family}/tags"))
+        variants = []
+        for name in parser.names:
+            if not name.startswith(family + ":"):
+                continue
+            size = parser.sizes.get(name)
+            variants.append({"name": name, "download_bytes": size,
+                             "fits": None if size is None else assess_fit(size, hardware, gpu_mode)["fits"],
+                             "size_source": "rounded catalogue size" if size is not None else "unknown"})
+        return sorted(variants, key=lambda item: {True: 0, False: 1, None: 2}[item["fits"]])

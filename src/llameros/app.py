@@ -248,6 +248,12 @@ def create_app(
     def tags(family: str):
         return {"tags": catalog.tags(family)}
 
+    @app.get("/api/catalog/{family}/compatibility", dependencies=protected)
+    def compatibility(family: str):
+        variants = catalog.variants(family, hardware(), cfg.gpu)
+        return {"family": family, "variants": variants,
+                "fits": True if any(item["fits"] is True for item in variants) else None if any(item["fits"] is None for item in variants) or not variants else False}
+
     @app.get("/api/fit", dependencies=protected)
     def fit(model: str):
         size = catalog.size(validate_model(model))

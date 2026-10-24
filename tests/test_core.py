@@ -2,6 +2,7 @@ import json
 import time
 from dataclasses import replace
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 from cryptography import x509
@@ -138,6 +139,29 @@ def wait_job(client):
             return result
         time.sleep(0.01)
     pytest.fail("Job did not finish")
+
+
+def test_landing_page_branding_and_repository_link(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert '<img class="brand-logo" src="/static/logo.svg"' in response.text
+    assert '<link rel="icon" href="/static/logo.svg" type="image/svg+xml">' in response.text
+    footer = response.text.split("<footer>", 1)[1].split("</footer>", 1)[0]
+    assert 'href="https://github.com/keuperj/Llameros"' in footer
+    assert 'rel="noopener noreferrer"' in footer
+    assert "View on GitHub" in footer
+
+
+def test_logo_is_public_svg_and_shared_with_readme(client):
+    response = client.get("/static/logo.svg")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+    logo = ElementTree.fromstring(response.content)
+    assert logo.tag == "{http://www.w3.org/2000/svg}svg"
+    assert logo.attrib["viewBox"] == "0 0 160 160"
+    assert logo.find("{http://www.w3.org/2000/svg}title").text == "Llameros logo"
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
+    assert 'src="src/llameros/static/logo.svg"' in readme.split("# Llameros", 1)[0]
 
 
 def test_authentication_and_cookie_flags(client):
