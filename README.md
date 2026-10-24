@@ -4,6 +4,13 @@
 
 # Llameros
 
+A Python, local-first web interface for Ollama on Linux. Discover and download
+models, run them in hardware-isolated CPU/GPU containers, estimate memory fit,
+and inspect current and historical usage. No Node.js build, cloud account, or
+external UI assets are required.
+
+## Dashboard and model runtimes
+
 ### Dashboard controls
 
 The runtime banner distinguishes **Ollama off**, **Ollama running** (no model
@@ -22,8 +29,8 @@ position.
 ### Per-device runtimes
 
 Select a free device above the downloaded-models list before pressing Load/start.
-There is one CPU slot (Ollama chooses its thread count), plus one slot per safely identifiable
-NVIDIA GPU UUID or AMD render device. Intel/unidentified GPUs are shown but cannot
+There is one CPU slot (Ollama chooses its thread count), plus one slot per safely
+identifiable NVIDIA GPU UUID or AMD render device. Intel/unidentified GPUs are shown but cannot
 be selected. Hardware cards show assigned models, free VRAM and utilization when
 available. “Free” means unassigned by Llameros, not exclusive of other programs.
 CPU utilization does not restrict loading: one CPU model can run alongside other
@@ -50,9 +57,9 @@ serialized, but models on different slots can stay loaded simultaneously and
 their direct API endpoints can be used independently.
 
 **Existing-container migration:** older containers lack the new hardware-assignment
-label and will be refused for model operations. Stop Ollama, open Configuration,
-confirm and reapply the current model-storage selection, then start Ollama again.
-This recreates managed containers only; model files are never moved or deleted.
+label and will be refused for model operations. Follow the migration steps under
+**Troubleshooting** below. This recreates managed containers only; model files
+are never moved or deleted.
 Stop Ollama stops all registered runtimes. Stopping a model alone leaves its slot
 service ready for reuse. Do not delete the runtime registry while containers exist.
 
@@ -71,6 +78,8 @@ Container start/stop and model load/unload controls are enabled only for the
 opposite known state, and remain disabled during background jobs. The backend
 also rejects redundant transitions. The inference playground lists only active
 (loaded) models; load a downloaded model before generating a response.
+Loading requests indefinite residency; playground generation sets a five-minute
+keep-alive, so a model can subsequently expire from memory without a manual stop.
 
 The button-shaped container availability indicator refreshes status when clicked.
 Model info opens a closable panel over the downloaded-models card, showing the
@@ -78,10 +87,6 @@ selected family or tag's public Ollama README as plain text. External scripts,
 HTML, images, and editor forms are not embedded. An **Open on Ollama** link is
 available for the original formatting. Description fetching requires internet
 access; fetching failures are shown inside the panel.
-
-A Python, local-first web interface for Ollama on Linux. Manage a dedicated Ollama
-Docker container, discover models, estimate hardware compatibility, and inspect
-current and historic usage. No Node.js build, cloud account, or external UI assets.
 
 ## Quick start
 
@@ -104,9 +109,11 @@ username and password as the user running Llameros**.
 There is no default password, separate user database, or authentication bypass.
 
 The dashboard works without Docker; Docker errors appear in the runtime panel.
-Rootful Docker is **refused by default**. Prefer configuring rootless Docker.
-If you deliberately accept the root-equivalent access risk, copy the example config and set
-`allow_rootful_docker = true`. Llameros does not change your Docker setup.
+Prefer configuring rootless Docker. The current application default allows
+rootful Docker (`allow_rootful_docker = true`), which carries root-equivalent
+access risk. The example configuration explicitly sets this to `false` to require
+rootless Docker; change it to `true` only if you deliberately accept that risk.
+Llameros does not change your Docker setup.
 
 ```bash
 mkdir -p "$HOME/.config/llameros"
@@ -168,13 +175,18 @@ are not supported by this streaming download path.
    existing memory heuristic. Selecting a tag checks its exact registry size
    before enabling download; execution checks memory again. No check guarantees
    performance, GPU driver support, or sufficient memory at a different context.
-4. Download, load/start, and unload/stop models. Loading keeps a model resident;
-   unloading releases it. Stopping the container stops all its models. Downloaded
+4. Download a model, select a free device under **Start model on free hardware**,
+   and load/start it. Another model can stay loaded on each other supported slot;
+   the same model can run on multiple devices. GPU containers start on demand.
+   **■ Stop model** unloads only the selected model; **Stop Ollama** stops all
+   registered runtime containers. Downloaded
    weights persist in the `llameros-<uid>-models` Docker volume by default, or in
    the host directory selected in the **Model storage** panel. The **Downloaded
    models** panel shows the models available in the selected location.
-5. Use the inference playground to record token counts and timing. Generation
-   runs asynchronously, returning up to 256 tokens from the UI (API limit 4096).
+5. Expand **Try a model**, select a loaded model and its hardware, and generate
+   to record token counts and timing. Generation runs asynchronously, returning
+   up to 256 tokens from the UI (API limit 4096). Expand **Access model** for the
+   selected runtime's API URLs and copyable Python/framework examples.
 6. Inspect sampled host CPU/RAM history, container CPU/memory/network usage,
    loaded-model snapshots, lifecycle events, and per-model inference totals.
 
@@ -192,8 +204,9 @@ Choose the **models directory itself**, not its parent `.ollama` directory.
 
 Stop Ollama, enter the location, check the confirmation, and select **Save storage
 location**. The operation shares the lifecycle job lock with downloads/inference.
-It removes only the stopped managed container; the next start creates it with the
-selected storage mount. Model data is **never automatically copied or deleted**.
+It removes the stopped managed CPU and registered GPU containers; the CPU runtime
+is recreated on start and GPU runtimes on their next load, sharing the selected
+storage. Model data is **never automatically copied or deleted**.
 Switch back to the previous location to see its models again. To relocate models,
 copy `blobs` and `manifests` yourself while Ollama is stopped, preserving access
 permissions. Back up important data before doing so.
@@ -224,17 +237,17 @@ expanded for the user running Llameros.
 | Setting | Default | Purpose |
 |---|---|---|
 | `host`, `port` | `127.0.0.1`, `8443` | HTTPS binding; ports must be unprivileged |
-| `state_dir` | Current user's `.local/share/llameros` | TLS files and SQLite history |
+| `state_dir` | Current user's `.local/share/llameros` | TLS files, SQLite history, storage preference, inventory cache, and runtime registry |
 | `cert_file`, `key_file` | Empty | Optional existing PEM certificate and private key |
 | `pam_service` | `login` | Existing Linux PAM service |
 | `session_seconds` | `3600` | Absolute session lifetime |
 | `sample_seconds` | `15` | Resource collection interval |
 | `retention_days` | `30` | History retention, pruned during sampling |
-| `ollama_port` | `11435` | Ollama API, published only on IPv4 loopback |
+| `ollama_port` | `11435` | CPU API on IPv4 loopback; GPU slot ports are allocated above it and persisted |
 | `ollama_image` | `ollama/ollama:latest` | Image; pin a tested tag/digest for reproducibility |
 | `gpu` | `cpu` | Catalogue estimate preference: `cpu`, `nvidia`, or `amd`; execution is selected per model |
 | `context_length` | `4096` | Runtime context length |
-| `allow_rootful_docker` | `false` | Explicit rootful daemon risk acceptance |
+| `allow_rootful_docker` | `true` | Rootful daemon risk acceptance; example config sets `false` to require rootless Docker |
 
 Configuration changes to existing containers do not recreate them. Stop all
 runtimes and confirm/reapply model storage to recreate them for image changes.
@@ -243,6 +256,37 @@ Keep the model volume to preserve downloads. Runtime ports are persisted in
 deliberate stopped-container/registry migration, not merely editing TOML.
 Only one Llameros instance per Linux UID and Docker daemon is supported.
 
+## Troubleshooting
+
+### CPU shows “Unavailable” despite low utilization
+
+CPU utilization is telemetry, not a loading threshold. **Free** means the slot
+has no assigned model; **Unavailable** means a runtime error, not a busy CPU.
+Read the error shown on the CPU hardware card and in the runtime detail panel.
+An already loaded model instead occupies the slot until it is unloaded or expires.
+
+If the error says **Legacy or differently assigned container found**, migrate it:
+
+1. Click **Stop Ollama** to stop all registered runtimes.
+2. Expand **Configuration → Model storage**. Keep the current location unchanged
+   (including an empty path if using the Docker volume).
+3. Tick the confirmation box and click **Save storage location**. Wait for success.
+4. Click **Start Ollama**, then select **CPU** when loading a downloaded model.
+
+This explicitly recreates managed containers with hardware-assignment labels;
+it does not move or delete model files. Restarting the dashboard alone does not
+migrate containers. Other errors, such as an inaccessible Docker daemon or an
+unreachable Ollama API, must be resolved before the slot is usable. Do not remove
+ownership checks or delete `runtime-slots.json` to bypass an error.
+
+### GPU cannot be selected or a load fails
+
+Only safely identifiable NVIDIA UUIDs and AMD render devices can be selected.
+Check host drivers, Docker GPU support, device permissions, available system RAM,
+and the selected GPU's free VRAM. Other applications can consume these resources
+after a fit check. A load with no reported GPU VRAM use is unloaded and reported
+as a CPU fallback rather than shown as successful GPU execution.
+
 ## Security model and limitations
 
 - The application does not sudo, read shadow files, switch identity, or create
@@ -250,7 +294,9 @@ Only one Llameros instance per Linux UID and Docker daemon is supported.
   account policy. PAM configuration differs by distribution; test it locally.
   Passwordless, locked, MFA-only, and expired-password accounts may not support
   this simple username/password flow. Do not weaken PAM or run as root to fix it.
-- Rootless Docker is the default requirement. Docker-group membership/rootful
+- Rootless Docker is recommended and required by the example configuration.
+  The current application default also accepts rootful Docker; set
+  `allow_rootful_docker = false` to refuse it. Docker-group membership/rootful
   socket access already carries root-equivalent authority, even if this web
   process has an ordinary UID. Rootless mode does not eliminate kernel risks.
 - HTTPS is mandatory; the CLI refuses root/setuid execution. Sessions are opaque,
@@ -289,7 +335,7 @@ Only one Llameros instance per Linux UID and Docker daemon is supported.
 - Resource history is sampled only while Llameros is running. Per-model token and
   timing totals cover **only requests through Llameros**, not direct Ollama clients.
   Container metrics cannot reliably be attributed to individual models. Models
-  can remain running when the dashboard exits; stop the container explicitly.
+   can remain running when the dashboard exits; use **Stop Ollama** explicitly.
 - Passwords, prompts, and responses are not saved in SQLite. The latest response
   exists temporarily in the in-memory job result and browser. Database/state files
   are private to the current user. Back up the database only if you want to retain
@@ -303,12 +349,29 @@ uv sync --extra dev --locked
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
-node --check /path/to/Llameros/src/llameros/static/app.js
-node --test /path/to/Llameros/tests/catalogue.test.cjs
+python -m compileall -q src/llameros
+for script in src/llameros/static/*.js; do node --check "$script"; done
+node --test tests/*.test.cjs
 ```
 
 Tests use fake PAM/Docker/catalogue services; they do not use your password,
 download large models, or modify your Docker daemon. A successful real PAM login
 and GPU/container inference need local acceptance testing on the target host.
+For multi-device acceptance, verify NVIDIA/AMD isolation, simultaneous CPU/GPU
+loads, the same model on two devices, independent stopping, slot-specific access
+URLs, and migration of an existing container. Automated fake-runtime tests do
+not establish real driver compatibility or visual browser correctness.
 
 MIT licensed. Llameros: the people who manage llama caravans through the Andes.
+
+---
+
+<p>
+  <a href="https://github.com/keuperj/Llameros" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a>
+  · <a href="https://www.llm-praxis.de/" target="_blank" rel="noopener noreferrer">maintained by LLM-Praxis</a>
+</p>
+<p align="right">
+Supported by
+  <img src="src/llameros/static/bmftr.png" alt="Federal Ministry of Research, Technology and Space"  height="160">
+  <img src="src/llameros/static/forschung-an-haw.png" alt="Forschung an HAW"  height="160">
+</p>
