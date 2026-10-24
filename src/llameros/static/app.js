@@ -24,6 +24,12 @@ function options(select, values, placeholder) {
   select.replaceChildren(); if (placeholder) select.add(new Option(placeholder, ''));
   values.forEach(value => select.add(new Option(value, value)));
 }
+function updateModelInfo() {
+  const link = $('model-info');
+  const url = Catalogue.modelInfoUrl($('tags').value || $('families').value);
+  if (url) { link.href = url; link.removeAttribute('aria-disabled'); link.removeAttribute('tabindex'); }
+  else { link.removeAttribute('href'); link.setAttribute('aria-disabled', 'true'); link.setAttribute('tabindex', '-1'); }
+}
 function signedOut() { csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
@@ -48,6 +54,7 @@ async function catalogue() {
   const version = ++catalogueVersion;
   familyVersion++; fitVersion++; selectedFit = null; $('pull').disabled = true;
   options($('tags'), [], 'Select a variant');
+  $('families').value = ''; updateModelInfo();
   const query = $('search').value.trim(), cpu = cpuOnly();
   $('catalog-progress').textContent = 'Searching Ollama…';
   const data = await api('/api/catalog?q=' + encodeURIComponent(query));
@@ -88,6 +95,7 @@ function compatibleOptions(select, entries, placeholder) {
 }
 function renderFamilies() {
   compatibleOptions($('families'), Catalogue.sort(Catalogue.visible(catalogueEntries, loadedCatalogueQuery, cpuOnly())), 'Select a family');
+  updateModelInfo();
 }
 function renderRecommendations() {
   $('recommended').replaceChildren();
@@ -114,6 +122,7 @@ $('search-form').addEventListener('submit', safe(catalogue));
 async function selectFamily(preferred = '') {
   const version = ++familyVersion;
   fitVersion++; selectedFit = null; $('pull').disabled = true; options($('tags'), [], 'Loading variants…');
+  updateModelInfo();
   $('fit').textContent = 'Select a variant for an exact registry size and current memory check.';
   const family = $('families').value; if (!family) { options($('tags'), [], 'Select a variant'); return; }
   const cpu = cpuOnly();
@@ -121,10 +130,12 @@ async function selectFamily(preferred = '') {
   if (version !== familyVersion || $('families').value !== family) return;
   const variants = data.variants.filter(v => (!cpu || v.cpu_fits === true) && (!loadedCatalogueQuery.includes(':') || v.name.toLowerCase().includes(loadedCatalogueQuery.toLowerCase())));
   compatibleOptions($('tags'), variants, 'Select a variant');
+  updateModelInfo();
   if (preferred && variants.some(v => v.name === preferred)) { $('tags').value = preferred; await checkSelectedFit(); }
 }
 $('families').addEventListener('change', safe(() => selectFamily()));
 async function checkSelectedFit() {
+  updateModelInfo();
   const version = ++fitVersion, model = $('tags').value; selectedFit = null; $('pull').disabled = true;
   if (!model) return; $('fit').textContent = 'Checking registry and available memory…';
   const data = await api('/api/fit?model=' + encodeURIComponent(model) + '&cpu_only=' + cpuOnly());

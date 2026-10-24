@@ -178,3 +178,43 @@ def test_config_menu_contains_storage_and_is_collapsed(tmp_path):
         assert parser.storage_inside
         assert 'id="cpu-only" type="checkbox"' in client.get("/").text
         assert client.get("/static/catalogue.js").status_code == 200
+
+
+def test_model_info_and_maintainer_links(tmp_path):
+    from html.parser import HTMLParser
+
+    class LinkParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+            self.active = None
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                self.active = {**dict(attrs), "text": ""}
+                self.links.append(self.active)
+
+        def handle_data(self, data):
+            if self.active is not None:
+                self.active["text"] += data
+
+        def handle_endtag(self, tag):
+            if tag == "a":
+                self.active = None
+
+    app = create_app(Settings(state_dir=tmp_path), docker=FakeDocker(), sampling=False)
+    with TestClient(app, base_url="https://testserver") as client:
+        parser = LinkParser()
+        parser.feed(client.get("/").text)
+    info = next(link for link in parser.links if link.get("id") == "model-info")
+    assert info["text"] == "Model info"
+    assert info["aria-disabled"] == "true" and "href" not in info
+    maintainer = next(
+        link for link in parser.links if link.get("href") == "https://www.keuper-labs.org/"
+    )
+    assert maintainer["text"] == "maintained by Keuper Labs"
+    for link in (info, maintainer):
+        assert link["target"] == "_blank"
+        assert {"noopener", "noreferrer"} <= set(link["rel"].split())
+    github = next(link for link in parser.links if "github.com" in link.get("href", ""))
+    assert parser.links.index(maintainer) == parser.links.index(github) + 1

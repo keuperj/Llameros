@@ -3,6 +3,14 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const Catalogue = require('../src/llameros/static/catalogue.js');
 
+test('model info links point to the selected official family or variant', () => {
+  assert.equal(Catalogue.modelInfoUrl('gemma3'), 'https://ollama.com/library/gemma3');
+  assert.equal(Catalogue.modelInfoUrl('smollm2:135m-instruct-q2_K'), 'https://ollama.com/library/smollm2:135m-instruct-q2_K');
+  for (const value of ['', '../escape', 'https://evil.example', 'gemma3\n', 'gemma3:<script>']) {
+    assert.equal(Catalogue.modelInfoUrl(value), null);
+  }
+});
+
 test('compatible entries first, popularity order retained within each group', () => {
   const entries = [{name: 'unknown', rank: 0, fits: null}, {name: 'large', rank: 1, fits: false},
     {name: 'popular-fit', rank: 2, fits: true}, {name: 'other-fit', rank: 3, fits: true}];

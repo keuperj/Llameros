@@ -1,6 +1,11 @@
 'use strict';
 // Pure helpers shared by the browser and dependency-free Node tests.
 const Catalogue = {
+  modelInfoUrl(model) {
+    if (!/^[a-z0-9][a-z0-9._-]{0,79}(?::[A-Za-z0-9][A-Za-z0-9._-]{0,127})?$/.test(model) || /\s/.test(model)) return null;
+    const [family, tag] = model.split(':');
+    return `https://ollama.com/library/${family}${tag ? ':' + encodeURIComponent(tag) : ''}`;
+  },
   visible(entries, query = '', cpuOnly = false) {
     const tagQuery = query.trim().toLowerCase();
     return entries.map(entry => ({...entry, variants: entry.variants.filter(variant =>

@@ -25,7 +25,7 @@ class Settings:
     ollama_port: int = 11435
     ollama_image: str = "ollama/ollama:latest"
     gpu: str = "cpu"
-    allow_rootful_docker: bool = False
+    allow_rootful_docker: bool = True
     context_length: int = 4096
 
     def __post_init__(self):
