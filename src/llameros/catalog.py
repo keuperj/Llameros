@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import time
 from html.parser import HTMLParser
+from urllib.parse import urlencode
 
 import httpx
 
@@ -75,9 +76,17 @@ class Catalog:
         return value
 
     def list(self, query: str = "") -> list[str]:
+        query = query.strip()
+        # Tags are selected from the family page; send only the family to search.
+        family = query.partition(":")[0]
+        url = "https://ollama.com/library?sort=popular"
+        if family:
+            url = "https://ollama.com/search?" + urlencode({"q": family, "sort": "popular"})
         parser = Links()
-        parser.feed(self._get("https://ollama.com/library?sort=popular"))
-        return [name for name in parser.names if ":" not in name and query.lower() in name.lower()]
+        parser.feed(self._get(url))
+        # The search page can match descriptions, not just model names. Preserve
+        # upstream order and keep the existing official-library-only boundary.
+        return [name for name in parser.names if ":" not in name]
 
     def tags(self, family: str) -> list[str]:
         validate_model(family)
@@ -112,11 +121,13 @@ class Catalog:
             if not name.startswith(family + ":"):
                 continue
             size = parser.sizes.get(name)
+            cpu_fit = None if size is None else assess_fit(size, hardware, "cpu")["fits"]
             variants.append(
                 {
                     "name": name,
                     "download_bytes": size,
                     "fits": None if size is None else assess_fit(size, hardware, gpu_mode)["fits"],
+                    "cpu_fits": cpu_fit,
                     "size_source": "rounded catalogue size" if size is not None else "unknown",
                 }
             )

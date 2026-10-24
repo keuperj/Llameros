@@ -55,7 +55,73 @@ def test_popularity_order_and_search():
     catalog._get = get
     assert catalog.list() == ["popular", "second"]
     assert seen == ["https://ollama.com/library?sort=popular"]
-    assert catalog.list("SECOND") == ["second"]
+    assert catalog.list("SECOND") == ["popular", "second"]
+    assert seen[-1] == "https://ollama.com/search?q=SECOND&sort=popular"
+
+
+def test_search_queries_upstream_and_handles_explicit_tags():
+    catalog = Catalog()
+    urls = []
+
+    def get(url):
+        urls.append(url)
+        # Matches can be in descriptions, or absent from the default library page.
+        return '<a href="/library/smollm2">Small CPU language model</a><a href="/library/gemma3">Compact</a>'
+
+    catalog._get = get
+    assert catalog.list("small cpu") == ["smollm2", "gemma3"]
+    assert urls[-1] == "https://ollama.com/search?q=small+cpu&sort=popular"
+    assert catalog.list("smollm2:135m") == ["smollm2", "gemma3"]
+    assert urls[-1] == "https://ollama.com/search?q=smollm2&sort=popular"
+
+
+def test_small_cpu_models_fit_without_gpu_or_multi_gib_fixed_overhead():
+    from llameros.hardware import GIB, assess_fit
+
+    hardware = {**HARDWARE, "memory_available": int(1.3 * GIB), "gpus": []}
+    assert assess_fit(89_000_000, hardware, "cpu")["fits"]
+    assert assess_fit(295_425_000, hardware, "cpu")["fits"]
+    assert assess_fit(295_425_000, hardware, "cpu")["placement"] == "cpu"
+    assert not assess_fit(4 * GIB, hardware, "cpu")["fits"]
+    assert not assess_fit(89_000_000, {**hardware, "memory_available": 256 * 1024**2}, "cpu")[
+        "fits"
+    ]
+
+
+def test_cpu_only_api_reports_ram_fit_without_gpu_and_uses_same_exact_estimate(tmp_path):
+    from llameros.hardware import GIB
+
+    hardware = {
+        **HARDWARE,
+        "memory_available": int(1.3 * GIB),
+        "gpus": [{"vendor": "nvidia", "free": 32 * GIB}],
+    }
+    catalog = Catalog()
+    catalog._get = lambda *args, **kwargs: TAGS
+    catalog.size = lambda name: 292_000_000
+    app = create_app(
+        Settings(state_dir=tmp_path, gpu="nvidia"),
+        catalog=catalog,
+        docker=FakeDocker(),
+        authenticator=lambda *args: True,
+        hardware_provider=lambda: hardware,
+        sampling=False,
+    )
+    with TestClient(
+        app, base_url="https://testserver", headers={"Origin": "https://testserver"}
+    ) as client:
+        assert client.get("/api/catalog/example/compatibility?cpu_only=true").status_code == 401
+        sign_in(client)
+        data = client.get("/api/catalog/example/compatibility?cpu_only=true").json()
+        assert data["cpu_only"] is True
+        assert data["fits"] is True
+        assert next(v for v in data["variants"] if v["name"] == "example:small")["cpu_fits"] is True
+        assert next(v for v in data["variants"] if v["name"] == "example:huge")["cpu_fits"] is False
+        exact = client.get("/api/fit?model=example:small&cpu_only=true").json()
+        assert exact["fits"] is True and exact["placement"] == "cpu"
+        assert client.get("/api/fit?model=example:small").json()["placement"] == "gpu"
+        hardware["memory_available"] = 256 * 1024**2
+        assert client.get("/api/fit?model=example:small&cpu_only=true").json()["fits"] is False
 
 
 def test_compatibility_api_authentication_family_and_unknown(tmp_path):
@@ -110,4 +176,5 @@ def test_config_menu_contains_storage_and_is_collapsed(tmp_path):
     with TestClient(app, base_url="https://testserver") as client:
         parser.feed(client.get("/").text)
         assert parser.storage_inside
+        assert 'id="cpu-only" type="checkbox"' in client.get("/").text
         assert client.get("/static/catalogue.js").status_code == 200

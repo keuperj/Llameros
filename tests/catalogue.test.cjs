@@ -28,3 +28,25 @@ test('labels distinguish estimated fits, oversized and unknown without relying s
   assert.match(Catalogue.label({name: 'large', fits: false}), /exceeds estimate/);
   assert.match(Catalogue.label({name: 'unknown', fits: null}), /unchecked \/ unknown/);
 });
+
+test('CPU-only filters families and tags, excludes unknown/oversized, keeps fitting CPU variants', () => {
+  const entries = [
+    {name: 'smollm2', fits: true, rank: 0, variants: [
+      {name: 'smollm2:135m', fits: true, cpu_fits: true},
+      {name: 'smollm2:huge', fits: false, cpu_fits: false}]},
+    {name: 'unknown', rank: 1, variants: [{name: 'unknown:latest', cpu_fits: null}]},
+  ];
+  const result = Catalogue.visible(entries, '', true);
+  assert.deepEqual(result.map(e => e.name), ['smollm2']);
+  assert.deepEqual(result[0].variants.map(v => v.name), ['smollm2:135m']);
+  assert.equal(entries[0].variants.length, 2);
+  assert.equal(Catalogue.visible(entries, '', false).length, 2);
+  assert.equal(Catalogue.visible(entries, 'SMOLLM2:135M', true).length, 1);
+  assert.equal(Catalogue.visible(entries, 'smollm2:huge', true).length, 0);
+});
+
+test('description search results are not discarded by a second name-only filter', () => {
+  const entries = [{name: 'smollm2', variants: [{name: 'smollm2:135m', cpu_fits: true}]}];
+  assert.equal(Catalogue.visible(entries, 'compact cpu', false).length, 1);
+  assert.equal(Catalogue.visible(entries, 'compact cpu', true).length, 1);
+});

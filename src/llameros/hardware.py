@@ -85,9 +85,11 @@ def snapshot() -> dict:
 
 
 def assess_fit(size: int, hardware: dict, gpu_mode: str = "cpu") -> dict:
-    # Reserve OS headroom; weights + a conservative fixed KV/runtime allowance.
-    required = int(size * 1.25 + 2 * GIB)
-    available = max(0, hardware["memory_available"] - GIB)
+    # Fixed 2 GiB runtime + 1 GiB reserve excluded even tiny CPU models. Scale
+    # runtime headroom with weights while retaining a floor and OS reserve.
+    runtime = max(256 * 1024**2, min(2 * GIB, int(size * 0.25)))
+    required = int(size * 1.25 + runtime)
+    available = max(0, hardware["memory_available"] - 512 * 1024**2)
     gpu_free = (
         max(
             (gpu.get("free") or 0 for gpu in hardware["gpus"] if gpu["vendor"] == gpu_mode),
@@ -102,8 +104,10 @@ def assess_fit(size: int, hardware: dict, gpu_mode: str = "cpu") -> dict:
         "estimated_memory": required,
         "placement": "gpu"
         if fits and required <= gpu_free
+        else "cpu"
+        if gpu_mode == "cpu" and fits
         else "cpu/partial-gpu"
         if fits
         else "insufficient-memory",
-        "note": "Estimate only: weights × 1.25 + 2 GiB; 1 GiB OS reserve. Context, architecture, and other workloads change actual requirements. GPU memory is not added to RAM.",
+        "note": "Estimate only: weights × 1.25 + runtime allowance (25% of weights, minimum 256 MiB, maximum 2 GiB); 512 MiB reserve from currently available RAM. Context, architecture, and other workloads change actual requirements. GPU memory is not added to RAM. A memory fit does not guarantee CPU architecture support or acceptable speed.",
     }

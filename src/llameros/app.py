@@ -249,10 +249,14 @@ def create_app(
         return {"tags": catalog.tags(family)}
 
     @app.get("/api/catalog/{family}/compatibility", dependencies=protected)
-    def compatibility(family: str):
-        variants = catalog.variants(family, hardware(), cfg.gpu)
+    def compatibility(family: str, cpu_only: bool = False):
+        variants = catalog.variants(family, hardware(), "cpu" if cpu_only else cfg.gpu)
+        if cpu_only:
+            for variant in variants:
+                variant["fits"] = variant["cpu_fits"]
         return {
             "family": family,
+            "cpu_only": cpu_only,
             "variants": variants,
             "fits": True
             if any(item["fits"] is True for item in variants)
@@ -262,9 +266,13 @@ def create_app(
         }
 
     @app.get("/api/fit", dependencies=protected)
-    def fit(model: str):
+    def fit(model: str, cpu_only: bool = False):
         size = catalog.size(validate_model(model))
-        return {"model": model, "download_bytes": size, **assess_fit(size, hardware(), cfg.gpu)}
+        return {
+            "model": model,
+            "download_bytes": size,
+            **assess_fit(size, hardware(), "cpu" if cpu_only else cfg.gpu),
+        }
 
     @app.get("/api/history", dependencies=protected)
     def history():

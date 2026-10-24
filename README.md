@@ -63,7 +63,16 @@ run `llameros`. The committed `uv.lock` pins the tested dependency set.
    fitting families in Ollama's live popularity order, preferring a fitting `latest`
    variant when available. It includes specialized models such as embeddings;
    popularity is not a quality score or a guarantee of playground compatibility.
-   Search filters families; **Search / recheck** refreshes memory estimates.
+   **Search / recheck** searches Ollama, rather than filtering only the families
+   already loaded. Enter a family, description, or `family:tag`; tag queries
+   search for the family upstream and filter its variants locally. Check
+   **CPU-only** to show only variants estimated to fit available system RAM
+   without relying on GPU memory. The same filter applies to recommendations.
+   Unknown/oversized variants are hidden while checked; clear it to inspect them.
+   This is a discovery filter, not a change to the configured execution mode:
+   use `gpu = "cpu"` in configuration to run the container without GPU devices.
+   Small local models are not a separate CPU-only model category. Changing the
+   checkbox or submitting search refreshes memory estimates.
    Catalogue badges use rounded download sizes with rounding headroom and the
    existing memory heuristic. Selecting a tag checks its exact registry size
    before enabling download; execution checks memory again. No check guarantees
@@ -172,8 +181,11 @@ Only one Llameros instance per Linux UID and Docker daemon is supported.
   require additional administrator configuration. Integrated-GPU memory may be
   shared with RAM and is not double-counted. Validate GPU execution on your target
   hardware before relying on it.
-- Fit estimates are **heuristics**, not guarantees: weights × 1.25 + 2 GiB runtime
-  allowance, with 1 GiB host reserve. They do not fully model KV cache, architecture,
+- Fit estimates are **heuristics**, not guarantees: weights × 1.25 plus runtime
+  allowance of 25% of weights (minimum 256 MiB, maximum 2 GiB), with a 512 MiB
+  reserve subtracted from currently available RAM. This replaces the old fixed
+  3 GiB overhead that incorrectly excluded tiny CPU models. The same heuristic
+  is used for catalogue, download, and load checks. It does not fully model KV cache, architecture,
   long contexts, MoE, disk capacity, or concurrent processes. RAM and VRAM are not
   simply summed. Large contexts may still exhaust memory. Runtime checks are
   repeated before downloads/loads; GPU availability can change afterward.

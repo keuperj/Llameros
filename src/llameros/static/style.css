@@ -9,3 +9,5 @@ footer a:focus-visible{outline:2px solid var(--green);outline-offset:5px;border-
 
 /* Collapsed configuration and hardware-aware catalogue. */
 .config-menu summary{cursor:pointer;font-weight:700;color:var(--green);font-size:17px;padding:2px}.config-menu summary:focus-visible{outline:2px solid var(--green);outline-offset:4px}.config-content{margin-top:22px;border-top:1px solid var(--line);padding-top:20px}.config-content input[type=checkbox]{display:inline-block;width:auto;margin:0 8px 0 0}.fit-bullet,.fit-option{color:var(--green)}.recommendation{display:flex;align-items:center;gap:9px;padding:8px 0;flex-wrap:wrap}.recommendation button{white-space:normal;text-align:left}.recommendation small{color:var(--muted)}#catalog-progress{font-size:12px;color:var(--muted)}
+
+#search-form{flex-wrap:wrap}#search-form>input{flex:1;min-width:160px}.checkbox-label{display:flex;align-items:center;gap:8px;white-space:nowrap;margin:0}.checkbox-label input[type=checkbox]{display:inline-block;width:auto;margin:0}

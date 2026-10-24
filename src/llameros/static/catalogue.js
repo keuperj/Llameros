@@ -1,6 +1,13 @@
 'use strict';
 // Pure helpers shared by the browser and dependency-free Node tests.
 const Catalogue = {
+  visible(entries, query = '', cpuOnly = false) {
+    const tagQuery = query.trim().toLowerCase();
+    return entries.map(entry => ({...entry, variants: entry.variants.filter(variant =>
+      (!tagQuery.includes(':') || variant.name.toLowerCase().includes(tagQuery)) &&
+      (!cpuOnly || variant.cpu_fits === true))}))
+      .filter(entry => (!cpuOnly && !tagQuery.includes(':')) || entry.variants.length > 0);
+  },
   sort(entries) {
     const priority = value => value === true ? 0 : value === false ? 1 : 2;
     return [...entries].sort((a, b) => priority(a.fits) - priority(b.fits) || a.rank - b.rank);
