@@ -56,6 +56,18 @@ run `llameros`. The committed `uv.lock` pins the tested dependency set.
    its download size and estimated memory requirement. Download is enabled for
    variants estimated to fit available system RAM. The catalogue lists the
    families exposed by the library page; it is not an exhaustive registry API.
+   Compatible families and variants have a green bullet and sort first. A family
+   qualifies when at least one variant fits. Unknown entries are marked separately.
+   Checks run progressively with three concurrent requests, starting with the
+   most popular families. The **Recommended for this host** list shows up to six
+   fitting families in Ollama's live popularity order, preferring a fitting `latest`
+   variant when available. It includes specialized models such as embeddings;
+   popularity is not a quality score or a guarantee of playground compatibility.
+   Search filters families; **Search / recheck** refreshes memory estimates.
+   Catalogue badges use rounded download sizes with rounding headroom and the
+   existing memory heuristic. Selecting a tag checks its exact registry size
+   before enabling download; execution checks memory again. No check guarantees
+   performance, GPU driver support, or sufficient memory at a different context.
 4. Download, load/start, and unload/stop models. Loading keeps a model resident;
    unloading releases it. Stopping the container stops all its models. Downloaded
    weights persist in the `llameros-<uid>-models` Docker volume by default, or in
@@ -70,7 +82,8 @@ run `llameros`. The committed `uv.lock` pins the tested dependency set.
 
 ### Model storage in the GUI
 
-The **Model storage** panel lets you select a dedicated host directory, including
+Expand the collapsed **Configuration** drop-down to find **Model storage**.
+The panel lets you select a dedicated host directory, including
 paths beginning with `~`. Leave the path empty to use the original Docker-managed
 volume. New directories are created with private permissions; existing directories
 must be owned by the current user, not group/other-writable, and contain only
@@ -186,6 +199,7 @@ uv run pytest
 uv run ruff check .
 uv run ruff format --check .
 node --check /path/to/Llameros/src/llameros/static/app.js
+node --test /path/to/Llameros/tests/catalogue.test.cjs
 ```
 
 Tests use fake PAM/Docker/catalogue services; they do not use your password,

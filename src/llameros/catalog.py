@@ -48,9 +48,13 @@ class Links(HTMLParser):
         if tag == "a" and self.active:
             text = " ".join(self.text)
             match = re.search(r"\b(\d+(?:\.\d+)?)\s*(KB|MB|GB|TB)\b", text)
-            if match and not re.search(r"\bcloud\b", self.active, re.I):
-                # Page sizes are rounded decimal units; add headroom for rounding.
-                self.sizes[self.active] = int(float(match[1]) * 1000 ** ({"KB": 1, "MB": 2, "GB": 3, "TB": 4}[match[2]]) * 1.01)
+            if match and not re.search(r"\bcloud\b", self.active + " " + text, re.I):
+                # Assume rounding to the displayed precision, then add 1% headroom.
+                number = match[1]
+                precision = len(number.partition(".")[2])
+                upper = float(number) + 0.5 * 10**-precision
+                unit = 1000 ** {"KB": 1, "MB": 2, "GB": 3, "TB": 4}[match[2]]
+                self.sizes[self.active] = int(upper * unit * 1.01)
             self.active = ""
             self.text = []
 
@@ -108,7 +112,12 @@ class Catalog:
             if not name.startswith(family + ":"):
                 continue
             size = parser.sizes.get(name)
-            variants.append({"name": name, "download_bytes": size,
-                             "fits": None if size is None else assess_fit(size, hardware, gpu_mode)["fits"],
-                             "size_source": "rounded catalogue size" if size is not None else "unknown"})
+            variants.append(
+                {
+                    "name": name,
+                    "download_bytes": size,
+                    "fits": None if size is None else assess_fit(size, hardware, gpu_mode)["fits"],
+                    "size_source": "rounded catalogue size" if size is not None else "unknown",
+                }
+            )
         return sorted(variants, key=lambda item: {True: 0, False: 1, None: 2}[item["fits"]])

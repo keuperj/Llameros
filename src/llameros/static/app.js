@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 let csrf = '', timer = null, lastResult = '', selectedFit = null, fitVersion = 0, refreshing = false;
 let storageInitialized = false;
+let catalogueVersion = 0, familyVersion = 0, catalogueEntries = [];
 const bytes = n => n == null ? 'unknown' : `${(n / 1073741824).toFixed(1)} GiB`;
 function notice(message = '') { $('notice').textContent = message; }
 async function api(path, body) {
@@ -21,7 +22,7 @@ function options(select, values, placeholder) {
   select.replaceChildren(); if (placeholder) select.add(new Option(placeholder, ''));
   values.forEach(value => select.add(new Option(value, value)));
 }
-function signedOut() { csrf = ''; storageInitialized = false; clearInterval(timer); timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function signedOut() { csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
@@ -42,24 +43,82 @@ $('storage-form').addEventListener('submit', safe(async () => {
 }));
 for (const action of ['start', 'stop']) $('container-' + action).addEventListener('click', safe(async () => { await api('/api/container/' + action, {}); await refresh(); }));
 async function catalogue() {
-  const data = await api('/api/catalog?q=' + encodeURIComponent($('search').value));
-  options($('families'), data.models, 'Select a family');
+  const version = ++catalogueVersion;
+  $('catalog-progress').textContent = 'Loading popularity-ranked catalogue…';
+  const data = await api('/api/catalog');
+  if (version !== catalogueVersion) return;
+  catalogueEntries = data.models.map((name, rank) => ({name, rank, fits: null, variants: []}));
+  let next = 0, checked = 0, failures = 0;
+  const render = () => {
+    renderFamilies(); renderRecommendations();
+    $('catalog-progress').textContent = `Checked ${checked}/${catalogueEntries.length} families${failures ? ` · ${failures} unavailable` : ''}. ${checked < catalogueEntries.length ? 'Checking in popularity order…' : 'Select Search / recheck to update memory estimates.'}`;
+  };
+  render();
+  async function worker() {
+    while (version === catalogueVersion && csrf && next < catalogueEntries.length) {
+      const entry = catalogueEntries[next++];
+      try {
+        const result = await api('/api/catalog/' + encodeURIComponent(entry.name) + '/compatibility');
+        if (version !== catalogueVersion) return;
+        Object.assign(entry, {fits: result.fits, variants: result.variants});
+      } catch (error) { if (version !== catalogueVersion) return; failures++; }
+      checked++; render();
+    }
+  }
+  // Bound network concurrency; no registry request per tag or blocking full-catalogue scan.
+  await Promise.all(Array.from({length: 3}, worker));
 }
+function compatibleOptions(select, entries, placeholder) {
+  const current = select.value;
+  select.replaceChildren(new Option(placeholder, ''));
+  for (const entry of entries) {
+    const option = new Option(Catalogue.label(entry), entry.name);
+    if (entry.fits === true) option.className = 'fit-option';
+    select.add(option);
+  }
+  if (entries.some(entry => entry.name === current)) select.value = current;
+}
+function renderFamilies() {
+  const query = $('search').value.toLowerCase();
+  compatibleOptions($('families'), Catalogue.sort(catalogueEntries.filter(entry => entry.name.toLowerCase().includes(query))), 'Select a family');
+}
+function renderRecommendations() {
+  $('recommended').replaceChildren();
+  for (const entry of Catalogue.recommendations(catalogueEntries)) {
+    const row = element('div', '', 'recommendation');
+    const bullet = element('span', '●', 'fit-bullet'); bullet.setAttribute('aria-hidden', 'true');
+    const button = element('button', entry.variant.name);
+    button.addEventListener('click', safe(async () => {
+      $('search').value = ''; renderFamilies(); $('families').value = entry.family;
+      await selectFamily(entry.variant.name);
+    }));
+    row.append(bullet, button, element('small', `~${bytes(entry.variant.download_bytes)} · popularity rank ${entry.rank + 1}`));
+    $('recommended').append(row);
+  }
+  if (!$('recommended').children.length) $('recommended').append(element('p', 'No compatible recommendations found yet. Unknown or oversized variants are not recommended.'));
+}
+$('search').addEventListener('input', renderFamilies);
 $('search-form').addEventListener('submit', safe(catalogue));
-$('families').addEventListener('change', safe(async () => {
+async function selectFamily(preferred = '') {
+  const version = ++familyVersion;
   fitVersion++; selectedFit = null; $('pull').disabled = true; options($('tags'), [], 'Loading variants…');
-  const family = $('families').value; if (!family) return;
-  const data = await api('/api/catalog/' + encodeURIComponent(family) + '/tags');
-  if ($('families').value === family) options($('tags'), data.tags, 'Select a variant');
-}));
-$('tags').addEventListener('change', safe(async () => {
+  $('fit').textContent = 'Select a variant for an exact registry size and current memory check.';
+  const family = $('families').value; if (!family) { options($('tags'), [], 'Select a variant'); return; }
+  const data = await api('/api/catalog/' + encodeURIComponent(family) + '/compatibility');
+  if (version !== familyVersion || $('families').value !== family) return;
+  compatibleOptions($('tags'), data.variants, 'Select a variant');
+  if (preferred && data.variants.some(v => v.name === preferred)) { $('tags').value = preferred; await checkSelectedFit(); }
+}
+$('families').addEventListener('change', safe(() => selectFamily()));
+async function checkSelectedFit() {
   const version = ++fitVersion, model = $('tags').value; selectedFit = null; $('pull').disabled = true;
   if (!model) return; $('fit').textContent = 'Checking registry and available memory…';
   const data = await api('/api/fit?model=' + encodeURIComponent(model));
   if (version !== fitVersion) return;
   selectedFit = data; $('pull').disabled = !data.fits;
   $('fit').textContent = `${data.fits ? '✓ Estimated to fit' : '✕ Insufficient memory'} · ${bytes(data.download_bytes)} download · ${bytes(data.estimated_memory)} estimated runtime · ${data.placement}. ${data.note}`;
-}));
+}
+$('tags').addEventListener('change', safe(checkSelectedFit));
 $('pull').addEventListener('click', safe(async () => {
   if (!selectedFit || !selectedFit.fits) return;
   await api('/api/models/pull', {model: selectedFit.model}); await refresh();
