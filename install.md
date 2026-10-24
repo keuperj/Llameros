@@ -157,16 +157,10 @@ are never moved or deleted.
 Stop Ollama stops all registered runtimes. Stopping a model alone leaves its slot
 service ready for reuse. Do not delete the runtime registry while containers exist.
 
-The **Ollama runtime → Access model** dropdown shows the configured loopback API
-base URL and OpenAI-compatible `/v1` base URL. Select a loaded model and choose
+The **Ollama runtime → Access model** dropdown shows the authenticated Llameros
+HTTPS gateway, not the direct Ollama port. Select a loaded model/device and choose
 Ollama Python, OpenAI-compatible Python, LangChain, or LlamaIndex for copyable
-install commands and Python examples. Copy buttons fall back to selecting text
-for manual copying if clipboard access is denied. No additional client libraries
-are installed by Llameros; install the chosen client in your own environment.
-Examples require a text-generation/chat-capable model and run on the Llameros
-host, not a remote browser's computer or an ordinary bridged container. The local
-HTTP API has no authentication and direct requests bypass dashboard job locking,
-memory-fit guards, and token usage statistics. Do not expose this port publicly.
+examples. Install the chosen client in your own environment. See [Secure inference API](#secure-inference-api).
 
 Container start/stop and model load/unload controls are enabled only for the
 opposite known state, and remain disabled during background jobs. The backend
@@ -181,6 +175,66 @@ selected family or tag's public Ollama README as plain text. External scripts,
 HTML, images, and editor forms are not embedded. An **Open on Ollama** link is
 available for the original formatting. Description fetching requires internet
 access; fetching failures are shown inside the panel.
+
+## Secure inference API
+
+1. Sign in with PAM and expand **Ollama runtime → Access model → API keys & usage**.
+2. Create a named key with exact allowed model tags and hardware targets, or `*`.
+   Untagged model permissions mean `:latest`; they do not allow all tags.
+   Target IDs are `cpu` or the `gpu-…` IDs shown in the selected model's example.
+3. Copy the secret immediately. Only its SHA-256 digest is stored; the secret
+   cannot be retrieved again. Keys default to 30 days and can expire in 1–365 days.
+4. Set `LLAMEROS_API_KEY` and `LLAMEROS_CA_CERT` in the client environment.
+   The latter points to the trusted PEM certificate/CA for your Llameros server
+   (the default generated certificate is `state_dir/cert.pem`). Verify its
+   fingerprint before trusting it. Never disable certificate verification.
+5. Use the generated client example. Keys grant inference only, not dashboard,
+   container, storage, download, load, or unload access. Never send PAM passwords
+   or dashboard cookies to inference clients.
+
+Default base URLs are `https://127.0.0.1:8443/inference` (Ollama) and
+`https://127.0.0.1:8443/inference/v1` (OpenAI-compatible).
+The gateway requires `Authorization: Bearer <key>` on every endpoint:
+
+| Method | Path under `/inference` | Purpose |
+|---|---|---|
+| POST | `/api/generate` | Ollama text generation, JSON or NDJSON stream |
+| POST | `/api/chat` | Ollama chat, JSON or NDJSON stream |
+| POST | `/v1/chat/completions` | OpenAI-compatible chat, JSON or SSE stream |
+| GET | `/api/tags` | Permitted **loaded** models and device targets |
+| GET | `/v1/models` | OpenAI-style list of permitted loaded models |
+
+Set `X-Llameros-Target: cpu` or a GPU slot ID to choose a device; the JSON
+extension `target` also works and takes precedence. Without a target, exactly
+one permitted instance of the model must be loaded, otherwise the request gets
+409. Models must be loaded through the dashboard first; the gateway never
+intentionally loads a different model. All gateway generation and dashboard
+jobs share one global lock; concurrent jobs return 409 instead of queueing.
+
+Ollama requests default to streaming; OpenAI requests default to non-streaming.
+Use `stream: true` for streaming and OpenAI `stream_options.include_usage: true`
+for a usage chunk. OpenAI compatibility covers chat completions, **not** the
+Responses, embeddings, audio, or full OpenAI API. Unsupported fields return 400.
+Limits: 128 KiB JSON request, output 1–4096 tokens (default 256), configured
+context length only, and allowlisted sampling options. Client residency hints
+are ignored; Ollama-style gateway generation keeps the loaded model resident.
+These are guardrails, not hard CPU/RAM quotas or a public-service rate limiter.
+
+The key list shows requests reaching inference routing, failures, known input/output
+tokens, elapsed seconds, and requests with unknown usage. Rejected authentication,
+validation, permission, or busy-lock requests are not counted. Interrupted streams
+can lack final token counts; missing counts are **unknown**, not measured zero.
+Refresh the key list to update usage. Accounting stores no prompts/responses;
+key metadata and per-key usage persist until the local database is removed,
+independently of sampled-history retention. Revoke keys in the dashboard;
+revocation/expiration rejects new requests but does not terminate an active one.
+
+**Security boundary:** Llameros still defaults to loopback HTTPS. Ollama ports
+remain loopback-only **and unauthenticated**: other local processes can bypass
+the gateway, permissions, accounting, and job lock. Do not forward/publish those
+ports. This does not provide isolation from untrusted users/processes on the same
+host. LAN/public deployment, reverse proxies, and multi-user hosting remain
+outside the supported security model; no live Docker/network changes are needed.
 
 ## Configuration
 

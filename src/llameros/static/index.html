@@ -20,7 +20,7 @@
       <div id="hardware" class="metrics"></div>
       <section class="card"><div class="section-head"><h3>Ollama runtime</h3><span id="runtime" class="runtime-state" role="status" aria-live="polite">Checking Ollama…</span></div><div id="runtime-models" class="runtime-models"></div><p id="runtime-detail"></p><div id="job" role="status"></div>
         <details id="access-model" class="access-menu"><summary>Access model · API URL &amp; Python examples</summary>
-          <p>Run this code on the Llameros host. These HTTP endpoints are bound to host loopback, not the dashboard HTTPS URL; they are not reachable directly from another computer or a normal bridged container. Local Ollama has no authentication: never send your Linux password or dashboard session token.</p>
+          <p>These HTTPS endpoints require a Llameros bearer API key. Set LLAMEROS_API_KEY and LLAMEROS_CA_CERT in your client environment and trust the dashboard certificate. Never send your Linux password or session token. Direct Ollama loopback ports remain unauthenticated; do not publish them.</p>
           <label>Ollama API base URL<input id="access-url" readonly></label>
           <div class="actions"><button type="button" data-copy="access-url" disabled>Copy API URL</button></div>
           <label>OpenAI-compatible base URL<input id="access-openai-url" readonly></label>
@@ -31,7 +31,12 @@
           <div class="actions"><button type="button" data-copy="access-install" disabled>Copy install command</button></div>
           <label>Python example<textarea id="access-code" class="access-code" rows="16" readonly spellcheck="false"></textarea></label>
           <div class="actions"><button type="button" data-copy="access-code" disabled>Copy Python code</button></div><p id="access-feedback" role="status" aria-live="polite"></p>
-          <p>Examples require a text-generation/chat-capable model; embedding-only models cannot answer chat prompts. Direct API calls bypass Llameros job locking, memory-fit checks, and token usage history. They can reload models and change how long models remain loaded. Avoid concurrent dashboard lifecycle operations.</p>
+          <p>Examples require a loaded text-generation/chat model. Gateway requests share the dashboard job lock and record token usage without saving content. Select a device explicitly when a model is loaded on multiple devices.</p>
+          <h4>API keys &amp; usage</h4>
+          <p>Keys are displayed once, expire automatically, and grant inference only. Use exact model names (including tags) and hardware slot IDs, or * for all. Revocation prevents new requests, not requests already running.</p>
+          <form id="api-key-form"><label>Key name<input id="api-key-name" maxlength="80" required autocomplete="off"></label><label>Models (comma-separated)<input id="api-key-models" value="*" required></label><label>Hardware targets (cpu, GPU slot ID, or *, comma-separated)<input id="api-key-targets" value="*" required></label><label>Expires in days<input id="api-key-days" type="number" min="1" max="365" value="30" required></label><button type="submit">Create API key</button></form>
+          <label>New key — copy now; not shown again<input id="api-key-secret" readonly autocomplete="off" spellcheck="false"></label><button id="api-key-clear" type="button">Clear displayed key</button>
+          <button id="api-keys-refresh" type="button">Refresh keys &amp; usage</button><div id="api-keys" aria-live="polite"></div>
         </details>
       </section>
       <details id="config-menu" class="card config-menu"><summary>Configuration</summary><div class="config-content"><h3>Model storage</h3><p id="storage-current"></p><p>Choose a dedicated Ollama models directory (containing blobs and manifests), or leave the path empty to use the Docker-managed volume. Stop Ollama first. Switching locations does not copy, move, or delete existing models.</p><form id="storage-form"><label>Host models directory<input id="storage-directory" placeholder="Empty = Docker-managed volume" maxlength="4096"></label><label><input id="storage-confirm" type="checkbox" required> I understand that existing models stay in their original location and the stopped container will be recreated on next start.</label><button id="storage-save">Save storage location</button></form><p id="storage-feedback" role="status"></p></div></details>

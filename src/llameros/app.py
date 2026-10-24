@@ -20,6 +20,7 @@ from .auth import COOKIE, Sessions, verify_password
 from .catalog import Catalog, validate_model
 from .config import Settings, current_user
 from .docker import DockerError
+from .gateway import PREFIX, install_gateway
 from .hardware import assess_fit, snapshot
 from .runtimes import Runtimes
 from .storage import Store
@@ -116,6 +117,7 @@ def create_app(
     authenticator=None,
     hardware_provider=None,
     sampling=True,
+    gateway_transport=None,
 ) -> FastAPI:
     cfg = settings or Settings()
     cfg.prepare()
@@ -168,7 +170,8 @@ def create_app(
     async def security(request: Request, call_next):
         if request.url.scheme != "https":
             return JSONResponse({"detail": "HTTPS is required"}, status_code=400)
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        gateway = request.url.path == PREFIX or request.url.path.startswith(PREFIX + "/")
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and not gateway:
             origin = request.headers.get("origin")
             if (
                 not origin
@@ -501,6 +504,10 @@ def create_app(
             }
 
         return jobs.submit("generate", name, work)
+
+    install_gateway(
+        app, cfg, store, jobs, protected, runtime_status, runtimes, docker, gateway_transport
+    )
 
     static = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=static), name="static")

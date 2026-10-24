@@ -103,3 +103,25 @@ test('model names are quoted rather than interpolated as Python code', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.ok(example.code.includes('4096'));
 });
+
+test('secure examples use bearer credentials, TLS trust and explicit hardware routing', () => {
+  for (const framework of Object.keys(Access.frameworks)) {
+    const example = Access.example(framework, 'gemma3:270m', 'https://127.0.0.1:8443/inference', 4096, 'gpu-0123456789abcdef');
+    assert.match(example.code, /LLAMEROS_API_KEY/);
+    assert.match(example.code, /LLAMEROS_CA_CERT/);
+    assert.match(example.code, /X-Llameros-Target/);
+    assert.match(example.code, /gpu-0123456789abcdef/);
+    assert.ok(!example.code.includes('ignores it'));
+    assert.ok(!example.code.includes('verify=False'));
+    const result = spawnSync('python3', ['-c', 'import ast,sys; ast.parse(sys.stdin.read())'], {input: example.code, encoding: 'utf8'});
+    assert.equal(result.status, 0, result.stderr);
+  }
+});
+
+test('secure access panel never selects direct runtime URLs', () => {
+  const ui = panel();
+  ui.run('accessConfig = {secure_url: "https://127.0.0.1:8443/inference"}; runtimeState = {running: true, loaded: [{name: "one:latest", target: "cpu", base_url: "http://127.0.0.1:11435"}]}; renderAccess();');
+  assert.equal(ui.get('access-url').value, 'https://127.0.0.1:8443/inference');
+  assert.match(ui.get('access-code').value, /LLAMEROS_API_KEY/);
+  assert.ok(!ui.get('access-code').value.includes('11435'));
+});

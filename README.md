@@ -14,7 +14,7 @@ account, frontend build, or external UI assets.
   containers, shared downloads, and individual **■ Stop model** controls.
 - **Hardware-aware discovery** — RAM/VRAM fit estimates, recommendations,
   search, model descriptions, and download progress.
-- **Ready-to-use inference** — playground, slot-specific API URLs, and copyable
+- **Authenticated inference** — scoped, revocable API keys, streaming, usage accounting, and copyable
   Ollama, OpenAI-compatible, LangChain, and LlamaIndex examples.
 - **Local control** — Linux PAM sign-in over HTTPS, configurable model storage,
   resource history, lifecycle events, and token/timing totals.

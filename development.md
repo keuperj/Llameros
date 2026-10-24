@@ -27,6 +27,8 @@ not establish real driver compatibility or visual browser correctness.
 
 - `src/llameros/app.py`: FastAPI routes, session/CSRF protection, background jobs,
   inference routing, and static dashboard delivery.
+- `src/llameros/gateway.py` and `api_keys.py`: bearer-authenticated inference,
+  allowlisted runtime forwarding, streamed usage accounting, and digest-only keys.
 - `src/llameros/runtimes.py`: CPU/GPU slots, persistent device/port registry,
   model placement, and coordinated stopping/storage changes.
 - `src/llameros/docker.py`: constrained Docker CLI/API access and device isolation.
@@ -38,7 +40,7 @@ not establish real driver compatibility or visual browser correctness.
 - `tests/`: Python integration/unit tests and Node.js frontend tests.
 
 Dashboard lifecycle and inference jobs share a single-worker lock. Models can
-remain loaded on several slots, but dashboard jobs are serialized. Direct Ollama
+remain loaded on several slots, but dashboard and gateway jobs are serialized. Direct Ollama
 clients bypass that lock, fit guards, and token accounting. Preserve ownership
 and hardware-assignment checks when changing container lifecycle code.
 
@@ -56,9 +58,15 @@ and hardware-assignment checks when changing container lifecycle code.
   process has an ordinary UID. Rootless mode does not eliminate kernel risks.
 - HTTPS is mandatory; the CLI refuses root/setuid execution. Sessions are opaque,
   in memory, expire absolutely, and disappear on restart. Cookies are Secure,
-  HttpOnly, SameSite=Strict, and host-only. Mutations require matching HTTPS Origin
+  HttpOnly, SameSite=Strict, and host-only. Dashboard mutations require matching HTTPS Origin
   and CSRF token. Login attempts are globally limited to five per minute; a hostile
   client can therefore temporarily deny login. No CORS or proxy-header trust.
+- `/inference/*` uses HTTPS bearer authentication instead of browser sessions or
+  CSRF; cookies alone cannot grant inference access. Key management still requires
+  PAM sessions and CSRF. High-entropy keys are digest-only at rest, scoped to model
+  tags/devices, expiring, and revocable. No client authorization/cookies or arbitrary
+  destination URLs are forwarded upstream. Failed streams release the shared job
+  lock and retain content-free accounting; incomplete token counts remain unknown.
 - No shell execution or browser-supplied Docker arguments, image names, devices,
   or hosts. The authenticated storage setting permits only a validated, dedicated
   directory mount to a fixed container destination. Only official library model

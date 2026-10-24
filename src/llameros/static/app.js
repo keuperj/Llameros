@@ -13,19 +13,19 @@ function loadedChoices() { return runtimeState && runtimeState.running && !runti
 function renderAccessExample() {
   const choice = selectedModel($('access-active-model').value), model = choice.model;
   const loaded = loadedChoices().find(item => modelKey(item) === $('access-active-model').value);
-  const baseUrl = loaded && loaded.base_url || (accessConfig && accessConfig.base_url);
+  const baseUrl = accessConfig && accessConfig.secure_url || loaded && loaded.base_url || (accessConfig && accessConfig.base_url);
   if (baseUrl) { $('access-url').value = baseUrl; $('access-openai-url').value = baseUrl + '/v1'; }
   const active = JobProgress.controls(runtimeState, false).active;
   const example = active.includes(model) && accessConfig
-    ? ModelAccess.example($('access-framework').value, model, baseUrl, accessContext) : null;
+    ? ModelAccess.example($('access-framework').value, model, baseUrl, accessContext, choice.target || 'cpu') : null;
   for (const [id, value] of [['access-install', example ? example.install : ''], ['access-code', example ? example.code : '']]) {
     if ($(id).value !== value) $(id).value = value;
   }
   document.querySelectorAll('#access-model [data-copy]').forEach(button => { button.disabled = !$(button.dataset.copy).value; });
 }
 function renderAccess() {
-  $('access-url').value = accessConfig ? accessConfig.base_url : '';
-  $('access-openai-url').value = accessConfig ? accessConfig.openai_url : '';
+  $('access-url').value = accessConfig ? accessConfig.secure_url || accessConfig.base_url : '';
+  $('access-openai-url').value = accessConfig ? (accessConfig.secure_url ? accessConfig.secure_url + '/v1' : accessConfig.openai_url) : '';
   const active = loadedChoices().map(modelKey);
   const select = $('access-active-model'), previous = select.value;
   // Preserve selection/focus and code selection across five-second refreshes.
@@ -148,12 +148,12 @@ $('model-info-close').addEventListener('click', () => closeModelInfo());
 $('model-info-overlay').addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeModelInfo(); } });
 $('generate-model').addEventListener('change', updateControls);
 $('image-availability').addEventListener('click', safe(refresh));
-function signedOut() { closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess(); $('access-model').open = false; $('access-feedback').textContent = ''; csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function signedOut() { $('api-key-secret').value = ''; $('api-keys').replaceChildren(); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess(); $('access-model').open = false; $('access-feedback').textContent = ''; csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
   clearInterval(timer); timer = setInterval(safe(refresh), 5000); clearInterval(jobTimer); jobTimer = setInterval(pollJob, 1000);
-  await refresh(); await catalogue();
+  await refresh(); await catalogue(); await refreshKeys();
 }
 $('login-form').addEventListener('submit', safe(async () => {
   try { const data = await api('/api/login', {username: $('username').value, password: $('password').value}); await signedIn(data); }
@@ -161,6 +161,32 @@ $('login-form').addEventListener('submit', safe(async () => {
 }));
 $('logout').addEventListener('click', safe(async () => { await api('/api/logout', {}); signedOut(); }));
 $('refresh').addEventListener('click', safe(refresh));
+async function refreshKeys() {
+  const data = await api('/api/keys');
+  if (!csrf) return;
+  $('api-keys').replaceChildren();
+  for (const key of data.keys) {
+    const row = element('div', '', 'runtime-model');
+    const state = key.revoked ? 'revoked' : key.expires * 1000 <= Date.now() ? 'expired' : 'active';
+    row.append(element('p', `${key.name} · ${state} · models: ${key.models.join(', ')} · targets: ${key.targets.join(', ')} · expires ${new Date(key.expires * 1000).toLocaleString()} · ${key.requests} requests / ${key.failed} failed · ${key.prompt_tokens} input / ${key.output_tokens} output tokens · ${key.unknown_usage} requests with unknown usage · ${key.seconds.toFixed(1)} s`));
+    if (!key.revoked) {
+      const button = element('button', 'Revoke');
+      button.addEventListener('click', safe(async () => { await api('/api/keys/' + key.id + '/revoke', {}); await refreshKeys(); }));
+      row.append(button);
+    }
+    $('api-keys').append(row);
+  }
+  if (!data.keys.length) $('api-keys').textContent = 'No API keys yet.';
+}
+$('api-key-form').addEventListener('submit', safe(async () => {
+  const split = id => $(id).value.split(',').map(value => value.trim()).filter(Boolean);
+  const result = await api('/api/keys', {name: $('api-key-name').value.trim(), models: split('api-key-models'), targets: split('api-key-targets'), expires_days: Number($('api-key-days').value)});
+  if (!csrf) return;
+  $('api-key-secret').value = result.key; $('api-key-secret').focus(); $('api-key-secret').select();
+  await refreshKeys();
+}));
+$('api-key-clear').addEventListener('click', () => { $('api-key-secret').value = ''; });
+$('api-keys-refresh').addEventListener('click', safe(refreshKeys));
 $('storage-form').addEventListener('submit', safe(async () => {
   await api('/api/storage', {directory: $('storage-directory').value.trim(), confirmed: $('storage-confirm').checked});
   $('storage-feedback').textContent = 'Storage change queued; see the runtime job for completion or errors.';
@@ -278,7 +304,7 @@ async function refresh() {
     $('storage-current').textContent = `Active location: ${storage.location} (${storage.mode === 'directory' ? 'host directory' : 'Docker volume'})`;
     if (!storageInitialized) { $('storage-directory').value = storage.directory; $('storage-directory').placeholder = `Empty = Docker volume; example: ${storage.suggested_directory}`; storageInitialized = true; }
     runtimeState = data.ollama;
-    accessConfig = data.access; accessContext = data.context_length; renderAccess();
+    accessConfig = {...data.access, secure_url: window.location.origin + '/inference'}; accessContext = data.context_length; renderAccess();
     const hw = data.hardware;
     $('hardware').replaceChildren();
     for (const [label, value, detail] of [
