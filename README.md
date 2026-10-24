@@ -6,6 +6,19 @@
 
 ### Dashboard controls
 
+The runtime banner distinguishes **Ollama off**, **Ollama running** (no model
+loaded), and **Model running — model name**. Unknown/error states are reported
+explicitly rather than displayed as off. “Running model” means loaded in memory,
+not necessarily generating tokens right now.
+
+**Try a model** is collapsed by default. The downloaded-models card has a bounded
+height and scrollable inventory. Dashboard controls and backend load jobs require
+unloading the current model before loading another; this does not intercept
+independent requests sent directly to the local Ollama API. Lifecycle events show
+up to ten single-line entries at once, with vertical scrolling for older events
+and horizontal scrolling for long details. Refresh preserves the event scroll
+position.
+
 The **Ollama runtime → Access model** dropdown shows the configured loopback API
 base URL and OpenAI-compatible `/v1` base URL. Select a loaded model and choose
 Ollama Python, OpenAI-compatible Python, LangChain, or LlamaIndex for copyable

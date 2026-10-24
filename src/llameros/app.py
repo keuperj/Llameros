@@ -411,6 +411,10 @@ def create_app(
                     "Model is already loaded" if active else "Model is already unloaded"
                 )
             if action == "load":
+                if docker.api("GET", "/api/ps").get("models", []):
+                    raise ValueError(
+                        "Only one model may be loaded. Unload the running model first."
+                    )
                 check_fit(info["size"])
             progress(
                 {

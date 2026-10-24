@@ -22,6 +22,27 @@ test('real byte counters yield percentages and missing counters remain indetermi
   assert.equal(Progress.percent({completed: -3, total: 100}), 0);
   for (const value of [{}, {total: 0}, {total: 100}, {completed: null, total: 100}]) assert.equal(Progress.percent(value), null);
 });
+
+test('single-model controls block every load while a model is active, but allow unloading it', () => {
+  const running = {running: true, loaded: [{name: 'one:latest'}]};
+  assert.deepEqual(Progress.modelControls(running, false, 'one:latest'), {load: false, unload: true});
+  assert.deepEqual(Progress.modelControls(running, false, 'two:latest'), {load: false, unload: false});
+  assert.deepEqual(Progress.modelControls({running: true, loaded: []}, false, 'two:latest'), {load: true, unload: false});
+  for (const runtime of [null, {running: false}, {running: true, error: 'unavailable'}]) {
+    assert.deepEqual(Progress.modelControls(runtime, false, 'one:latest'), {load: false, unload: false});
+  }
+  assert.deepEqual(Progress.modelControls(running, true, 'one:latest'), {load: false, unload: false});
+});
+
+test('runtime prominently distinguishes off, running, and named active models without guessing on errors', () => {
+  assert.equal(Progress.runtimeState({running: false}).text, 'Ollama off');
+  assert.equal(Progress.runtimeState({running: true, loaded: []}).text, 'Ollama running');
+  assert.deepEqual(Progress.runtimeState({running: true, loaded: [{name: 'gemma3:270m'}]}), {state: 'model', text: 'Model running — gemma3:270m'});
+  assert.match(Progress.runtimeState({running: true, loaded: [{model: 'fallback:latest'}]}).text, /fallback:latest/);
+  assert.match(Progress.runtimeState({running: true, loaded: [{name: 'one'}, {name: 'two'}]}).text, /one, two/);
+  assert.equal(Progress.runtimeState({running: false, loaded: [{name: 'stale'}]}).state, 'off');
+  for (const runtime of [null, {}, {running: false, error: 'Docker down'}]) assert.equal(Progress.runtimeState(runtime).state, 'unknown');
+});
 test('availability distinguishes cached image, existing container, missing and unknown', () => {
   assert.match(Progress.availability({image_available: true, container_exists: false}).text, /Image available/);
   assert.match(Progress.availability({image_available: false, container_exists: true}).text, /Container available/);

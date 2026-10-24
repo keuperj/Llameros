@@ -5,6 +5,18 @@ const JobProgress = {
     return {start: !busy && known && !runtime.running, stop: !busy && known && runtime.running,
       active: known && runtime.running ? (runtime.loaded || []).map(model => model.name || model.model) : []};
   },
+  modelControls(runtime, busy, model) {
+    const active = this.controls(runtime, busy).active;
+    const ready = !busy && !!runtime && runtime.running === true && !runtime.error;
+    return {load: ready && active.length === 0, unload: ready && active.includes(model)};
+  },
+  runtimeState(runtime) {
+    if (!runtime || runtime.error || typeof runtime.running !== 'boolean') return {state: 'unknown', text: 'Ollama status unavailable'};
+    if (!runtime.running) return {state: 'off', text: 'Ollama off'};
+    const active = this.controls(runtime, false).active;
+    return active.length ? {state: 'model', text: 'Model running — ' + active.join(', ')}
+      : {state: 'running', text: 'Ollama running'};
+  },
   percent(progress) {
     if (['Pull complete', 'Download complete', 'Already exists'].includes(progress.status)) return 100;
     const total = Number(progress.total), done = Number(progress.completed);

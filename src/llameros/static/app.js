@@ -57,8 +57,9 @@ function updateControls() {
   $('generate-form').querySelector('button').disabled = busy || !state.active.includes($('generate-model').value);
   $('storage-save').disabled = busy || !runtimeState || runtimeState.running || !!runtimeState.error;
   document.querySelectorAll('#installed button[data-action]').forEach(button => {
-    const active = state.active.includes(button.dataset.model);
-    button.disabled = busy || !runtimeState || !runtimeState.running || !!runtimeState.error || (button.dataset.action === 'load' ? active : !active);
+    const controls = JobProgress.modelControls(runtimeState, busy, button.dataset.model);
+    button.disabled = !controls[button.dataset.action];
+    button.title = button.dataset.action === 'load' && state.active.length ? 'Unload the running model before starting another.' : '';
   });
 }
 function progressBar(label, value) {
@@ -278,7 +279,8 @@ async function refresh() {
       ['GPU', hw.gpus.length ? hw.gpus.map(g => g.vendor).join(', ') : 'CPU mode', hw.gpus.map(g => `${g.name}: ${bytes(g.free)} free`).join(' · ') || 'No supported GPU detected'],
       ['RUNTIME', data.ollama.running ? 'Online' : 'Offline', `${data.gpu_mode} · ${data.context_length} context`],
     ]) { const card = element('div', '', 'metric'); card.append(element('small', label), element('strong', value), element('small', detail)); $('hardware').append(card); }
-    $('runtime').textContent = data.ollama.running ? 'RUNNING' : 'STOPPED';
+    const runtimeStatus = JobProgress.runtimeState(data.ollama);
+    $('runtime').textContent = runtimeStatus.text; $('runtime').dataset.state = runtimeStatus.state;
     const resource = data.ollama.resources;
     $('runtime-detail').textContent = data.ollama.error || (resource ? `Container CPU ${resource.CPUPerc} · memory ${resource.MemUsage} · network ${resource.NetIO}` : 'Start the managed container to download or run models.');
     const available = JobProgress.availability(data.ollama);
@@ -309,7 +311,9 @@ async function refresh() {
     });
     $('usage').replaceChildren();
     history.models.forEach(model => { const row = element('tr', ''); [model.model, model.requests, model.prompt_tokens, model.output_tokens, model.tokens_per_second.toFixed(1), model.seconds.toFixed(1)].forEach(value => row.append(element('td', value))); $('usage').append(row); });
-    $('events').replaceChildren(); history.events.slice(0, 20).forEach(event => $('events').append(element('div', `${new Date(event.timestamp * 1000).toLocaleString()} · ${event.kind} · ${event.model} ${event.detail}`, 'event')));
+    const eventScroll = $('events').scrollTop, eventHorizontal = $('events').scrollLeft;
+    $('events').replaceChildren(); history.events.forEach(event => $('events').append(element('div', `${new Date(event.timestamp * 1000).toLocaleString()} · ${event.kind} · ${event.model} ${event.detail}`, 'event')));
+    $('events').scrollTop = eventScroll; $('events').scrollLeft = eventHorizontal;
     updateControls();
     draw(history.samples);
   } finally { refreshing = false; }
