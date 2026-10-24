@@ -116,10 +116,9 @@ def test_cpu_and_two_gpu_models_coexist_with_stable_ports_and_routing(pool):
     again = Runtimes(cfg, lambda: hw)
     assert again.records == manager.records
     cpu = states[cfg.container_name]
-    assert (
-        next(call[2] for call in cpu["calls"] if call[0] == "POST")["options"]["num_thread"]
-        == HARDWARE["logical_cores"]
-    )
+    options = next(call[2] for call in cpu["calls"] if call[0] == "POST")["options"]
+    assert options["num_gpu"] == 0
+    assert "num_thread" not in options
     manager.stop()
     assert not manager.status()["running"]
 
@@ -175,6 +174,24 @@ def test_isolated_container_arguments_share_storage_but_not_devices(tmp_path, mo
     assert "--group-add" in amd
 
 
+@pytest.mark.parametrize("cpu_percent", [0, 75, 100])
+def test_cpu_load_ignores_utilization_without_reserving_all_threads(pool, cpu_percent):
+    manager, states, cfg, hw = pool
+    hw["cpu_percent"] = cpu_percent
+    slot = next(slot for slot in manager.status()["slots"] if slot["id"] == "cpu")
+    assert slot["available"]
+    assert slot["label"] == "CPU"
+    manager.load("one:latest", 300_000_000, "cpu", 4096, lambda value: None)
+    options = next(
+        body["options"]
+        for method, path, body in states[cfg.container_name]["calls"]
+        if method == "POST" and path == "/api/generate"
+    )
+    assert options == {"num_ctx": 4096, "num_gpu": 0}
+    with pytest.raises(ValueError, match="free"):
+        manager.load("two:latest", 300_000_000, "cpu", 4096, lambda value: None)
+
+
 def test_app_routes_inference_and_stop_to_selected_slot(pool):
     _, states, cfg, hw = pool
     app = create_app(
@@ -205,6 +222,18 @@ def test_app_routes_inference_and_stop_to_selected_slot(pool):
         assert wait_job(client)["state"] == "completed"
         loaded = client.get("/api/status").json()["ollama"]["loaded"]
         assert len(loaded) == 1 and loaded[0]["target"] == "cpu"
+        hw["cpu_percent"] = 100
+        client.post(
+            "/api/generate", json={"model": "one:latest", "target": "cpu", "prompt": "Hello CPU"}
+        )
+        assert wait_job(client)["state"] == "completed"
+        options = next(
+            body["options"]
+            for _, _, body in states[cfg.container_name]["calls"]
+            if body and body.get("prompt") == "Hello CPU"
+        )
+        assert options["num_gpu"] == 0
+        assert "num_thread" not in options
 
 
 def test_legacy_container_requires_explicit_recreation(tmp_path):

@@ -475,7 +475,7 @@ def create_app(
             )
             options = {"num_ctx": cfg.context_length, "num_predict": body.max_tokens}
             if runtimes and client.target["id"] == "cpu":
-                options.update(num_gpu=0, num_thread=hardware()["logical_cores"])
+                options.update(num_gpu=0)
             result = client.api(
                 "POST",
                 "/api/generate",

@@ -209,9 +209,9 @@ def test_model_info_and_maintainer_links(tmp_path):
     info = next(link for link in parser.links if link.get("id") == "model-info-source")
     assert info["text"] == "Open on Ollama"
     maintainer = next(
-        link for link in parser.links if link.get("href") == "https://www.keuper-labs.org/"
+        link for link in parser.links if link.get("href") == "https://www.llm-praxis.de/"
     )
-    assert maintainer["text"] == "maintained by Keuper Labs"
+    assert maintainer["text"] == "maintained by LLM-Praxis"
     for link in (info, maintainer):
         assert link["target"] == "_blank"
         assert {"noopener", "noreferrer"} <= set(link["rel"].split())

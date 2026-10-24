@@ -22,7 +22,7 @@ class Runtimes:
         self.refresh()
 
     def refresh(self):
-        targets = [{"id": "cpu", "label": "CPU · all cores", "vendor": "cpu", "supported": True}]
+        targets = [{"id": "cpu", "label": "CPU", "vendor": "cpu", "supported": True}]
         for index, gpu in enumerate(self.hardware()["gpus"]):
             identity = gpu.get("id", f"unidentified-{index}")
             vendor = gpu["vendor"]
@@ -173,7 +173,7 @@ class Runtimes:
             raise ValueError("Hardware slot already has a loaded model; unload it first")
         options = {"num_ctx": context}
         if target_id == "cpu":
-            options.update(num_gpu=0, num_thread=hw["logical_cores"])
+            options.update(num_gpu=0)
         result = client.api(
             "POST",
             "/api/generate",

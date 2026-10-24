@@ -155,6 +155,38 @@ def test_landing_page_branding_and_repository_link(client):
     assert 'href="https://github.com/keuperj/Llameros"' in footer
     assert 'rel="noopener noreferrer"' in footer
     assert "View on GitHub" in footer
+    assert 'href="https://www.llm-praxis.de/"' in footer
+    assert "maintained by LLM-Praxis" in footer
+    assert "keuper-labs.org" not in footer
+
+
+def test_footer_logos_are_small_public_local_images(client):
+    from html.parser import HTMLParser
+
+    class Images(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.images = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "img":
+                self.images.append(dict(attrs))
+
+    footer = client.get("/").text.split("<footer>", 1)[1].split("</footer>", 1)[0]
+    parser = Images()
+    parser.feed(footer)
+    assert [image["src"] for image in parser.images] == [
+        "/static/bmftr.png",
+        "/static/forschung-an-haw.png",
+    ]
+    for image in parser.images:
+        assert image["alt"]
+        assert int(image["height"]) <= 40
+        assert int(image["width"]) <= 80
+        response = client.get(image["src"])
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_logo_is_public_svg_and_shared_with_readme(client):

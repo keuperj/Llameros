@@ -22,10 +22,12 @@ position.
 ### Per-device runtimes
 
 Select a free device above the downloaded-models list before pressing Load/start.
-There is one CPU slot (all logical cores), plus one slot per safely identifiable
+There is one CPU slot (Ollama chooses its thread count), plus one slot per safely identifiable
 NVIDIA GPU UUID or AMD render device. Intel/unidentified GPUs are shown but cannot
 be selected. Hardware cards show assigned models, free VRAM and utilization when
 available. “Free” means unassigned by Llameros, not exclusive of other programs.
+CPU utilization does not restrict loading: one CPU model can run alongside other
+CPU workloads, provided it fits available RAM. CPU cores are not reserved.
 Each running-model row includes a **■ Stop model** button on its right; it unloads
 that model without stopping other models or the Ollama services.
 
@@ -159,7 +161,7 @@ are not supported by this streaming download path.
    without relying on GPU memory. The same filter applies to recommendations.
    Unknown/oversized variants are hidden while checked; clear it to inspect them.
    This is a discovery filter, not a change to the configured execution mode:
-   select **CPU · all cores** when loading to run without GPU devices.
+   select **CPU** when loading to run without GPU devices.
    Small local models are not a separate CPU-only model category. Changing the
    checkbox or submitting search refreshes memory estimates.
    Catalogue badges use rounded download sizes with rounding headroom and the
