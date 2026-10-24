@@ -5,6 +5,62 @@ let storageInitialized = false;
 let catalogueVersion = 0, familyVersion = 0, catalogueEntries = [];
 let loadedCatalogueQuery = '';
 let busy = false, jobTimer = null, pollingJob = false;
+let runtimeState = null, infoVersion = 0;
+let accessConfig = null, accessContext = 4096;
+function renderAccessExample() {
+  const model = $('access-active-model').value;
+  const active = JobProgress.controls(runtimeState, false).active;
+  const example = active.includes(model) && accessConfig
+    ? ModelAccess.example($('access-framework').value, model, accessConfig.base_url, accessContext) : null;
+  for (const [id, value] of [['access-install', example ? example.install : ''], ['access-code', example ? example.code : '']]) {
+    if ($(id).value !== value) $(id).value = value;
+  }
+  document.querySelectorAll('#access-model [data-copy]').forEach(button => { button.disabled = !$(button.dataset.copy).value; });
+}
+function renderAccess() {
+  $('access-url').value = accessConfig ? accessConfig.base_url : '';
+  $('access-openai-url').value = accessConfig ? accessConfig.openai_url : '';
+  const active = JobProgress.controls(runtimeState, false).active;
+  const select = $('access-active-model'), previous = select.value;
+  // Preserve selection/focus and code selection across five-second refreshes.
+  if (JSON.stringify([...select.options].map(option => option.value).filter(Boolean)) !== JSON.stringify(active)) {
+    options(select, active, active.length ? null : 'Load a model first');
+    if (active.includes(previous)) select.value = previous;
+  }
+  select.disabled = !active.length;
+  $('access-state').textContent = runtimeState && runtimeState.running && !runtimeState.error
+    ? (active.length ? 'Select an active model and copy an example below.' : 'Ollama is running. Load a downloaded model to see its example.')
+    : 'Ollama is stopped or unavailable. Start Ollama and load a model to use the API.';
+  renderAccessExample();
+}
+$('access-active-model').addEventListener('change', () => { $('access-feedback').textContent = ''; renderAccessExample(); });
+$('access-framework').addEventListener('change', () => { $('access-feedback').textContent = ''; renderAccessExample(); });
+document.querySelectorAll('#access-model [data-copy]').forEach(button => {
+  button.addEventListener('click', async () => {
+    const field = $(button.dataset.copy);
+    if (!field.value) return;
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(field.value);
+      $('access-feedback').textContent = 'Copied to clipboard.';
+    } catch (error) {
+      field.focus(); field.select();
+      $('access-feedback').textContent = 'Clipboard access unavailable. Text selected: press Ctrl+C (or Command+C) to copy.';
+    }
+  });
+});
+function updateControls() {
+  const state = JobProgress.controls(runtimeState, busy);
+  $('container-start').disabled = !state.start;
+  $('container-stop').disabled = !state.stop;
+  $('generate-model').disabled = busy || !state.active.length;
+  $('generate-form').querySelector('button').disabled = busy || !state.active.includes($('generate-model').value);
+  $('storage-save').disabled = busy || !runtimeState || runtimeState.running || !!runtimeState.error;
+  document.querySelectorAll('#installed button[data-action]').forEach(button => {
+    const active = state.active.includes(button.dataset.model);
+    button.disabled = busy || !runtimeState || !runtimeState.running || !!runtimeState.error || (button.dataset.action === 'load' ? active : !active);
+  });
+}
 function progressBar(label, value) {
   const wrapper = element('div', '', 'progress-row');
   wrapper.append(element('div', label));
@@ -26,15 +82,14 @@ function renderJob(job) {
       $('job').append(progressBar(`${id.slice(0, 20)} · ${layer.status || 'Downloading'}${percent === null ? '' : ' · ' + percent.toFixed(0) + '% · ' + bytes(layer.completed) + ' / ' + bytes(layer.total)}`, percent));
     }
   }
-  $('container-start').disabled = busy;
-  $('container-stop').disabled = busy;
+  updateControls();
   $('pull').disabled = busy || !selectedFit || !selectedFit.fits;
   if (busy) document.querySelectorAll('#installed button, #generate-form button, #storage-save').forEach(button => { button.disabled = true; });
 }
 async function pollJob() {
   if (!csrf || pollingJob) return;
   pollingJob = true;
-  try { const job = await api('/api/job'); if (csrf) renderJob(job); } catch (error) { notice(error.message); }
+  try { const job = await api('/api/job'); if (csrf) { const finished = busy && job.state !== 'running'; renderJob(job); if (finished) await refresh(); } } catch (error) { notice(error.message); }
   finally { pollingJob = false; }
 }
 const cpuOnly = () => $('cpu-only').checked;
@@ -60,10 +115,31 @@ function options(select, values, placeholder) {
 function updateModelInfo() {
   const link = $('model-info');
   const url = Catalogue.modelInfoUrl($('tags').value || $('families').value);
-  if (url) { link.href = url; link.removeAttribute('aria-disabled'); link.removeAttribute('tabindex'); }
-  else { link.removeAttribute('href'); link.setAttribute('aria-disabled', 'true'); link.setAttribute('tabindex', '-1'); }
+  link.disabled = !url;
 }
-function signedOut() { csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function closeModelInfo(restore = true) {
+  infoVersion++; $('model-info-overlay').hidden = true;
+  if (restore) $('model-info').focus();
+}
+$('model-info').addEventListener('click', safe(async () => {
+  const model = $('tags').value || $('families').value, url = Catalogue.modelInfoUrl(model);
+  if (!url) return;
+  const version = ++infoVersion;
+  $('model-info-overlay').hidden = false;
+  $('model-info-title').textContent = model;
+  $('model-info-content').textContent = 'Loading model description…';
+  $('model-info-source').href = url;
+  $('model-info-close').focus();
+  try {
+    const data = await api('/api/model-info?model=' + encodeURIComponent(model));
+    if (version === infoVersion && csrf) $('model-info-content').textContent = data.description;
+  } catch (error) { if (version === infoVersion) $('model-info-content').textContent = 'Could not load model description: ' + error.message; }
+}));
+$('model-info-close').addEventListener('click', () => closeModelInfo());
+$('model-info-overlay').addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeModelInfo(); } });
+$('generate-model').addEventListener('change', updateControls);
+$('image-availability').addEventListener('click', safe(refresh));
+function signedOut() { closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess(); $('access-model').open = false; $('access-feedback').textContent = ''; csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
@@ -192,6 +268,8 @@ async function refresh() {
     const storage = inventory.storage;
     $('storage-current').textContent = `Active location: ${storage.location} (${storage.mode === 'directory' ? 'host directory' : 'Docker volume'})`;
     if (!storageInitialized) { $('storage-directory').value = storage.directory; $('storage-directory').placeholder = `Empty = Docker volume; example: ${storage.suggested_directory}`; storageInitialized = true; }
+    runtimeState = data.ollama;
+    accessConfig = data.access; accessContext = data.context_length; renderAccess();
     const hw = data.hardware;
     $('hardware').replaceChildren();
     for (const [label, value, detail] of [
@@ -218,20 +296,21 @@ async function refresh() {
     const models = inventory.models || [], loaded = data.ollama.loaded || [];
     $('model-count').textContent = models.length;
     $('inventory-detail').textContent = `${inventory.source === 'live' ? 'Live Ollama inventory' : inventory.source === 'disk' ? 'Read from model directory; blob sizes checked (not checksums)' : inventory.source === 'cache' ? 'Last known inventory from ' + new Date(inventory.cached_at * 1000).toLocaleString() + ' — start Ollama to refresh' : 'Inventory unavailable until Ollama starts'}. ${(inventory.warnings || []).join(' ')}`;
-    const current = $('generate-model').value; options($('generate-model'), models.map(m => m.name)); if (models.some(m => m.name === current)) $('generate-model').value = current;
-    $('generate-form').querySelector('button').disabled = !data.ollama.running || !models.length || job.state === 'running';
+    const activeNames = JobProgress.controls(runtimeState, busy).active;
+    const current = $('generate-model').value; options($('generate-model'), activeNames, activeNames.length ? null : 'Load a model first'); if (activeNames.includes(current)) $('generate-model').value = current;
     $('installed').replaceChildren();
     if (!models.length) $('installed').append(element('p', ['unknown', 'unavailable'].includes(inventory.source) ? 'No inventory available. Start Ollama to check this storage location.' : 'No downloaded models found in the selected storage location.'));
     models.forEach(model => {
       const row = element('div', '', 'model'), active = loaded.some(m => m.name === model.name);
       row.append(element('strong', model.name), element('small', `${bytes(model.size)}${active ? ' · loaded' : ' · downloaded'}${model.modified_at ? ' · ' + new Date(model.modified_at).toLocaleDateString() : ''}`));
       const actions = element('div', '', 'actions');
-      for (const action of ['load', 'unload']) { const button = element('button', action === 'load' ? 'Load / start' : 'Unload / stop'); button.disabled = job.state === 'running' || !data.ollama.running; button.addEventListener('click', safe(async () => { await api('/api/models/' + action, {model: model.name}); await refresh(); })); actions.append(button); }
+      for (const action of ['load', 'unload']) { const button = element('button', action === 'load' ? 'Load / start' : 'Unload / stop'); button.dataset.action = action; button.dataset.model = model.name; button.addEventListener('click', safe(async () => { await api('/api/models/' + action, {model: model.name}); await refresh(); })); actions.append(button); }
       row.append(actions); $('installed').append(row);
     });
     $('usage').replaceChildren();
     history.models.forEach(model => { const row = element('tr', ''); [model.model, model.requests, model.prompt_tokens, model.output_tokens, model.tokens_per_second.toFixed(1), model.seconds.toFixed(1)].forEach(value => row.append(element('td', value))); $('usage').append(row); });
     $('events').replaceChildren(); history.events.slice(0, 20).forEach(event => $('events').append(element('div', `${new Date(event.timestamp * 1000).toLocaleString()} · ${event.kind} · ${event.model} ${event.detail}`, 'event')));
+    updateControls();
     draw(history.samples);
   } finally { refreshing = false; }
 }

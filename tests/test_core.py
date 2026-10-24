@@ -33,12 +33,13 @@ class FakeDocker:
     def __init__(self):
         self.running = False
         self.calls = []
+        self.loaded = []
 
     def status(self):
         return {
             "running": self.running,
             "models": [{"name": "gemma3:270m", "size": 300_000_000}],
-            "loaded": [],
+            "loaded": self.loaded if self.running else [],
         }
 
     def storage_info(self):
@@ -70,6 +71,7 @@ class FakeDocker:
 
     def stop(self):
         self.running = False
+        self.loaded = []
 
     def ensure_running(self):
         if not self.running:
@@ -84,7 +86,9 @@ class FakeDocker:
         if path == "/api/tags":
             return {"models": self.status()["models"]}
         if path == "/api/ps":
-            return {"models": []}
+            return {"models": self.loaded}
+        if path == "/api/generate" and not body.get("prompt"):
+            self.loaded = [] if body.get("keep_alive") == 0 else [{"name": body["model"]}]
         return {
             "model": body["model"],
             "response": "Hello",
@@ -234,7 +238,7 @@ def test_lifecycle_generation_and_history(client):
     assert wait_job(client)["state"] == "completed"
     assert client.post("/api/models/pull", json={"model": "gemma3:270m"}).status_code == 202
     assert wait_job(client)["state"] == "completed"
-    for action in ("load", "unload"):
+    for action in ("load", "unload", "load"):
         assert (
             client.post(f"/api/models/{action}", json={"model": "gemma3:270m"}).status_code == 202
         )

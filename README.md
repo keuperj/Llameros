@@ -4,6 +4,31 @@
 
 # Llameros
 
+### Dashboard controls
+
+The **Ollama runtime → Access model** dropdown shows the configured loopback API
+base URL and OpenAI-compatible `/v1` base URL. Select a loaded model and choose
+Ollama Python, OpenAI-compatible Python, LangChain, or LlamaIndex for copyable
+install commands and Python examples. Copy buttons fall back to selecting text
+for manual copying if clipboard access is denied. No additional client libraries
+are installed by Llameros; install the chosen client in your own environment.
+Examples require a text-generation/chat-capable model and run on the Llameros
+host, not a remote browser's computer or an ordinary bridged container. The local
+HTTP API has no authentication and direct requests bypass dashboard job locking,
+memory-fit guards, and token usage statistics. Do not expose this port publicly.
+
+Container start/stop and model load/unload controls are enabled only for the
+opposite known state, and remain disabled during background jobs. The backend
+also rejects redundant transitions. The inference playground lists only active
+(loaded) models; load a downloaded model before generating a response.
+
+The button-shaped container availability indicator refreshes status when clicked.
+Model info opens a closable panel over the downloaded-models card, showing the
+selected family or tag's public Ollama README as plain text. External scripts,
+HTML, images, and editor forms are not embedded. An **Open on Ollama** link is
+available for the original formatting. Description fetching requires internet
+access; fetching failures are shown inside the panel.
+
 A Python, local-first web interface for Ollama on Linux. Manage a dedicated Ollama
 Docker container, discover models, estimate hardware compatibility, and inspect
 current and historic usage. No Node.js build, cloud account, or external UI assets.

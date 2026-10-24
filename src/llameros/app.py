@@ -257,6 +257,7 @@ def create_app(
             "user": current_user(),
             "gpu_mode": cfg.gpu,
             "context_length": cfg.context_length,
+            "access": {"base_url": cfg.ollama_url, "openai_url": cfg.ollama_url + "/v1"},
         }
 
     @app.get("/api/catalog", dependencies=protected)
@@ -266,6 +267,10 @@ def create_app(
     @app.get("/api/catalog/{family}/tags", dependencies=protected)
     def tags(family: str):
         return {"tags": catalog.tags(family)}
+
+    @app.get("/api/model-info", dependencies=protected)
+    def model_info(model: str):
+        return catalog.description(validate_model(model))
 
     @app.get("/api/catalog/{family}/compatibility", dependencies=protected)
     def compatibility(family: str, cpu_only: bool = False):
@@ -352,6 +357,11 @@ def create_app(
             raise HTTPException(404, "Unknown container action")
 
         def work(progress):
+            running = docker.status()["running"]
+            if running == (action == "start"):
+                raise ValueError(
+                    "Ollama is already running" if running else "Ollama is already stopped"
+                )
             if action == "start":
                 return docker.start(progress=progress)
             progress({"status": "Stopping Ollama container (up to 20 seconds grace period)"})
@@ -375,6 +385,13 @@ def create_app(
                 "Insufficient currently available memory for the conservative fit estimate"
             )
 
+    def is_loaded(name: str) -> bool:
+        normalized = name if ":" in name else name + ":latest"
+        return any(
+            model.get("name", model.get("model")) == normalized
+            for model in docker.api("GET", "/api/ps").get("models", [])
+        )
+
     @app.post("/api/models/{action}", dependencies=protected, status_code=202)
     def model_action(action: str, body: ModelRequest):
         name = validate_model(body.model)
@@ -388,6 +405,11 @@ def create_app(
                 docker.pull(name, progress)
                 return {"message": "Model downloaded"}
             info = installed(name)
+            active = is_loaded(name)
+            if active == (action == "load"):
+                raise ValueError(
+                    "Model is already loaded" if active else "Model is already unloaded"
+                )
             if action == "load":
                 check_fit(info["size"])
             progress(
@@ -415,12 +437,9 @@ def create_app(
         name = validate_model(body.model)
 
         def work(progress):
-            info = installed(name)
-            # Loaded weights already occupy RAM; do not double-count them.
-            loaded = docker.api("GET", "/api/ps").get("models", [])
-            normalized = name if ":" in name else name + ":latest"
-            if not any(model.get("name") == normalized for model in loaded):
-                check_fit(info["size"])
+            installed(name)
+            if not is_loaded(name):
+                raise ValueError("Load the model before using the inference playground")
             progress(
                 {
                     "status": "Generating response; duration and token counts will be available on completion"

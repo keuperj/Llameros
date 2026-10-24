@@ -1,5 +1,10 @@
 'use strict';
 const JobProgress = {
+  controls(runtime, busy) {
+    const known = !!runtime && !runtime.error && typeof runtime.running === 'boolean';
+    return {start: !busy && known && !runtime.running, stop: !busy && known && runtime.running,
+      active: known && runtime.running ? (runtime.loaded || []).map(model => model.name || model.model) : []};
+  },
   percent(progress) {
     if (['Pull complete', 'Download complete', 'Already exists'].includes(progress.status)) return 100;
     const total = Number(progress.total), done = Number(progress.completed);

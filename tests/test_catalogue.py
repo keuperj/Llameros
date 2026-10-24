@@ -206,9 +206,8 @@ def test_model_info_and_maintainer_links(tmp_path):
     with TestClient(app, base_url="https://testserver") as client:
         parser = LinkParser()
         parser.feed(client.get("/").text)
-    info = next(link for link in parser.links if link.get("id") == "model-info")
-    assert info["text"] == "Model info"
-    assert info["aria-disabled"] == "true" and "href" not in info
+    info = next(link for link in parser.links if link.get("id") == "model-info-source")
+    assert info["text"] == "Open on Ollama"
     maintainer = next(
         link for link in parser.links if link.get("href") == "https://www.keuper-labs.org/"
     )
@@ -218,3 +217,33 @@ def test_model_info_and_maintainer_links(tmp_path):
         assert {"noopener", "noreferrer"} <= set(link["rel"].split())
     github = next(link for link in parser.links if "github.com" in link.get("href", ""))
     assert parser.links.index(maintainer) == parser.links.index(github) + 1
+
+
+def test_model_description_text_extraction_and_api(tmp_path):
+    from llameros.catalog import Description
+
+    html = '<meta name="description" content="Summary"><div id="readme"><h2>About</h2><p>Useful model</p><script>evil()</script><form>Private editor<textarea>draft</textarea></form><p>Usage</p></div><footer>Unrelated</footer>'
+    parser = Description()
+    parser.feed(html)
+    text = "".join(parser.content)
+    assert "Useful model" in text and "Usage" in text
+    assert not any(word in text for word in ["evil", "Private", "draft", "Unrelated"])
+    catalog = Catalog()
+    catalog._get = lambda url: html
+    app = create_app(
+        Settings(state_dir=tmp_path),
+        docker=FakeDocker(),
+        catalog=catalog,
+        authenticator=lambda *args: True,
+        sampling=False,
+    )
+    with TestClient(
+        app, base_url="https://testserver", headers={"Origin": "https://testserver"}
+    ) as client:
+        assert client.get("/api/model-info?model=gemma3").status_code == 401
+        sign_in(client)
+        data = client.get("/api/model-info?model=gemma3:270m").json()
+        assert "Useful model" in data["description"]
+        assert "<script>" not in data["description"]
+        assert data["url"] == "https://ollama.com/library/gemma3:270m"
+        assert client.get("/api/model-info?model=../escape").status_code == 400

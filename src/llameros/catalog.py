@@ -88,6 +88,20 @@ class Catalog:
         # upstream order and keep the existing official-library-only boundary.
         return [name for name in parser.names if ":" not in name]
 
+    def description(self, name: str) -> dict:
+        validate_model(name)
+        url = f"https://ollama.com/library/{name}"
+        parser = Description()
+        parser.feed(self._get(url))
+        return {
+            "model": name,
+            "url": url,
+            "summary": parser.summary,
+            "description": re.sub(r"\n[ \t\n]*\n", "\n\n", "".join(parser.content)).strip()[:100000]
+            or parser.summary
+            or "No model description is available.",
+        }
+
     def tags(self, family: str) -> list[str]:
         validate_model(family)
         if ":" in family:
@@ -132,3 +146,62 @@ class Catalog:
                 }
             )
         return sorted(variants, key=lambda item: {True: 0, False: 1, None: 2}[item["fits"]])
+
+
+class Description(HTMLParser):
+    """Extract readable README text only, never forward external HTML/scripts."""
+
+    def __init__(self):
+        super().__init__()
+        self.summary = ""
+        self.content: list[str] = []
+        self.stack: list[str] = []
+        self.hidden = 0
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "meta" and attrs.get("name") == "description":
+            self.summary = attrs.get("content", "")
+        if attrs.get("id") == "readme" and not self.stack:
+            self.stack.append(tag)
+        elif self.stack and tag not in {
+            "br",
+            "hr",
+            "img",
+            "input",
+            "meta",
+            "link",
+            "source",
+            "wbr",
+        }:
+            self.stack.append(tag)
+        if self.stack:
+            if tag in {"script", "style", "form", "textarea"}:
+                self.hidden += 1
+            if not self.hidden and tag in {
+                "p",
+                "div",
+                "br",
+                "li",
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "pre",
+                "tr",
+            }:
+                self.content.append("\n")
+
+    def handle_endtag(self, tag):
+        if not self.stack or tag not in self.stack:
+            return
+        if tag in {"script", "style", "form", "textarea"}:
+            self.hidden = max(0, self.hidden - 1)
+        if not self.hidden and tag in {"p", "div", "li", "h1", "h2", "h3", "h4", "pre", "tr"}:
+            self.content.append("\n")
+        index = len(self.stack) - 1 - self.stack[::-1].index(tag)
+        self.stack = self.stack[:index]
+
+    def handle_data(self, data):
+        if self.stack and not self.hidden:
+            self.content.append(data)
