@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Llameros · Local model caravan</title>
   <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css"><script src="/static/catalogue.js" defer></script><script src="/static/app.js" defer></script>
+  <link rel="stylesheet" href="/static/style.css"><script src="/static/catalogue.js" defer></script><script src="/static/progress.js" defer></script><script src="/static/app.js" defer></script>
 </head>
 <body>
   <header><div class="brand"><img class="brand-logo" src="/static/logo.svg" alt="Llameros llama and circuit saddle logo" width="72" height="72"><div><span class="eyebrow">YOUR LOCAL MODEL CARAVAN</span><h1>Llameros<span>●</span></h1></div></div><div id="identity"></div><button id="logout" hidden>Sign out</button></header>
@@ -16,7 +16,7 @@
       <form id="login-form"><label>Linux username<input id="username" autocomplete="username" required></label><label>Password<input id="password" type="password" autocomplete="current-password" required></label><button class="primary">Sign in securely</button></form>
     </section>
     <div id="dashboard" hidden>
-      <section class="intro"><div><span class="eyebrow">HOST OVERVIEW</span><h2>Local intelligence.<br>Under your control.</h2></div><div class="actions"><button id="container-start" class="primary">Start Ollama</button><button id="container-stop">Stop Ollama</button><button id="refresh">Refresh</button></div></section>
+      <section class="intro"><div><span class="eyebrow">HOST OVERVIEW</span><h2>Local intelligence.<br>Under your control.</h2></div><div class="actions"><button id="container-start" class="primary">Start Ollama</button><span id="image-availability" class="availability" role="status">Checking local availability…</span><button id="container-stop">Stop Ollama</button><button id="refresh">Refresh</button></div></section>
       <div id="hardware" class="metrics"></div>
       <section class="card"><div class="section-head"><h3>Ollama runtime</h3><span id="runtime" class="badge"></span></div><p id="runtime-detail"></p><div id="job" role="status"></div></section>
       <details id="config-menu" class="card config-menu"><summary>Configuration</summary><div class="config-content"><h3>Model storage</h3><p id="storage-current"></p><p>Choose a dedicated Ollama models directory (containing blobs and manifests), or leave the path empty to use the Docker-managed volume. Stop Ollama first. Switching locations does not copy, move, or delete existing models.</p><form id="storage-form"><label>Host models directory<input id="storage-directory" placeholder="Empty = Docker-managed volume" maxlength="4096"></label><label><input id="storage-confirm" type="checkbox" required> I understand that existing models stay in their original location and the stopped container will be recreated on next start.</label><button id="storage-save">Save storage location</button></form><p id="storage-feedback" role="status"></p></div></details>

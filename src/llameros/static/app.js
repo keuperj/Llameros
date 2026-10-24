@@ -4,6 +4,39 @@ let csrf = '', timer = null, lastResult = '', selectedFit = null, fitVersion = 0
 let storageInitialized = false;
 let catalogueVersion = 0, familyVersion = 0, catalogueEntries = [];
 let loadedCatalogueQuery = '';
+let busy = false, jobTimer = null, pollingJob = false;
+function progressBar(label, value) {
+  const wrapper = element('div', '', 'progress-row');
+  wrapper.append(element('div', label));
+  const bar = document.createElement('progress'); bar.max = 100; bar.setAttribute('aria-label', label);
+  if (value !== null) bar.value = value;
+  wrapper.append(bar); return wrapper;
+}
+function renderJob(job) {
+  busy = job.state === 'running';
+  $('job').replaceChildren();
+  if (job.state !== 'idle') {
+    const p = job.progress || {}, value = job.state === 'completed' ? 100 : JobProgress.percent(p);
+    const elapsed = Math.max(0, Math.round((job.finished || Date.now() / 1000) - job.started));
+    $('job').append(element('strong', `${job.action} · ${job.state}${job.model ? ' · ' + job.model : ''} · ${elapsed}s`));
+    if (job.state === 'failed') $('job').append(element('p', job.error || 'Operation failed'));
+    else $('job').append(progressBar(`${p.status || 'Working…'}${value !== null ? ' · ' + value.toFixed(0) + '%' : ' · progress percentage unavailable'}`, value));
+    if (busy) for (const layer of p.layers || []) {
+      const percent = JobProgress.percent(layer), id = layer.id || layer.digest || '';
+      $('job').append(progressBar(`${id.slice(0, 20)} · ${layer.status || 'Downloading'}${percent === null ? '' : ' · ' + percent.toFixed(0) + '% · ' + bytes(layer.completed) + ' / ' + bytes(layer.total)}`, percent));
+    }
+  }
+  $('container-start').disabled = busy;
+  $('container-stop').disabled = busy;
+  $('pull').disabled = busy || !selectedFit || !selectedFit.fits;
+  if (busy) document.querySelectorAll('#installed button, #generate-form button, #storage-save').forEach(button => { button.disabled = true; });
+}
+async function pollJob() {
+  if (!csrf || pollingJob) return;
+  pollingJob = true;
+  try { const job = await api('/api/job'); if (csrf) renderJob(job); } catch (error) { notice(error.message); }
+  finally { pollingJob = false; }
+}
 const cpuOnly = () => $('cpu-only').checked;
 const bytes = n => n == null ? 'unknown' : `${(n / 1073741824).toFixed(1)} GiB`;
 function notice(message = '') { $('notice').textContent = message; }
@@ -30,11 +63,11 @@ function updateModelInfo() {
   if (url) { link.href = url; link.removeAttribute('aria-disabled'); link.removeAttribute('tabindex'); }
   else { link.removeAttribute('href'); link.setAttribute('aria-disabled', 'true'); link.setAttribute('tabindex', '-1'); }
 }
-function signedOut() { csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function signedOut() { csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
-  clearInterval(timer); timer = setInterval(safe(refresh), 5000);
+  clearInterval(timer); timer = setInterval(safe(refresh), 5000); clearInterval(jobTimer); jobTimer = setInterval(pollJob, 1000);
   await refresh(); await catalogue();
 }
 $('login-form').addEventListener('submit', safe(async () => {
@@ -140,7 +173,7 @@ async function checkSelectedFit() {
   if (!model) return; $('fit').textContent = 'Checking registry and available memory…';
   const data = await api('/api/fit?model=' + encodeURIComponent(model) + '&cpu_only=' + cpuOnly());
   if (version !== fitVersion) return;
-  selectedFit = data; $('pull').disabled = !data.fits;
+  selectedFit = data; $('pull').disabled = busy || !data.fits;
   $('fit').textContent = `${data.fits ? '✓ Estimated to fit' : '✕ Insufficient memory'} · ${bytes(data.download_bytes)} download · ${bytes(data.estimated_memory)} estimated runtime · ${data.placement}. ${data.note}`;
 }
 $('tags').addEventListener('change', safe(checkSelectedFit));
@@ -170,10 +203,12 @@ async function refresh() {
     $('runtime').textContent = data.ollama.running ? 'RUNNING' : 'STOPPED';
     const resource = data.ollama.resources;
     $('runtime-detail').textContent = data.ollama.error || (resource ? `Container CPU ${resource.CPUPerc} · memory ${resource.MemUsage} · network ${resource.NetIO}` : 'Start the managed container to download or run models.');
+    const available = JobProgress.availability(data.ollama);
+    $('image-availability').textContent = available.text; $('image-availability').title = available.detail; $('image-availability').dataset.state = available.state;
     const job = data.job;
     $('storage-save').disabled = data.ollama.running || job.state === 'running';
     if (job.action === 'storage-change' && job.state !== 'running') $('storage-feedback').textContent = job.state === 'completed' ? 'Storage location saved. Start Ollama to use it. Existing models have not been moved or deleted.' : job.error;
-    $('job').textContent = job.state === 'idle' ? '' : `${job.action}: ${job.state}${job.model ? ' · ' + job.model : ''}${job.progress ? ' · ' + JSON.stringify(job.progress) : ''}${job.error ? ' · ' + job.error : ''}`;
+    renderJob(job);
     const resultKey = job.started + ':' + job.state;
     if (job.action === 'generate' && job.state === 'completed' && resultKey !== lastResult) {
       lastResult = resultKey; const r = job.result;

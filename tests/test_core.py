@@ -64,7 +64,8 @@ class FakeDocker:
             raise DockerError("Stop Ollama first")
         return {"directory": directory}
 
-    def start(self):
+    def start(self, progress=lambda value: None):
+        progress({"status": "Starting test container"})
         self.running = True
 
     def stop(self):
@@ -324,7 +325,7 @@ def test_docker_arguments_and_gpu_modes(tmp_path):
 
 def test_rootful_guard_and_remote_daemon(tmp_path, monkeypatch):
     monkeypatch.delenv("DOCKER_HOST", raising=False)
-    docker = Docker(Settings(state_dir=tmp_path))
+    docker = Docker(Settings(state_dir=tmp_path, allow_rootful_docker=False))
     docker.command = lambda *args, **kwargs: (
         "unix:///var/run/docker.sock" if args[0] == "context" else '["name=seccomp"]'
     )

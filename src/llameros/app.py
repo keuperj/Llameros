@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import logging
 import secrets
 import threading
@@ -53,7 +54,7 @@ class Jobs:
 
     def status(self):
         with self.lock:
-            return dict(self.job)
+            return copy.deepcopy(self.job)
 
     def submit(self, action, model, function):
         with self.lock:
@@ -64,10 +65,23 @@ class Jobs:
                 "action": action,
                 "model": model,
                 "started": time.time(),
+                "progress": {"status": "Preparing operation"},
             }
 
         def progress(value):
             with self.lock:
+                value = dict(value)
+                layer_id = value.get("id") or value.get("digest")
+                if layer_id:
+                    layers = self.job.setdefault("layers", {})
+                    phase = value.get("phase", "model-download")
+                    key = f"{phase}:{layer_id}:{'extract' if 'extract' in value.get('status', '').lower() else 'download'}"
+                    previous = layers.get(key, {})
+                    layers[key] = {
+                        **previous,
+                        **{name: item for name, item in value.items() if item is not None},
+                    }
+                    value["layers"] = list(layers.values())
                 self.job["progress"] = value
 
         def work():
@@ -76,11 +90,16 @@ class Jobs:
                 result = function(progress)
                 self.store.event(f"{action}:completed", model)
                 with self.lock:
-                    self.job.update(state="completed", result=result)
+                    self.job.update(
+                        state="completed",
+                        result=result,
+                        finished=time.time(),
+                        progress={"status": "Completed", "completed": 1, "total": 1},
+                    )
             except Exception as exc:
                 log.warning("Job %s failed: %s", action, exc)
                 with self.lock:
-                    self.job.update(state="failed", error=str(exc)[:2000])
+                    self.job.update(state="failed", error=str(exc)[:2000], finished=time.time())
                 self.store.event(f"{action}:failed", model, str(exc)[:2000])
 
         self.pool.submit(work)
@@ -284,10 +303,14 @@ def create_app(
 
     @app.post("/api/storage", dependencies=protected, status_code=202)
     def configure_storage(body: StorageRequest):
+        def work(progress):
+            progress({"status": "Validating storage directory and reconfiguring stopped container"})
+            return docker.configure_storage(body.directory, body.confirmed)
+
         return jobs.submit(
             "storage-change",
             "",
-            lambda progress: docker.configure_storage(body.directory, body.confirmed),
+            work,
         )
 
     @app.get("/api/models", dependencies=protected)
@@ -327,7 +350,14 @@ def create_app(
     def container(action: str):
         if action not in {"start", "stop"}:
             raise HTTPException(404, "Unknown container action")
-        return jobs.submit(f"container-{action}", "", lambda progress: getattr(docker, action)())
+
+        def work(progress):
+            if action == "start":
+                return docker.start(progress=progress)
+            progress({"status": "Stopping Ollama container (up to 20 seconds grace period)"})
+            return docker.stop()
+
+        return jobs.submit(f"container-{action}", "", work)
 
     def installed(name: str) -> dict:
         validate_model(name)
@@ -353,12 +383,20 @@ def create_app(
 
         def work(progress):
             if action == "pull":
+                progress({"status": "Checking model registry and available memory"})
                 check_fit(catalog.size(name))
                 docker.pull(name, progress)
                 return {"message": "Model downloaded"}
             info = installed(name)
             if action == "load":
                 check_fit(info["size"])
+            progress(
+                {
+                    "status": "Loading model into memory"
+                    if action == "load"
+                    else "Unloading model from memory"
+                }
+            )
             return docker.api(
                 "POST",
                 "/api/generate",
@@ -383,6 +421,11 @@ def create_app(
             normalized = name if ":" in name else name + ":latest"
             if not any(model.get("name") == normalized for model in loaded):
                 check_fit(info["size"])
+            progress(
+                {
+                    "status": "Generating response; duration and token counts will be available on completion"
+                }
+            )
             result = docker.api(
                 "POST",
                 "/api/generate",

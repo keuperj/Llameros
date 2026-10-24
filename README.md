@@ -46,6 +46,22 @@ run `llameros`. The committed `uv.lock` pins the tested dependency set.
 
 ## Features and workflow
 
+The indicator beside **Start Ollama** distinguishes an existing local container,
+a cached Docker image, an image that needs downloading, and unknown availability
+(for example, an inaccessible daemon). Existing containers can start even if the
+configured image tag is no longer cached. No image is pulled just to check status.
+
+Every lifecycle/inference job shows a progress bar, stage, elapsed time, and
+completion/failure status. Docker image pulls show real per-layer download and
+extraction counters via the local daemon API; Ollama model pulls show blob byte
+progress. Percentages apply to the current layer/stage, **not** the entire startup
+operation. Loading, stopping, storage changes, readiness checks, and inference
+use indeterminate bars because those operations do not expose a reliable percent.
+Job progress refreshes independently every second; runtime availability refreshes
+with the main dashboard. Conflicting lifecycle buttons are disabled while busy.
+Docker pulls use anonymous public-image access; private authenticated registries
+are not supported by this streaming download path.
+
 1. Inspect CPU cores/utilization, available RAM, and detected GPU VRAM. NVIDIA
    uses `nvidia-smi`; AMD/Intel inspection falls back to Linux DRM sysfs where
    available. Missing telemetry is shown as unknown rather than invented.

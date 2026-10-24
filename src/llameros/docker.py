@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import time
 
@@ -25,6 +26,80 @@ class Docker:
 
     def inventory(self) -> dict:
         return self.storage.inventory()
+
+    @property
+    def image(self) -> str:
+        cfg = self.settings
+        return (
+            "ollama/ollama:rocm"
+            if cfg.gpu == "amd" and cfg.ollama_image == "ollama/ollama:latest"
+            else cfg.ollama_image
+        )
+
+    def image_available(self) -> bool:
+        images = self.command("image", "ls", "--quiet", "--filter", f"reference={self.image}")
+        if images:
+            return True
+        # Digest references aren't matched consistently by the reference filter.
+        if "@" in self.image:
+            return (
+                self.image
+                in self.command(
+                    "image", "ls", "--digests", "--format", "{{.Repository}}@{{.Digest}}"
+                ).splitlines()
+            )
+        return False
+
+    def pull_image(self, progress):
+        """Read daemon JSON progress over the same local socket as Docker CLI."""
+        self.check_daemon()
+        endpoint = os.environ.get("DOCKER_HOST") or self.command(
+            "context", "inspect", "--format", "{{.Endpoints.docker.Host}}"
+        )
+        transport = httpx.HTTPTransport(uds=endpoint.removeprefix("unix://"))
+        with httpx.Client(
+            transport=transport,
+            base_url="http://docker",
+            timeout=httpx.Timeout(30, read=900),
+            trust_env=False,
+        ) as client:
+            version = client.get("/version")
+            version.raise_for_status()
+            api_version = version.json()["ApiVersion"]
+            if not re.fullmatch(r"\d+\.\d+", api_version):
+                raise DockerError("Invalid Docker daemon API version")
+            with client.stream(
+                "POST", f"/v{api_version}/images/create", params={"fromImage": self.image}
+            ) as response:
+                response.raise_for_status()
+                seen = False
+                started = time.monotonic()
+                for line in response.iter_lines():
+                    if time.monotonic() - started > 1800:
+                        raise DockerError("Docker image download exceeded 30 minutes")
+                    if not line:
+                        continue
+                    seen = True
+                    event = json.loads(line)
+                    if event.get("error") or event.get("errorDetail"):
+                        raise DockerError(
+                            event.get("error")
+                            or event["errorDetail"].get("message", "Docker pull failed")
+                        )
+                    detail = event.get("progressDetail") or {}
+                    progress(
+                        {
+                            "status": event.get("status", "Pulling Docker image"),
+                            "phase": "docker-image",
+                            "id": event.get("id", ""),
+                            "completed": detail.get("current"),
+                            "total": detail.get("total"),
+                        }
+                    )
+                if not seen or not self.image_available():
+                    raise DockerError(
+                        "Docker image download ended without a locally available image"
+                    )
 
     def configure_storage(self, directory: str, confirmed: bool):
         if not confirmed:
@@ -139,14 +214,10 @@ class Docker:
             args += ["--gpus", "all"]
         elif cfg.gpu == "amd":
             args += ["--device", "/dev/kfd", "--device", "/dev/dri"]
-        image = (
-            "ollama/ollama:rocm"
-            if cfg.gpu == "amd" and cfg.ollama_image == "ollama/ollama:latest"
-            else cfg.ollama_image
-        )
-        return [*args, image]
+        return [*args, self.image]
 
-    def start(self):
+    def start(self, progress=lambda value: None):
+        progress({"status": "Checking local Docker daemon and container"})
         self.check_daemon()
         data = self.inspect()
         if data and self.storage.directory:
@@ -160,9 +231,15 @@ class Docker:
                     "Container storage differs from the selected directory; reapply storage settings while stopped"
                 )
         if data is None:
-            self.command(*self.run_args(), timeout=900)
+            if not self.image_available():
+                progress({"status": "Downloading Ollama Docker image", "phase": "docker-image"})
+                self.pull_image(progress)
+            progress({"status": "Creating and starting Ollama container", "phase": "container"})
+            self.command(*self.run_args(), timeout=60)
         elif not data["State"]["Running"]:
+            progress({"status": "Starting existing Ollama container", "phase": "container"})
             self.command("start", self.settings.container_name)
+        progress({"status": "Waiting for Ollama API readiness", "phase": "readiness"})
         for _ in range(60):
             try:
                 self.api("GET", "/api/version", timeout=2)
@@ -218,10 +295,16 @@ class Docker:
     def status(self) -> dict:
         self.check_daemon()
         data = self.inspect()
+        availability = {
+            "image": self.image,
+            "image_available": self.image_available(),
+            "container_exists": data is not None,
+        }
         if not data:
-            return {"running": False, "models": [], "loaded": []}
+            return {"running": False, "models": [], "loaded": [], **availability}
         running = data["State"]["Running"]
         result = {
+            **availability,
             "running": running,
             "models": [],
             "loaded": [],
