@@ -2,6 +2,10 @@
 
 [Overview](README.md) · [Installation & usage](install.md) · [Troubleshooting](trouble_shooting.md) · [Development](development.md)
 
+Manage and securely share your local Ollama models with the HTTPS inference gateway
+and dashboard-managed bearer keys. Sharing remains within the documented local-host
+security boundary; it does not make public or multi-user hosting supported.
+
 ## Requirements and installation
 
 Requires Linux, Python 3.11+, Docker CLI, an accessible **local** Docker daemon,
@@ -178,17 +182,27 @@ access; fetching failures are shown inside the panel.
 
 ## Secure inference API
 
-1. Sign in with PAM and expand **Ollama runtime → Access model → API keys & usage**.
-2. Create a named key with exact allowed model tags and hardware targets, or `*`.
-   Untagged model permissions mean `:latest`; they do not allow all tags.
-   Target IDs are `cpu` or the `gpu-…` IDs shown in the selected model's example.
-3. Copy the secret immediately. Only its SHA-256 digest is stored; the secret
-   cannot be retrieved again. Keys default to 30 days and can expire in 1–365 days.
+1. Sign in with PAM and open **Key Management** before Configuration. Existing keys
+   appear in a width-constrained table with a scrollbar after ten entries. Delete
+   any key using its right-hand trash icon; content-free usage history is retained.
+2. Expand **Add key** below the table. Enter a name and select **All models**
+   (default) or a downloaded local model from the dropdown. Choose **1 week**,
+   **1 month**, **1 year**, or **Never** (default) for expiry. Finite choices mean
+   7, 30, and 365 days; never-expiring keys stay valid until revoked/deleted.
+   Exact model tags are used; untagged API permissions mean `:latest`, not all tags.
+   The dashboard creates keys for all hardware targets. Advanced management API
+   clients can still restrict targets to `cpu` or registered `gpu-…` slot IDs.
+3. Generate the key and use **Copy key** next to the masked field; the credential
+   is never displayed in plain text. Store it securely and use **Clear key**.
+   Only its SHA-256 digest is stored; clearing, logout, or navigation loses the
+   one-time copy opportunity. If clipboard permission is denied, the masked field
+   can be selected for keyboard copying. No per-key token cap is added by the form;
+   server-wide request limits (1–4096 output tokens, default 256) remain enforced.
 4. Set `LLAMEROS_API_KEY` and `LLAMEROS_CA_CERT` in the client environment.
    The latter points to the trusted PEM certificate/CA for your Llameros server
    (the default generated certificate is `state_dir/cert.pem`). Verify its
    fingerprint before trusting it. Never disable certificate verification.
-5. Use the generated client example. Keys grant inference only, not dashboard,
+5. Expand **Access model** in a running model's own box and use its client example. Keys grant inference only, not dashboard,
    container, storage, download, load, or unload access. Never send PAM passwords
    or dashboard cookies to inference clients.
 

@@ -36,6 +36,44 @@ def test_model_boxes_and_independent_keys_precede_configuration():
         < html.index('id="config-menu"')
     )
     assert 'id="key-usage"' in html
-    assert 'id="api-key-models" multiple' in html
-    assert 'id="api-key-max-tokens"' in html
+    assert 'id="api-key-models"' in html
+    assert 'id="api-key-max-tokens"' not in html
     assert 'id="access-active-model"' not in html
+
+
+def test_key_table_collapsed_form_and_masked_secret():
+    from html.parser import HTMLParser
+    from pathlib import Path
+
+    class Parser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.nodes = {}
+            self.expiry_options = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if "id" in attrs:
+                self.nodes[attrs["id"]] = (tag, attrs)
+            if tag == "option" and attrs.get("value") in {"7", "30", "365", "never"}:
+                self.expiry_options.append(attrs)
+
+    static = Path(__file__).resolve().parents[1] / "src/llameros/static"
+    html = (static / "index.html").read_text()
+    parser = Parser()
+    parser.feed(html)
+    assert parser.nodes["api-keys"][0] == "tbody"
+    assert parser.nodes["api-key-add"][0] == "details"
+    assert "open" not in parser.nodes["api-key-add"][1]
+    assert html.index('id="api-keys"') < html.index('id="api-key-add"')
+    assert parser.nodes["api-key-secret"][1]["type"] == "password"
+    assert "readonly" in parser.nodes["api-key-secret"][1]
+    assert "disabled" in parser.nodes["api-key-copy"][1]
+    assert {option["value"] for option in parser.expiry_options} == {"7", "30", "365", "never"}
+    assert "selected" in next(
+        option for option in parser.expiry_options if option["value"] == "never"
+    )
+    css = (static / "style.css").read_text()
+    assert "10 * var(--key-row-height)" in css
+    assert "table-layout:fixed" in css
+    assert "overflow-y:auto" in css

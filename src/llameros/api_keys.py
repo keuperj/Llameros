@@ -18,7 +18,7 @@ class KeyRequest(BaseModel):
     models: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
     max_tokens: int | None = Field(default=None, ge=1, le=4096, strict=True)
     targets: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
-    expires_days: int = Field(default=30, ge=1, le=365)
+    expires_days: int | None = Field(default=None, ge=1, le=365, strict=True)
 
     @field_validator("models")
     @classmethod
@@ -79,7 +79,7 @@ class ApiKeys:
                     json.dumps(body.models),
                     json.dumps(body.targets),
                     now,
-                    now + body.expires_days * 86400,
+                    now + body.expires_days * 86400 if body.expires_days is not None else 0,
                     body.max_tokens,
                 ),
             )
@@ -93,7 +93,7 @@ class ApiKeys:
             )
         with self.store.connect() as db:
             row = db.execute(
-                "SELECT * FROM api_keys WHERE digest=? AND revoked=0 AND expires>?",
+                "SELECT * FROM api_keys WHERE digest=? AND revoked=0 AND (expires=0 OR expires>?)",
                 (hashlib.sha256(token.encode()).hexdigest(), time.time()),
             ).fetchone()
         if not row:

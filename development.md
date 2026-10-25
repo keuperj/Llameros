@@ -2,6 +2,10 @@
 
 [Overview](README.md) · [Installation & usage](install.md) · [Troubleshooting](trouble_shooting.md) · [Development](development.md)
 
+Llameros helps users **manage and securely share their local Ollama models**.
+Keep this local-first theme consistent across the dashboard, key management, and
+client examples; bearer authentication does not imply supported public hosting.
+
 ## Setup and checks
 
 ```bash
@@ -64,7 +68,7 @@ and hardware-assignment checks when changing container lifecycle code.
 - `/inference/*` uses HTTPS bearer authentication instead of browser sessions or
   CSRF; cookies alone cannot grant inference access. Key management still requires
   PAM sessions and CSRF. High-entropy keys are digest-only at rest, scoped to model
-  tags/devices, expiring, and revocable. No client authorization/cookies or arbitrary
+  tags/devices, optionally expiring, and revocable. No client authorization/cookies or arbitrary
   destination URLs are forwarded upstream. Failed streams release the shared job
   lock and retain content-free accounting; incomplete token counts remain unknown.
 - No shell execution or browser-supplied Docker arguments, image names, devices,
@@ -103,3 +107,29 @@ and hardware-assignment checks when changing container lifecycle code.
   exists temporarily in the in-memory job result and browser. Database/state files
   are private to the current user. Back up the database only if you want to retain
   usage history. This is an initial implementation, not a security-audited product.
+
+## Key management contract and UI acceptance
+
+- `POST /api/keys` requires a name. Omitted `models` means `["*"]`; the dashboard
+  dropdown offers all models or one local tag. Advanced API callers may supply
+  multiple model tags and hardware target restrictions.
+- `expires_days` accepts `null` (default: never) or integers 1–365. UI presets are
+  7, 30, 365, and never. SQLite stores no expiry as `expires=0`, preserving the
+  existing NOT NULL schema and finite expiry values of old keys. Authentication
+  checks revocation and `(expires=0 OR expires>now)`.
+- New dashboard keys use `max_tokens=null`: no additional per-key cap. Existing
+  capped keys remain capped and the advanced API still accepts caps. The global
+  1–4096 output-token range and 256-token request default remain safety guardrails.
+- `DELETE /api/keys/{id}` is session/CSRF protected, disables authentication, and
+  retains a deleted-key tombstone for `/api/keys/usage`. No plaintext secret or
+  digest is exposed by listing/history endpoints.
+- The fixed-layout key table has sticky headings, right-aligned accessible delete
+  icons, truncation with full-text tooltips, and a scroll region sized for ten
+  entries. Test narrow and wide browser widths and more than ten keys manually.
+- **Add key** is collapsed below the table. The one-time secret is a readonly
+  password field, copied using Clipboard API with masked keyboard-copy fallback.
+  Test copy success/denial, clear, logout, expiry presets, deletion, and usage.
+  No reveal control or persistent browser secret storage is provided. Clipboard
+  contents are controlled by the user/OS and are not cleared by logout.
+- Run the standalone HTTPS smoke test described in the README against a trusted
+  certificate and loaded model for live acceptance; automated tests use mocks.

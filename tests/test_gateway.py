@@ -318,6 +318,31 @@ def test_keys_persist_expire_and_validate(tmp_path):
         KeyRequest(name="bad", models=["*"], targets=["arbitrary-port"])
 
 
+@pytest.mark.parametrize("days", [None, 7, 30, 365])
+def test_key_expiry_presets_and_unlimited_default(gateway, days):
+    app, client, docker, calls, response = gateway
+    before = time.time()
+    created, _ = issue(client, expires_days=days)
+    key = app.state.api_keys.authenticate("Bearer " + created["key"])
+    assert key["max_tokens"] is None
+    if days is None:
+        assert key["expires"] == 0
+        # Never-expiring keys remain valid even far into the future.
+        with app.state.store.connect() as db:
+            db.execute("UPDATE api_keys SET created=? WHERE id=?", (1, created["id"]))
+        assert post(client, created["key"], options={"num_predict": 4096}).status_code == 200
+    else:
+        assert before + days * 86400 <= key["expires"] <= time.time() + days * 86400
+    assert KeyRequest(name="default").expires_days is None
+    assert KeyRequest(name="default").max_tokens is None
+
+
+@pytest.mark.parametrize("days", [0, -1, 366, True, "never"])
+def test_invalid_key_expiry(days):
+    with pytest.raises(ValueError):
+        KeyRequest(name="invalid", expires_days=days)
+
+
 @pytest.mark.parametrize(
     "status,content",
     [

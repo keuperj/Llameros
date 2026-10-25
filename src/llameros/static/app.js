@@ -64,24 +64,42 @@ function renderAccess() {
   }
 }
 function renderKeyModels(models) {
-  const select = $('api-key-models');
-  const previous = [...select.selectedOptions].map(option => option.value);
+  const select = $('api-key-models'), previous = select.value || '*';
   const names = [...new Set(models.map(model => model.name || model.model))].sort();
-  // Preserve explicitly selected permissions if storage/model inventory changes.
-  for (const value of previous) if (value !== '*' && !names.includes(value)) names.push(value);
+  if (previous !== '*' && !names.includes(previous)) names.push(previous);
   const values = ['*', ...names];
   if (JSON.stringify([...select.options].map(option => option.value)) === JSON.stringify(values)) return;
   select.replaceChildren();
   for (const value of values) {
     const option = element('option', value === '*' ? 'All models' : value); option.value = value;
-    option.selected = previous.length ? previous.includes(value) : value === '*'; select.append(option);
+    select.append(option);
+  }
+  select.value = previous;
+}
+function keyState(key) {
+  return key.deleted ? 'deleted' : key.revoked ? 'revoked' : key.expires && key.expires * 1000 <= Date.now() ? 'expired' : 'active';
+}
+function clearKeySecret() {
+  $('api-key-secret').value = ''; $('api-key-copy').disabled = true;
+  $('api-key-result').hidden = true; $('api-key-feedback').textContent = '';
+}
+async function copyKeySecret() {
+  const field = $('api-key-secret');
+  if (!field.value) return;
+  try {
+    await navigator.clipboard.writeText(field.value);
+    $('api-key-feedback').textContent = 'Key copied. Store it securely; it cannot be retrieved later.';
+  } catch {
+    // Keep the secret masked even when Clipboard API access is denied.
+    field.focus(); field.select();
+    $('api-key-feedback').textContent = 'Clipboard unavailable. The masked key is selected; press Ctrl+C or Command+C.';
   }
 }
 function renderKeyUsage(keys) {
   $('key-usage').replaceChildren();
   for (const key of keys) {
     const row = element('tr', '');
-    const state = key.deleted ? 'deleted' : key.revoked ? 'revoked' : key.expires * 1000 <= Date.now() ? 'expired' : 'active';
+    const state = keyState(key);
     for (const value of [key.name, state, key.requests, key.failed, key.prompt_tokens, key.output_tokens, key.unknown_usage, key.seconds.toFixed(1)]) row.append(element('td', value));
     $('key-usage').append(row);
   }
@@ -178,7 +196,7 @@ $('model-info-close').addEventListener('click', () => closeModelInfo());
 $('model-info-overlay').addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeModelInfo(); } });
 $('generate-model').addEventListener('change', updateControls);
 $('image-availability').addEventListener('click', safe(refresh));
-function signedOut() { $('api-key-secret').value = ''; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function signedOut() { clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
@@ -194,26 +212,39 @@ $('refresh').addEventListener('click', safe(refresh));
 async function refreshKeys() {
   const data = await api('/api/keys');
   if (!csrf) return;
+  const scroll = $('api-key-table-scroll').scrollTop;
   $('api-keys').replaceChildren();
   for (const key of data.keys) {
-    const row = element('div', '', 'runtime-model');
-    const state = key.revoked ? 'revoked' : key.expires * 1000 <= Date.now() ? 'expired' : 'active';
-    row.append(element('p', `${key.name} · ${state} · models: ${key.models.join(', ')} · max output tokens/request: ${key.max_tokens || 'server default'} · expires ${new Date(key.expires * 1000).toLocaleString()} · ${key.requests} requests / ${key.failed} failed · ${key.prompt_tokens} input / ${key.output_tokens} output tokens · ${key.unknown_usage} requests with unknown usage · ${key.seconds.toFixed(1)} s`));
-    const button = element('button', 'Delete key');
-    button.addEventListener('click', safe(async () => { await api('/api/keys/' + key.id, {}, 'DELETE'); await refreshKeys(); await refresh(); }));
-    row.append(button);
-    $('api-keys').append(row);
+    const row = element('tr', ''), state = keyState(key);
+    const name = element('td', ''), models = element('td', ''), status = element('td', '');
+    const nameText = element('span', key.name, 'key-cell-text'); nameText.title = key.name; name.append(nameText);
+    const modelText = key.models.includes('*') ? 'All models' : key.models.join(', ');
+    const modelLabel = element('span', modelText, 'key-cell-text'); modelLabel.title = modelText; models.append(modelLabel);
+    const badge = element('span', state, 'key-status'); badge.dataset.state = state; status.append(badge);
+    const expires = element('td', key.expires ? new Date(key.expires * 1000).toLocaleDateString() : 'Never');
+    const actions = element('td', '', 'key-action'), button = element('button', '', 'key-delete'); button.type = 'button';
+    button.title = `Delete key ${key.name}`; button.setAttribute('aria-label', button.title);
+    const icon = element('span', '🗑'); icon.setAttribute('aria-hidden', 'true'); button.append(icon);
+    button.addEventListener('click', safe(async () => { await api('/api/keys/' + key.id, {}, 'DELETE'); clearKeySecret(); await refreshKeys(); await refresh(); }));
+    actions.append(button); row.append(name, models, status, expires, actions); $('api-keys').append(row);
   }
-  if (!data.keys.length) $('api-keys').textContent = 'No API keys yet.';
+  if (!data.keys.length) {
+    const row = element('tr', ''), cell = element('td', 'No keys yet. Open “Add key” below to securely share a model.');
+    cell.colSpan = 5; cell.className = 'key-empty'; row.append(cell); $('api-keys').append(row);
+  }
+  $('api-key-table-scroll').scrollTop = scroll;
 }
 $('api-key-form').addEventListener('submit', safe(async () => {
-  const selected = [...$('api-key-models').selectedOptions].map(option => option.value);
-  const result = await api('/api/keys', {name: $('api-key-name').value.trim(), models: selected.length && !selected.includes('*') ? selected : ['*'], max_tokens: $('api-key-max-tokens').value ? Number($('api-key-max-tokens').value) : null, expires_days: Number($('api-key-days').value)});
+  clearKeySecret();
+  const result = await api('/api/keys', {name: $('api-key-name').value.trim(), models: [$('api-key-models').value || '*'], max_tokens: null, expires_days: $('api-key-days').value === 'never' ? null : Number($('api-key-days').value)});
   if (!csrf) return;
-  $('api-key-secret').value = result.key; $('api-key-secret').focus(); $('api-key-secret').select();
+  $('api-key-secret').value = result.key; $('api-key-result').hidden = false; $('api-key-copy').disabled = false;
+  $('api-key-feedback').textContent = 'Key generated. Copy it now; only its digest is stored.';
+  $('api-key-add').open = false; $('api-key-copy').focus();
   await refreshKeys(); await refresh();
 }));
-$('api-key-clear').addEventListener('click', () => { $('api-key-secret').value = ''; });
+$('api-key-copy').addEventListener('click', copyKeySecret);
+$('api-key-clear').addEventListener('click', clearKeySecret);
 $('api-keys-refresh').addEventListener('click', safe(refreshKeys));
 $('storage-form').addEventListener('submit', safe(async () => {
   await api('/api/storage', {directory: $('storage-directory').value.trim(), confirmed: $('storage-confirm').checked});

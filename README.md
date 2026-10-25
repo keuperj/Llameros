@@ -4,9 +4,10 @@
 
 # Llameros
 
-**Your local model caravan.** A local-first Ollama dashboard for Linux.
-Discover models, run them on CPU or GPU, and monitor usage—without a cloud
-account, frontend build, or external UI assets.
+**Manage and securely share your local Ollama models.** Your local model caravan
+for Linux: discover models, run them on CPU or GPU, create scoped bearer keys for
+your clients, and monitor usage—without a cloud account, frontend build, or external
+UI assets. Secure sharing is through the local HTTPS gateway, not public hosting.
 
 ## Features
 
@@ -14,6 +15,8 @@ account, frontend build, or external UI assets.
   containers, shared downloads, and individual **■ Stop model** controls.
 - **Hardware-aware discovery** — RAM/VRAM fit estimates, recommendations,
   search, model descriptions, and download progress.
+- **Secure model sharing** — named, model-scoped API keys with expiry or no expiry,
+  masked one-time copy, deletion, a scrollable key table, and per-key usage history.
 - **Authenticated inference** — scoped, revocable API keys, streaming, usage accounting, and copyable
   Ollama, OpenAI-compatible, LangChain, and LlamaIndex examples.
 - **Local control** — Linux PAM sign-in over HTTPS, configurable model storage,
@@ -69,15 +72,22 @@ Each loaded model/device has its own dashboard box with status, a Stop button, a
 an **Access model** dropdown containing authenticated client examples. Create or
 delete credentials in **Key Management**, before Configuration—even when no model
 is running. A name is required; model permissions default to all models (including
-future models). Select one or more downloaded local model tags to restrict access.
-An optional **maximum output tokens per request** restricts generation to 1–4096
-output tokens; it is not a cumulative quota or a context/input-token limit. Omitted
-request limits default to the smaller of 256 and the key cap; explicit higher
-limits return HTTP 403. Existing keys retain their permissions and server limits.
+future models). Open **Add key** below the existing-key table and choose **All models**
+or one downloaded local model tag. Expiry choices are **1 week**, **1 month**,
+**1 year**, and **Never** (default), implemented as 7, 30, and 365 days or no expiry.
+New keys have no per-key output-token quota/cap. The gateway's server-wide 1–4096
+output-token safety range and default of 256 tokens still apply; this is not
+unbounded generation. Existing keys retain their original expiry and restrictions.
+
+The table stays within the page width and shows at most ten rows before scrolling;
+each row has a delete icon on the right. Generated keys remain masked: use **Copy
+key**, then **Clear key** after storing the credential securely. Only a SHA-256
+digest is persisted; a secret cannot be retrieved again after clearing, logout,
+or leaving the page. Never-expiring keys remain valid until deleted or revoked;
+prefer shorter expiry when practical and treat credentials like passwords.
 Deletion disables new requests without interrupting in-flight inference. Non-secret
 key metadata and usage remain in the **Usage by key** history tile, including
 request/failure counts, known input/output tokens, unknown-usage requests, and time.
-The existing 30-day key expiry default remains configurable at creation.
 
 The standalone script at `/home/keuper/Projekte/Llameros/scripts/test_api_access.py`
 needs only Python 3.11+ and does not start or stop any containers. Load a permitted
