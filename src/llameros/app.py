@@ -320,25 +320,11 @@ def create_app(
         )
         history = store.history()
         own_keys = app.state.api_keys.list(session["username"])
-        with store.connect() as db:
-            totals = [
-                dict(row)
-                for row in db.execute(
-                    """
-                SELECT u.model,COUNT(*) AS requests,COALESCE(SUM(u.prompt_tokens),0) AS prompt_tokens,
-                    COALESCE(SUM(u.output_tokens),0) AS output_tokens,SUM(u.duration) AS seconds,
-                    0 AS tokens_per_second
-                FROM api_usage u JOIN api_keys k ON u.key_id=k.id
-                WHERE k.user=? GROUP BY u.model
-            """,
-                    (session["username"],),
-                )
-            ]
         return {
             "models": models,
             "keys": own_keys,
             "history": {
-                "models": totals,
+                "models": history["models"],
                 "samples": [
                     {
                         "timestamp": sample["timestamp"],

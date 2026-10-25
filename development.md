@@ -154,8 +154,9 @@ owner scoping for users. `?board=user` additionally scopes admins' key operation
 while viewing the user board; it is not a role elevation mechanism.
 
 `GET /api/user/dashboard` returns allowlisted running-model fields, CPU/RAM samples,
+overall model aggregates,
 and the signed-in owner's API-key aggregates. It excludes host events, raw runtime
-addresses, other users' statistics, and stored credential digests. `POST /api/users/{username}`
+addresses, other users' key statistics, and stored credential digests. `POST /api/users/{username}`
 is admin/CSRF protected and takes `role` (`admin` or `user`) and `blocked` (boolean).
 Blocks and key revocation commit together; key creation checks blocks in a write
 transaction. Blocking deletes existing sessions; unblocking restores neither keys

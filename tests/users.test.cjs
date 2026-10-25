@@ -7,11 +7,11 @@ const vm = require('node:vm');
 
 function board() {
   class Node {
-    constructor() { this.children = []; this.hidden = false; this.value = ''; this.handlers = {}; }
+    constructor() { this.children = []; this.hidden = false; this.value = ''; this.handlers = {}; this.scrollTop = 0; this.scrollLeft = 0; }
     append(...nodes) { this.children.push(...nodes); }
     replaceChildren(...nodes) { this.children = nodes; }
     addEventListener(type, callback) { this.handlers[type] = callback; }
-    setAttribute() {}
+    setAttribute(name, value) { this[name] = value; }
     add(option) { this.children.push(option); }
   }
   const nodes = new Map(), calls = [];
@@ -20,11 +20,12 @@ function board() {
   const document = {getElementById: get, querySelectorAll: () => ids.map(get), createElement: () => new Node(), addEventListener: (event, fn) => fn()};
   const data = {models: [{name: '<script>model</script>', target: 'cpu'}], keys: [], history: {models: [], samples: []}};
   const context = vm.createContext({document, csrf: 'csrf', modelBoxes: new Map(), window: {location: {origin: 'https://host'}},
+    Option: function(text, value) { this.textContent = text; this.value = value; },
     element: (tag, text) => Object.assign(new Node(), {textContent: text}), clearKeySecret() {},
     renderKeyModels() {}, renderKeyUsage() {}, renderModelUsage() {}, draw() {},
     safe: fn => fn, api: async url => { calls.push(url); return data; }});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/llameros/static/users.js'), 'utf8'), context);
-  return {get, calls, run: source => vm.runInContext(source, context)};
+  return {get, calls, data, run: source => vm.runInContext(source, context)};
 }
 
 test('user board hides administration and clears secrets and prior identity data', () => {
@@ -64,4 +65,32 @@ test('user refresh only calls the restricted dashboard and renders model names a
   assert.equal(card.children[0].textContent, '<script>model</script>');
   assert.equal(card.children[2].children[0].value, 'https://host/inference');
   assert.equal(card.children.length, 3); // No model lifecycle controls.
+});
+
+test('user access renders every account as a table row and preserves scrolling', async () => {
+  const ui = board();
+  ui.run('configureBoard({username: "owner", role: "admin"})');
+  ui.data.users = Array.from({length: 15}, (_, index) => ({username: index ? `user-${index}` : 'owner', role: index ? 'user' : 'admin', blocked: index === 2}));
+  ui.get('users-scroll').scrollTop = 128;
+  await ui.run('refreshUsers()');
+  const rows = ui.get('users').children;
+  assert.equal(rows.length, 15);
+  assert.equal(rows[0].children[0].textContent, 'owner');
+  assert.equal(rows[0].children[0].scope, 'row');
+  assert.equal(rows[0].children[1].children[0].disabled, true);
+  assert.equal(rows[0].children[3].children[0].disabled, true);
+  assert.equal(rows[2].children[2].children[0].checked, true);
+  assert.equal(rows[14].children[3].children[0]['aria-label'], 'Save access for user-14');
+  assert.equal(typeof rows[14].children[3].children[0].handlers.click, 'function');
+  assert.equal(ui.get('users-scroll').scrollTop, 128);
+});
+
+test('user access table is scrollable after ten rows and identity has a button-like box', () => {
+  const root = path.join(__dirname, '../src/llameros/static');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'style.css'), 'utf8');
+  assert.match(html, /id="users-scroll" tabindex="0" role="region" aria-labelledby="users-heading"/);
+  assert.match(html, /<tbody id="users"><\/tbody>/);
+  assert.match(css, /max-height:calc\(var\(--user-header-height\) \+ 10 \* var\(--user-row-height\)\);overflow:auto/);
+  assert.match(css, /#identity:not\(:empty\)\{border:1px solid var\(--line\);border-radius:8px;padding:10px 13px/);
 });

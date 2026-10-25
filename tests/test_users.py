@@ -123,19 +123,26 @@ def test_usage_and_running_model_redaction(multiuser):
     app.state.api_keys.record(
         other["id"], "private-model", "cpu", "completed", {"prompt": 200, "output": 300}, 10
     )
+    for model, output in (("own-model", 3), ("private-model", 300), ("playground-model", 12)):
+        app.state.store.generation({"model": model, "eval_count": output})
     app.state.store.event("PRIVATE_HOST_EVENT", detail="SECRET_HOST_PATH")
     app.state.store.sample({"hardware": HARDWARE, "ollama": {"secret": "SECRET_RUNTIME"}}, 30)
     result = user.get("/api/user/dashboard")
     assert result.status_code == 200
-    assert result.json()["history"]["models"][0]["output_tokens"] == 3
+    assert result.json()["history"]["models"] == admin.get("/api/history").json()["models"]
+    assert {row["model"]: row["output_tokens"] for row in result.json()["history"]["models"]} == {
+        "own-model": 3,
+        "private-model": 300,
+        "playground-model": 12,
+    }
     assert len(result.json()["keys"]) == 1
+    assert result.json()["keys"][0]["output_tokens"] == 3
     assert result.json()["models"] == [{"name": "gemma3:270m", "target": "cpu"}]
     assert set(result.json()["history"]["samples"][0]["hardware"]) == {
         "cpu_percent",
         "memory_percent",
     }
     for secret in (
-        "private-model",
         "SECRET_RUNTIME",
         "SECRET_HOST_PATH",
         "PRIVATE_HOST_EVENT",

@@ -335,7 +335,7 @@ Llameros is initially an **admin**; other login-shell accounts are **users** by 
 Service accounts with `nologin` or `false` shells cannot sign in. Account enumeration
 uses the system password database (including NSS where configured), not `/etc/shadow`.
 
-Users can view running models and host CPU/RAM history, see usage for their own keys,
+Users can view running models and host CPU/RAM history, see overall model usage and usage for their own keys,
 and create/delete their own keys. They cannot download/start/stop models, change
 configuration, use the admin playground, or see other users' keys or activity logs.
 Existing keys migrate automatically to the process account. Admins can optionally

@@ -163,7 +163,7 @@ production document ingestion and persistent vector storage remain outside Llame
 ## Multiple users
 
 The admin dashboard is restricted by server-side role checks. Other Linux login
-accounts get a user dashboard with running models, CPU/RAM history, their own
+accounts get a user dashboard with running models, CPU/RAM history, overall model
 inference totals, and their own API keys. Every key has a Linux `user` owner;
 existing keys are migrated to the account running Llameros without changing secrets.
 

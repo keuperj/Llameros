@@ -13,7 +13,7 @@ function configureBoard(data, asUser = data.role !== 'admin') {
   document.getElementById('user-intro').hidden = !asUser;
   for (const id of ['events', 'events-heading']) document.getElementById(id).hidden = asUser;
   document.getElementById('usage-description').textContent = asUser
-    ? 'Host CPU and RAM history, plus inference totals for your own keys only. Deleted keys remain in history. Tokens/s is unavailable for API usage.'
+    ? 'Host CPU and RAM history and overall usage by model across all users. Usage by key shows only your own keys, including deleted keys. Requests sent directly to Ollama are not included in token totals.'
     : 'Host CPU and RAM samples, plus per-model inference totals. Requests sent directly to Ollama are not included in token totals.';
   document.getElementById('api-key-owner-label').hidden = asUser;
   clearKeySecret();
@@ -43,22 +43,25 @@ async function refreshUsers() {
   const data = await api('/api/users');
   if (!csrf || userBoard) return;
   const panel = document.getElementById('users'); panel.replaceChildren();
+  const scroll = document.getElementById('users-scroll'), top = scroll.scrollTop, left = scroll.scrollLeft;
   for (const user of data.users) {
-    const row = element('form', '', 'inline');
-    row.append(element('strong', user.username));
+    const row = element('tr', '');
+    const name = element('th', user.username); name.scope = 'row'; row.append(name);
     const role = document.createElement('select'); role.setAttribute('aria-label', `Role for ${user.username}`);
     for (const value of ['user', 'admin']) role.add(new Option(value, value)); role.value = user.role;
     const blocked = document.createElement('input'); blocked.type = 'checkbox'; blocked.checked = Boolean(user.blocked);
-    const label = element('label', 'Blocked'); label.append(blocked);
-    const save = element('button', 'Save'); save.type = 'submit';
+    blocked.setAttribute('aria-label', `Block ${user.username}`);
+    const save = element('button', 'Save'); save.type = 'button';
+    save.setAttribute('aria-label', `Save access for ${user.username}`);
     if (user.username === dashboardIdentity.username) { role.disabled = true; blocked.disabled = true; save.disabled = true; }
-    row.append(role, label, save);
-    row.addEventListener('submit', safe(async () => {
+    for (const control of [role, blocked, save]) { const cell = element('td', ''); cell.append(control); row.append(cell); }
+    save.addEventListener('click', safe(async () => {
       await api('/api/users/' + encodeURIComponent(user.username), {role: role.value, blocked: blocked.checked});
       notice(`Updated ${user.username}. Blocking revokes all keys; unblocking does not restore them.`);
       await refreshUsers(); await refreshKeys();
     })); panel.append(row);
   }
+  scroll.scrollTop = top; scroll.scrollLeft = left;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
