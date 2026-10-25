@@ -22,6 +22,7 @@ function clearSessionView() {
   catalogueVersion++; familyVersion++; fitVersion++; infoVersion++;
   localActionEvents.length = 0; serverEvents = []; modelBoxes.clear();
   actionFeedback.reset(); clearKeySecret();
+  $('certificate-download').hidden = true;
   for (const id of ['output', 'events', 'job', 'hardware', 'installed', 'runtime-models', 'fit', 'catalog-progress', 'model-info-content', 'model-info-title', 'storage-current', 'storage-feedback', 'api-keys', 'users', 'notice']) $(id).replaceChildren();
   for (const node of document.querySelectorAll('#dashboard input, #dashboard textarea')) {
     if (node.type === 'checkbox') node.checked = node.defaultChecked;
@@ -95,8 +96,9 @@ async function submitAction(control, path, body) {
 }
 /**
  * Reconcile running-model cards by model/target identity without rebuilding unchanged controls.
+ * @param {boolean} [allowManagement=true] Include admin stop controls; switching boards clears cards.
  */
-function renderAccess() {
+function renderAccess(allowManagement = true) {
   const active = loadedChoices();
   const identities = new Set(active.map(modelKey));
   for (const [identity, box] of modelBoxes) {
@@ -110,11 +112,14 @@ function renderAccess() {
       box.dataset.identity = identity;
       const head = element('div', '', 'section-head');
       head.append(element('h3', name));
-      const stop = element('button', '■ Stop model'); stop.type = 'button'; stop.dataset.stop = 'true';
-      stop.setAttribute('aria-label', `Stop ${name} on ${model.hardware || model.target || 'CPU'}`);
-      actionFeedback.bind(stop, JSON.stringify(['running-stop', name, model.target || 'cpu']));
-      stop.addEventListener('click', safe(async (event, control) => { await submitAction(control, '/api/models/unload', {model: name, target: model.target || ''}); await refresh(); }));
-      head.append(stop); box.append(head);
+      if (allowManagement) {
+        const stop = element('button', '■ Stop model'); stop.type = 'button'; stop.dataset.stop = 'true';
+        stop.setAttribute('aria-label', `Stop ${name} on ${model.hardware || model.target || 'CPU'}`);
+        actionFeedback.bind(stop, JSON.stringify(['running-stop', name, model.target || 'cpu']));
+        stop.addEventListener('click', safe(async (event, control) => { await submitAction(control, '/api/models/unload', {model: name, target: model.target || ''}); await refresh(); }));
+        head.append(stop);
+      }
+      box.append(head);
       box.append(element('p', `Status: loaded · ${model.hardware || model.target || 'CPU'} · ${model.target || 'cpu'}`, 'model-status'));
       const details = element('details', '', 'access-menu');
       details.append(element('summary', 'Access model · API URL & Python examples'));

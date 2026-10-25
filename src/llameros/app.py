@@ -30,6 +30,7 @@ from .runtime_transport import close_relays
 from .runtimes import Runtimes
 from .scheduling import InferenceScheduler
 from .storage import Store
+from .tls import public_certificate
 from .users import Users, UserUpdate
 
 log = logging.getLogger(__name__)
@@ -337,12 +338,37 @@ def create_app(
             "username": body.username,
             "csrf": session["csrf"],
             "role": users.get(body.username)["role"],
+            "certificate_download_enabled": cfg.certificate_download_enabled,
         }
 
     @app.get("/api/session")
     def session_info(session=Depends(require_session)):
         """Return the signed-in identity, current role, and session CSRF token."""
-        return {"username": session["username"], "csrf": session["csrf"], "role": session["role"]}
+        return {
+            "username": session["username"],
+            "csrf": session["csrf"],
+            "role": session["role"],
+            "certificate_download_enabled": cfg.certificate_download_enabled,
+        }
+
+    @app.get("/api/certificate", dependencies=signed_in)
+    def download_certificate():
+        """Offer the public certificate chain to signed-in users when explicitly enabled."""
+        if not cfg.certificate_download_enabled:
+            raise HTTPException(404, "Certificate download disabled")
+        try:
+            content = public_certificate(cfg)
+        except (OSError, ValueError):
+            raise HTTPException(503, "Public certificate unavailable") from None
+        return Response(
+            content,
+            media_type="application/x-pem-file",
+            headers={
+                "Content-Disposition": 'attachment; filename="llameros-cert.pem"',
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @app.post("/api/logout", dependencies=signed_in)
     def logout(request: Request, response: Response, session=Depends(require_session)):
@@ -398,6 +424,7 @@ def create_app(
         return {
             "models": models,
             "keys": own_keys,
+            "context_length": cfg.context_length,
             "history": {
                 "models": history["models"],
                 "samples": [

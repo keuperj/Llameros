@@ -14,6 +14,7 @@ let userBoard = false, dashboardIdentity = null;
 function configureBoard(data, asUser = data.role !== 'admin') {
   if (typeof clearSessionView === 'function') clearSessionView();
   dashboardIdentity = data; userBoard = asUser;
+  document.getElementById('certificate-download').hidden = data.certificate_download_enabled !== true;
   if (data.role === 'user') document.getElementById('api-key-days').value = '7';
   const switcher = document.getElementById('board-switch');
   switcher.hidden = data.role !== 'admin';
@@ -44,15 +45,13 @@ function configureBoard(data, asUser = data.role !== 'admin') {
 async function refreshUserBoard() {
   const data = await api('/api/user/dashboard');
   if (!csrf || !userBoard) return;
-  const panel = document.getElementById('runtime-models'); panel.replaceChildren();
-  for (const model of data.models) {
-    const card = element('section', '', 'card running-model');
-    card.append(element('h3', model.name || model.model), element('p', `Loaded · ${model.hardware || model.target || 'CPU'}`));
-    const url = element('input', ''); url.readOnly = true; url.value = window.location.origin + '/inference';
-    const label = element('label', 'Authenticated API base URL'); label.append(url); card.append(label);
-    panel.append(card);
-  }
-  if (!data.models.length) panel.append(element('p', 'No models are currently running. An administrator can start a model.'));
+  runtimeState = {running: true, loaded: data.models};
+  accessConfig = {secure_url: window.location.origin + '/inference'};
+  accessContext = data.context_length;
+  const panel = document.getElementById('runtime-models');
+  if (!modelBoxes.size) panel.replaceChildren();
+  renderAccess(false);
+  if (!data.models.length) panel.replaceChildren(element('p', 'No models are currently running. An administrator can start a model.'));
   renderKeyModels(data.models); renderKeyUsage(data.keys); renderModelUsage(data.history.models); draw(data.history.samples);
 }
 

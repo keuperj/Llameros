@@ -34,6 +34,25 @@ function descendants(node, tag) { return node.children.flatMap(child => [...(chi
 function start(ui) {
   ui.run('accessConfig = {secure_url: "https://localhost:8443/inference"}; runtimeState = {running: true, loaded: [{name: "one:latest", target: "cpu"}, {name: "one:latest", target: "gpu-test"}]}; renderAccess();');
 }
+test('user model cards reuse framework examples and copy controls but never offer stop', () => {
+  const ui = panel();
+  ui.run('accessConfig = {secure_url: "https://host/inference"}; accessContext = 8192; runtimeState = {running: true, loaded: [{name: "<model>:latest", target: "gpu-demo"}]}; renderAccess(false);');
+  const card = ui.root.children[0];
+  assert.equal(descendants(card, 'h3')[0].textContent, '<model>:latest');
+  assert.equal(descendants(card, 'button').some(button => button.dataset.stop), false);
+  const select = descendants(card, 'select')[0];
+  for (const framework of Object.keys(Access.frameworks)) {
+    select.value = framework; select.handlers.change();
+    const code = descendants(card, 'textarea')[0].value;
+    assert.match(code, /LLAMEROS_API_KEY/);
+    assert.match(code, /LLAMEROS_CA_CERT/);
+    assert.match(code, /gpu-demo/);
+  }
+  const details = descendants(card, 'details')[0]; details.open = true;
+  ui.run('renderAccess(false)');
+  assert.equal(ui.root.children[0], card);
+  assert.equal(details.open, true);
+});
 test('one box per model/device, secure examples and preserved state on refresh', () => {
   const ui = panel(); start(ui);
   assert.equal(ui.root.children.length, 2);

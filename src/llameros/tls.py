@@ -17,6 +17,28 @@ from cryptography.x509.oid import NameOID
 from .config import Settings
 
 
+def public_certificate(settings: Settings) -> bytes:
+    """Export only parsed public PEM certificates, never adjacent private-key material.
+
+    Read the configured chain or generated certificate without generating/renewing TLS
+    files. Bound the read and reserialize certificate blocks to prevent accidental
+    disclosure when an operator supplies a combined certificate/private-key file.
+    """
+    path = (
+        Path(settings.cert_file).expanduser()
+        if settings.cert_file
+        else settings.state_dir / "cert.pem"
+    )
+    with path.open("rb") as stream:
+        data = stream.read(1024 * 1024 + 1)
+    if len(data) > 1024 * 1024:
+        raise ValueError("Certificate file too large")
+    certs = x509.load_pem_x509_certificates(data)
+    if not certs:
+        raise ValueError("No public certificates available")
+    return b"".join(cert.public_bytes(serialization.Encoding.PEM) for cert in certs)
+
+
 def certificates(settings: Settings) -> tuple[Path, Path]:
     """Return certificate/key paths, validating configured files or maintaining a private local pair.
 

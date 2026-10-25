@@ -99,6 +99,7 @@ Paths beginning with `~` expand to the service user's home directory.
 | `host`, `port` | `127.0.0.1`, `8443`; HTTPS listener |
 | `state_dir` | `~/.local/share/llameros`; private TLS, history, and runtime state |
 | `cert_file`, `key_file` | Empty: generate TLS material; otherwise use existing PEM files |
+| `certificate_download_enabled` | `true`; offer the public certificate download to signed-in users on both boards |
 | `pam_service`, `session_seconds` | `login`, `3600`; authentication and absolute session lifetime |
 | `sample_seconds`, `retention_days` | `15`, `30`; telemetry interval and history retention |
 | `ollama_image`, `ollama_rocm_image` | Digest-pinned runtime images; use the example configuration |
@@ -110,6 +111,48 @@ Runtime APIs use private relays, not published host ports. `ollama_port` is a le
 registry identifier. Keep one Llameros instance per Linux UID/Docker daemon; do not
 delete the runtime registry while containers exist. Changing an image/configuration
 does not recreate existing containers: stop runtimes and reapply storage first.
+
+### TLS certificates and client trust
+
+Set these in your startup TOML and restart Llameros after certificate/config changes:
+
+```toml
+cert_file = "/home/keuper/.config/llameros/tls/fullchain.pem"
+key_file = "/home/keuper/.config/llameros/tls/key.pem"
+certificate_download_enabled = true
+```
+
+Replace the example paths with your service account's paths. Supply both PEM files,
+keep the private key readable only by that account (`chmod 600`), and use a certificate
+whose subject alternative names match the DNS name/IP clients actually use. With
+both paths empty, Llameros generates `cert.pem` and `key.pem` inside `state_dir`.
+Never distribute `key.pem` or a CA private key.
+
+With downloads enabled (the default), **Key Management → Add key** on both admin
+and user boards offers **Download server certificate (PEM)**. The session-protected
+`GET /api/certificate` exports public certificate blocks only, including a configured
+chain, as `llameros-cert.pem`. Setting the option to `false` hides the link and makes
+the endpoint return 404. Missing/invalid certificate files return 503; downloading
+does not generate certificates. Keep the on-disk certificate aligned with the running
+TLS configuration by restarting after renewal/replacement.
+
+**Downloading is not trust verification.** Establish browser trust before signing
+in; do not bypass a certificate warning to obtain a supposedly trustworthy copy
+from that same server. For a small self-signed deployment, distribute the public
+certificate or its SHA-256 fingerprint through an independently authenticated
+channel, and compare before trusting the downloaded file. Use the verified file
+as `LLAMEROS_CA_CERT` in Python examples. The generated certificate is a server
+certificate, not an organizational CA; renewed self-signed certificates must be
+verified/distributed again.
+
+For shared deployments, prefer an organization-issued certificate with its root CA
+distributed through managed device configuration. Alternatively, use a publicly
+trusted certificate for a domain you control; DNS-01 issuance allows the service
+to remain VPN-only. CA-issued deployments should use the trusted issuing CA bundle
+or normal system trust, not assume the downloaded server chain contains a trusted
+root. All client examples must retain TLS verification. The model cards on both
+boards offer the same Ollama, OpenAI-compatible, LangChain, and LlamaIndex examples;
+user cards do not expose lifecycle controls.
 
 ### Model storage in the GUI
 

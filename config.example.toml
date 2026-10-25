@@ -9,6 +9,8 @@ state_dir = "~/.local/share/llameros"
 # Leave both empty to generate a self-signed certificate.
 cert_file = ""
 key_file = ""
+# Offer only the public certificate/chain to signed-in dashboard users.
+certificate_download_enabled = true
 
 pam_service = "login"
 session_seconds = 3600

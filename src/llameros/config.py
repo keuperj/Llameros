@@ -25,6 +25,7 @@ class Settings:
     state_dir: Path = Path.home() / ".local/share/llameros"
     cert_file: str = ""
     key_file: str = ""
+    certificate_download_enabled: bool = True
     pam_service: str = "login"
     session_seconds: int = 3600
     sample_seconds: int = 15
@@ -48,6 +49,8 @@ class Settings:
     def __post_init__(self):
         """Normalize the state path and reject inconsistent or out-of-range settings."""
         object.__setattr__(self, "state_dir", Path(self.state_dir).expanduser().absolute())
+        if type(self.certificate_download_enabled) is not bool:
+            raise ValueError("certificate_download_enabled must be boolean")
         for name, ceiling in {
             "inference_body_bytes": 64 * 1024 * 1024,
             "image_max_bytes": 32 * 1024 * 1024,

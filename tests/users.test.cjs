@@ -23,7 +23,7 @@ function board() {
   const ids = ['user-intro', 'runtime-models', 'key-management', 'usage-history', 'config-menu', 'hardware', 'try-model'];
   const document = {getElementById: get, querySelectorAll: () => ids.map(get), createElement: () => new Node(), addEventListener: (event, fn) => fn()};
   const data = {models: [{name: '<script>model</script>', target: 'cpu'}], keys: [], history: {models: [], samples: []}};
-  const context = vm.createContext({document, csrf: 'csrf', modelBoxes: new Map(), window: {location: {origin: 'https://host'}},
+  const context = vm.createContext({document, csrf: 'csrf', modelBoxes: new Map(), runtimeState: null, accessConfig: null, accessContext: null, renderAccess: management => { get('runtime-models').management = management; }, window: {location: {origin: 'https://host'}},
     Option: function(text, value) { this.textContent = text; this.value = value; },
     element: (tag, text) => Object.assign(new Node(), {textContent: text}), clearKeySecret() {},
     renderKeyModels() {}, renderKeyUsage() {}, renderModelUsage() {}, draw() {},
@@ -60,15 +60,24 @@ test('admins can switch boards in both directions without changing their role', 
   assert.equal(ui.get('user-intro').hidden, true);
 });
 
-test('user refresh only calls the restricted dashboard and renders model names as text', async () => {
+test('user refresh uses restricted data and shared access cards without management', async () => {
   const ui = board();
   ui.run('configureBoard({username: "alice", role: "user"})');
   await ui.run('refreshUserBoard()');
   assert.deepEqual(ui.calls, ['/api/user/dashboard']);
-  const card = ui.get('runtime-models').children[0];
-  assert.equal(card.children[0].textContent, '<script>model</script>');
-  assert.equal(card.children[2].children[0].value, 'https://host/inference');
-  assert.equal(card.children.length, 3); // No model lifecycle controls.
+  assert.equal(ui.get('runtime-models').management, false);
+  assert.equal(ui.run('runtimeState.loaded[0].name'), '<script>model</script>');
+  assert.equal(ui.run('accessConfig.secure_url'), 'https://host/inference');
+});
+
+test('certificate download visibility follows server policy on either board', () => {
+  const ui = board();
+  for (const role of ['admin', 'user']) {
+    ui.run(`configureBoard({username: 'alice', role: '${role}', certificate_download_enabled: true})`);
+    assert.equal(ui.get('certificate-download').hidden, false);
+    ui.run(`configureBoard({username: 'alice', role: '${role}', certificate_download_enabled: false})`);
+    assert.equal(ui.get('certificate-download').hidden, true);
+  }
 });
 
 test('user access renders every account as a table row and preserves scrolling', async () => {
