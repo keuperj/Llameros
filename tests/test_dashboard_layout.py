@@ -30,6 +30,10 @@ def test_playground_closed_and_scroll_regions_accessible():
     assert "height:var(--usage-row-height)" in css
     html = (static / "index.html").read_text()
     assert html.index("/static/usage.js") < html.index("/static/app.js")
+    assert html.index("/static/actions.js") < html.index("/static/app.js")
+    assert 'id="events-heading">Activity log' in html
+    assert ".action-error{" in css
+    assert ".action-error[hidden]{display:none}" in css
 
 
 def test_usage_tables_have_compact_matching_headers():

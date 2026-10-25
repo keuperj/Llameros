@@ -20,7 +20,7 @@ function panel(clipboard) {
     select() { this.selected = true; }
   }
   const root = new Node('div');
-  const context = vm.createContext({document: {getElementById: () => root}, navigator: {clipboard}, ModelAccess: Access,
+  const context = vm.createContext({ActionFeedback: {create: () => ({bind() {}, clear() {}, fail() {}, track() {}})}, notice() {}, document: {},document: {getElementById: () => root}, navigator: {clipboard}, ModelAccess: Access,
     element: (tag, text, cls) => Object.assign(new Node(tag, text), {className: cls}), safe: fn => fn});
   const source = fs.readFileSync(path.join(__dirname, '../src/llameros/static/app.js'), 'utf8');
   vm.runInContext(source.split('function updateControls()')[0], context);

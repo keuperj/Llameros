@@ -11,6 +11,30 @@ const modelKey = model => model.target ? JSON.stringify([model.name || model.mod
 function selectedModel(value) { if (value.startsWith('[')) { const [model, target] = JSON.parse(value); return {model, target}; } return {model: value}; }
 function loadedChoices() { return runtimeState && runtimeState.running && !runtimeState.error ? (runtimeState.loaded || []) : []; }
 const modelBoxes = new Map();
+const localActionEvents = [];
+const actionFeedback = ActionFeedback.create({document, notice, log: logActionError});
+function renderEvents(events = []) {
+  const panel = $('events'), top = panel.scrollTop, left = panel.scrollLeft;
+  const merged = [...localActionEvents, ...events].sort((a, b) => b.timestamp - a.timestamp).slice(0, 240);
+  panel.replaceChildren();
+  for (const event of merged) panel.append(element('div', `${new Date(event.timestamp * 1000).toLocaleString()} · ${event.kind} · ${event.model} ${event.detail}`, 'event'));
+  panel.scrollTop = top; panel.scrollLeft = left;
+}
+let serverEvents = [];
+function logActionError({action, message}, persist) {
+  const event = {timestamp: Date.now() / 1000, kind: 'dashboard-action:failed', model: action, detail: message};
+  localActionEvents.unshift(event); localActionEvents.splice(240); renderEvents(serverEvents);
+  if (persist && csrf) {
+    // Do not recursively report logging failures; retain the local event if offline.
+    api('/api/action-errors', {action: action.slice(0, 300), message: message.slice(0, 2000)})
+      .then(() => { event.persisted = true; }).catch(() => {});
+  } else if (!persist) event.persisted = true;
+}
+async function submitAction(control, path, body) {
+  const result = await api(path, body);
+  actionFeedback.track(control, result);
+  return result;
+}
 function renderAccess() {
   const active = loadedChoices();
   const identities = new Set(active.map(modelKey));
@@ -27,7 +51,8 @@ function renderAccess() {
       head.append(element('h3', name));
       const stop = element('button', '■ Stop model'); stop.type = 'button'; stop.dataset.stop = 'true';
       stop.setAttribute('aria-label', `Stop ${name} on ${model.hardware || model.target || 'CPU'}`);
-      stop.addEventListener('click', safe(async () => { await api('/api/models/unload', {model: name, target: model.target || ''}); await refresh(); }));
+      actionFeedback.bind(stop, JSON.stringify(['running-stop', name, model.target || 'cpu']));
+      stop.addEventListener('click', safe(async (event, control) => { await submitAction(control, '/api/models/unload', {model: name, target: model.target || ''}); await refresh(); }));
       head.append(stop); box.append(head);
       box.append(element('p', `Status: loaded · ${model.hardware || model.target || 'CPU'} · ${model.target || 'cpu'}`, 'model-status'));
       const details = element('details', '', 'access-menu');
@@ -41,9 +66,11 @@ function renderAccess() {
         if (field === 'code') { input.rows = 16; input.className = 'access-code'; input.spellcheck = false; }
         label.append(input); details.append(label); fields[field] = input;
         const copy = element('button', 'Copy ' + title); copy.type = 'button';
+        actionFeedback.bind(copy, JSON.stringify(['copy', identity, field]));
         copy.addEventListener('click', async () => {
+          actionFeedback.clear(copy);
           try { await navigator.clipboard.writeText(input.value); feedback.textContent = 'Copied to clipboard.'; }
-          catch { input.focus(); input.select(); feedback.textContent = 'Text selected; press Ctrl+C or Command+C.'; }
+          catch { input.focus(); input.select(); feedback.textContent = 'Text selected; press Ctrl+C or Command+C.'; actionFeedback.fail(copy, 'Clipboard unavailable. Text selected; press Ctrl+C or Command+C.'); }
         }); details.append(copy);
       }
       const label = element('label', 'Python client / framework'), framework = element('select', '');
@@ -84,6 +111,7 @@ function clearKeySecret() {
   $('api-key-result').hidden = true; $('api-key-feedback').textContent = '';
 }
 async function copyKeySecret() {
+  actionFeedback.clear($('api-key-copy'));
   const field = $('api-key-secret');
   if (!field.value) return;
   try {
@@ -93,6 +121,7 @@ async function copyKeySecret() {
     // Keep the secret masked even when Clipboard API access is denied.
     field.focus(); field.select();
     $('api-key-feedback').textContent = 'Clipboard unavailable. The masked key is selected; press Ctrl+C or Command+C.';
+    actionFeedback.fail($('api-key-copy'), $('api-key-feedback').textContent);
   }
 }
 let modelUsageTable = null, keyUsageTable = null;
@@ -126,6 +155,7 @@ function progressBar(label, value) {
   wrapper.append(bar); return wrapper;
 }
 function renderJob(job) {
+  actionFeedback.job(job);
   busy = job.state === 'running';
   $('job').replaceChildren();
   if (job.state !== 'idle') {
@@ -159,11 +189,23 @@ async function api(path, body, method) {
   const data = await response.json();
   if (!response.ok) {
     if (response.status === 401 && path !== '/api/login') signedOut();
-    throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
+    throw new Error(typeof data.detail === 'string' ? data.detail : Array.isArray(data.detail) ? data.detail.map(item => item.msg || 'Invalid value').join('; ') : 'Request failed');
   }
   return data;
 }
-function safe(fn) { return async event => { if (event) event.preventDefault(); try { await fn(event); } catch (error) { notice(error.message); } }; }
+function actionControl(event) {
+  if (!event || !event.currentTarget) return null;
+  const node = event.currentTarget;
+  return node.tagName === 'FORM' ? (event.submitter || node.querySelector('button[type=submit], button:not([type])')) : node;
+}
+function safe(fn) { return async event => {
+  if (event) event.preventDefault();
+  // Capture before await: browsers clear currentTarget after event dispatch.
+  const control = actionControl(event);
+  actionFeedback.clear(control);
+  try { await fn(event, control); }
+  catch (error) { actionFeedback.fail(control, error.message || 'Operation failed'); }
+}; }
 function element(tag, text, className) { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node; }
 function options(select, values, placeholder) {
   select.replaceChildren(); if (placeholder) select.add(new Option(placeholder, ''));
@@ -178,7 +220,7 @@ function closeModelInfo(restore = true) {
   infoVersion++; $('model-info-overlay').hidden = true;
   if (restore) $('model-info').focus();
 }
-$('model-info').addEventListener('click', safe(async () => {
+$('model-info').addEventListener('click', safe(async (event, control) => {
   const model = $('tags').value || $('families').value, url = Catalogue.modelInfoUrl(model);
   if (!url) return;
   const version = ++infoVersion;
@@ -190,19 +232,22 @@ $('model-info').addEventListener('click', safe(async () => {
   try {
     const data = await api('/api/model-info?model=' + encodeURIComponent(model));
     if (version === infoVersion && csrf) $('model-info-content').textContent = data.description;
-  } catch (error) { if (version === infoVersion) $('model-info-content').textContent = 'Could not load model description: ' + error.message; }
+  } catch (error) { if (version === infoVersion) { $('model-info-content').textContent = 'Could not load model description: ' + error.message; throw error; } }
 }));
 $('model-info-close').addEventListener('click', () => closeModelInfo());
 $('model-info-overlay').addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeModelInfo(); } });
 $('generate-model').addEventListener('change', updateControls);
 $('image-availability').addEventListener('click', safe(refresh));
-function signedOut() { clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); if (keyUsageTable) keyUsageTable.update([]); if (modelUsageTable) modelUsageTable.update([]); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function signedOut() { actionFeedback.reset(); localActionEvents.length = 0; serverEvents = [];  clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); if (keyUsageTable) keyUsageTable.update([]); if (modelUsageTable) modelUsageTable.update([]); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
   clearInterval(timer); timer = setInterval(safe(refresh), 5000); clearInterval(jobTimer); jobTimer = setInterval(pollJob, 1000);
   // Load keys independently: unavailable runtimes/catalogue must not leave the table empty.
   await Promise.all([refreshKeys(), refresh(), catalogue()]);
+}
+for (const id of ['login-form', 'api-key-form', 'storage-form', 'generate-form', 'search-form']) {
+  actionFeedback.bind($(id).querySelector('button[type=submit], button:not([type])'), id);
 }
 $('login-form').addEventListener('submit', safe(async () => {
   try { const data = await api('/api/login', {username: $('username').value, password: $('password').value}); await signedIn(data); }
@@ -224,6 +269,7 @@ async function refreshKeys() {
     const badge = element('span', state, 'key-status'); badge.dataset.state = state; status.append(badge);
     const expires = element('td', key.expires ? new Date(key.expires * 1000).toLocaleDateString() : 'Never');
     const actions = element('td', '', 'key-action'), button = element('button', '', 'key-delete'); button.type = 'button';
+    actionFeedback.bind(button, 'delete-key:' + key.id);
     button.title = `Delete key ${key.name}`; button.setAttribute('aria-label', button.title);
     const icon = element('span', '🗑'); icon.setAttribute('aria-hidden', 'true'); button.append(icon);
     button.addEventListener('click', safe(async () => { await api('/api/keys/' + key.id, {}, 'DELETE'); clearKeySecret(); await refreshKeys(); await refresh(); }));
@@ -234,6 +280,7 @@ async function refreshKeys() {
     cell.colSpan = 5; cell.className = 'key-empty'; row.append(cell); $('api-keys').append(row);
   }
   $('api-key-table-scroll').scrollTop = scroll;
+  actionFeedback.restore();
 }
 $('api-key-form').addEventListener('submit', safe(async () => {
   clearKeySecret();
@@ -247,14 +294,14 @@ $('api-key-form').addEventListener('submit', safe(async () => {
 $('api-key-copy').addEventListener('click', copyKeySecret);
 $('api-key-clear').addEventListener('click', clearKeySecret);
 $('api-keys-refresh').addEventListener('click', safe(refreshKeys));
-$('storage-form').addEventListener('submit', safe(async () => {
-  await api('/api/storage', {directory: $('storage-directory').value.trim(), confirmed: $('storage-confirm').checked});
+$('storage-form').addEventListener('submit', safe(async (event, control) => {
+  await submitAction(control, '/api/storage', {directory: $('storage-directory').value.trim(), confirmed: $('storage-confirm').checked});
   $('storage-feedback').textContent = 'Storage change queued; see the runtime job for completion or errors.';
   $('storage-confirm').checked = false;
   await refresh();
 }));
-for (const action of ['start', 'stop']) $('container-' + action).addEventListener('click', safe(async () => { await api('/api/container/' + action, {}); await refresh(); }));
-async function catalogue() {
+for (const action of ['start', 'stop']) $('container-' + action).addEventListener('click', safe(async (event, control) => { await submitAction(control, '/api/container/' + action, {}); await refresh(); }));
+async function catalogue(event, control) {
   const version = ++catalogueVersion;
   familyVersion++; fitVersion++; selectedFit = null; $('pull').disabled = true;
   options($('tags'), [], 'Select a variant');
@@ -280,7 +327,7 @@ async function catalogue() {
         const result = await api('/api/catalog/' + encodeURIComponent(entry.name) + '/compatibility?cpu_only=' + cpu);
         if (version !== catalogueVersion) return;
         Object.assign(entry, {fits: result.fits, variants: result.variants});
-      } catch (error) { if (version !== catalogueVersion) return; failures++; }
+      } catch (error) { if (version !== catalogueVersion) return; failures++; if (failures === 1) actionFeedback.fail(control, 'Some model compatibility checks failed: ' + error.message); }
       checked++; render();
     }
   }
@@ -307,6 +354,7 @@ function renderRecommendations() {
     const row = element('div', '', 'recommendation');
     const bullet = element('span', '●', 'fit-bullet'); bullet.setAttribute('aria-hidden', 'true');
     const button = element('button', entry.variant.name);
+    actionFeedback.bind(button, 'recommendation:' + entry.variant.name);
     button.addEventListener('click', safe(async () => {
       renderFamilies(); $('families').value = entry.family;
       await selectFamily(entry.variant.name);
@@ -314,6 +362,7 @@ function renderRecommendations() {
     row.append(bullet, button, element('small', `~${bytes(entry.variant.download_bytes)} · popularity rank ${entry.rank + 1}`));
     $('recommended').append(row);
   }
+  actionFeedback.restore();
   if (!$('recommended').children.length) $('recommended').append(element('p', 'No compatible recommendations found yet. Unknown or oversized variants are not recommended.'));
 }
 $('search').addEventListener('input', () => {
@@ -348,12 +397,12 @@ async function checkSelectedFit() {
   $('fit').textContent = `${data.fits ? '✓ Estimated to fit' : '✕ Insufficient memory'} · ${bytes(data.download_bytes)} download · ${bytes(data.estimated_memory)} estimated runtime · ${data.placement}. ${data.note}`;
 }
 $('tags').addEventListener('change', safe(checkSelectedFit));
-$('pull').addEventListener('click', safe(async () => {
+$('pull').addEventListener('click', safe(async (event, control) => {
   if (!selectedFit || !selectedFit.fits) return;
-  await api('/api/models/pull', {model: selectedFit.model}); await refresh();
+  await submitAction(control, '/api/models/pull', {model: selectedFit.model}); await refresh();
 }));
-$('generate-form').addEventListener('submit', safe(async () => {
-  await api('/api/generate', {...selectedModel($('generate-model').value), prompt: $('prompt').value, max_tokens: 256});
+$('generate-form').addEventListener('submit', safe(async (event, control) => {
+  await submitAction(control, '/api/generate', {...selectedModel($('generate-model').value), prompt: $('prompt').value, max_tokens: 256});
   $('output').textContent = 'Generating…'; await refresh();
 }));
 async function refresh() {
@@ -421,15 +470,22 @@ async function refresh() {
         for (const target of targets) {
           const button = element('button', action === 'load' ? 'Load / start' : '■ Stop' + (target.hardware ? ' · ' + target.hardware : ''));
           button.dataset.action = action; button.dataset.model = model.name;
-          button.addEventListener('click', safe(async () => { await api('/api/models/' + action, {model: model.name, target: action === 'load' ? $('load-target').value : target.target || ''}); await refresh(); })); actions.append(button);
+          actionFeedback.bind(button, JSON.stringify(['model', action, model.name, target.target || '']));
+          button.addEventListener('click', safe(async (event, control) => { await submitAction(control, '/api/models/' + action, {model: model.name, target: action === 'load' ? $('load-target').value : target.target || ''}); await refresh(); })); actions.append(button);
         }
       }
       row.append(actions); $('installed').append(row);
     });
     renderModelUsage(history.models);
-    const eventScroll = $('events').scrollTop, eventHorizontal = $('events').scrollLeft;
-    $('events').replaceChildren(); history.events.forEach(event => $('events').append(element('div', `${new Date(event.timestamp * 1000).toLocaleString()} · ${event.kind} · ${event.model} ${event.detail}`, 'event')));
-    $('events').scrollTop = eventScroll; $('events').scrollLeft = eventHorizontal;
+    serverEvents = history.events;
+    for (let index = localActionEvents.length - 1; index >= 0; index--) {
+      const local = localActionEvents[index];
+      if (local.persisted && serverEvents.some(event => event.detail === local.detail &&
+          (event.model === local.model || event.kind.endsWith(':failed')) &&
+          Math.abs(event.timestamp - local.timestamp) < 10)) localActionEvents.splice(index, 1);
+    }
+    renderEvents(serverEvents);
+    actionFeedback.restore();
     updateControls();
     draw(history.samples);
   } finally { refreshing = false; }

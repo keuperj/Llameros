@@ -22,7 +22,7 @@ function keyPanel(clipboard) {
     if (!fields.has(id)) fields.set(id, new Node(id));
     return fields.get(id);
   };
-  const context = vm.createContext({$: get, element: (tag, text, cls) => Object.assign(new Node(tag, text), {className: cls}),
+  const context = vm.createContext({actionFeedback: {bind() {}, clear() {}, fail() {}, restore() {}}, $: get, element: (tag, text, cls) => Object.assign(new Node(tag, text), {className: cls}),
     navigator: {clipboard}, csrf: 'csrf', safe: fn => fn,
     api: async (url, body, method) => { calls.push({url, body, method}); return body && !method ? {key: 'llm_test-secret'} : {keys}; },
     refresh: async () => {}});
@@ -114,7 +114,7 @@ test('startup loads existing keys without waiting for dashboard or catalogue', a
       refresh: () => failure === 'refresh' ? Promise.reject(new Error('runtime unavailable')) : refresh,
       catalogue: () => failure === 'catalogue' ? Promise.reject(new Error('catalogue unavailable')) : catalogue,
       refreshKeys: () => ui.run('refreshKeys()')});
-    vm.runInContext(source.slice(source.indexOf('async function signedIn('), source.indexOf("$('login-form')")), context);
+    vm.runInContext(source.slice(source.indexOf('async function signedIn('), source.indexOf("for (const id of ['login-form'")), context);
     const startup = vm.runInContext('signedIn({csrf: "session-token", username: "test-user"})', context);
     const outcome = startup.catch(error => error);
     await new Promise(resolve => setImmediate(resolve));

@@ -49,6 +49,11 @@ class StorageRequest(BaseModel):
     confirmed: bool = False
 
 
+class ActionError(BaseModel):
+    action: str = Field(min_length=1, max_length=300)
+    message: str = Field(min_length=1, max_length=2000)
+
+
 class Jobs:
     def __init__(self, store: Store):
         self.store = store
@@ -74,7 +79,9 @@ class Jobs:
                 "started": time.time(),
                 "progress": {"status": "Preparing operation"},
                 "targets": sorted(targets) if targets is not None else None,
+                "job_id": secrets.token_hex(16),
             }
+            job_id = self.job["job_id"]
 
         def progress(value):
             with self.lock:
@@ -111,7 +118,7 @@ class Jobs:
                 self.store.event(f"{action}:failed", model, str(exc)[:2000])
 
         self.pool.submit(work)
-        return {"accepted": True}
+        return {"accepted": True, "job_id": job_id}
 
 
 def create_app(
@@ -234,8 +241,10 @@ def create_app(
     @app.post("/api/login")
     def login(body: Login, request: Request, response: Response):
         if not sessions.allow_attempt():
+            store.event("login:failed", detail="Too many login attempts; wait one minute")
             raise HTTPException(429, "Too many login attempts; wait one minute")
         if not authenticate(body.username, body.password, cfg.pam_service):
+            store.event("login:failed", detail="Linux authentication failed")
             raise HTTPException(401, "Linux authentication failed")
         sessions.remove(request.cookies.get(COOKIE, ""))
         token, session = sessions.create(body.username)
@@ -317,6 +326,11 @@ def create_app(
     @app.get("/api/history", dependencies=protected)
     def history():
         return store.history()
+
+    @app.post("/api/action-errors", dependencies=protected)
+    def action_error(body: ActionError):
+        store.event("dashboard-action:failed", body.action, body.message)
+        return {"ok": True}
 
     @app.get("/api/storage", dependencies=protected)
     def storage_info():
