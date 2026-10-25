@@ -37,6 +37,105 @@ Command-line overrides include `--host` and `--port`. Without `uv`, install with
 `uv.lock` records the tested dependency set. The dashboard can open without Docker,
 but model operations require a working daemon.
 
+## Switch an existing installation to rootless Docker
+
+This creates a **separate per-user daemon**, not an in-place conversion. Keep the
+old containers/volumes until the replacement works. The steps below assume Linux
+with systemd and Docker Engine; package names differ for distribution/Snap/Desktop
+installations. Follow Docker's official rootless installation instructions for your
+distribution rather than mixing package sources.
+
+### 1. Stop workloads and preserve data
+
+- Record the current Docker context (`docker context show`) and any `DOCKER_HOST`
+  or `DOCKER_CONTEXT` overrides. Confirm which daemon owns your existing workloads.
+- Stop Llameros model runtimes on that original daemon, then stop the Llameros
+  server. If the dashboard refuses rootful Docker, use the original Docker context
+  to inspect and stop the specific managed containers manually; do not stop all
+  containers indiscriminately.
+- Back up Llameros configuration and `state_dir` while the server is stopped.
+  Keep `runtime-slots.json`; do not delete it to work around migration errors.
+- **Host-directory models:** back up `blobs` and `manifests`. Use a private copy
+  owned by the Llameros account and verify rootless container access before reuse.
+- **Docker-volume models:** volumes are not transferred by switching contexts.
+  Either re-download models on the new daemon or export them while the old daemon
+  is available. The default Llameros volume is `llameros-<uid>-models`, mounted at
+  `/root/.ollama`; its `models` subdirectory contains `blobs` and `manifests`.
+  Restore those two directories into a private host models directory, then select
+  it under **Configuration → Model storage**. Use Docker's volume backup/restore
+  procedure; do not copy Docker's internal data directory or its ownership mappings.
+
+### 2. Prepare the account and install the user daemon
+
+Log in directly as the account that runs Llameros (desktop or SSH), not through
+`sudo su`. Rootless Docker needs `newuidmap`/`newgidmap` and at least 65,536 subordinate
+UIDs and GIDs assigned to this account in `/etc/subuid` and `/etc/subgid`. Ask an
+administrator to allocate non-overlapping ranges if missing; do not copy another
+account's ranges. On Debian/Ubuntu using Docker's official apt repository, the
+relevant packages are typically installed with:
+
+```bash
+sudo apt-get install uidmap docker-ce-rootless-extras
+```
+
+Administrator privileges here are for host setup only, **never for running
+Llameros or the rootless setup tool**. Resolve any distribution-specific user
+namespace/AppArmor prerequisites reported by Docker's installer.
+
+If all workloads on the system-wide daemon have been stopped or migrated and its
+owner approves the outage, disable that daemon and its socket activation:
+
+```bash
+sudo systemctl disable --now docker.service docker.socket
+```
+
+Otherwise keep it available for unrelated workloads and use the installer's
+`--force` option below. This leaves a rootful daemon running; selecting rootless
+Docker does not remove that daemon or its access privileges.
+
+```bash
+# Run as the normal Llameros account, without sudo.
+unset DOCKER_HOST DOCKER_CONTEXT
+dockerd-rootless-setuptool.sh install
+# If intentionally retaining the rootful daemon, use instead:
+# dockerd-rootless-setuptool.sh install --force
+systemctl --user enable --now docker.service
+docker context use rootless
+docker info --format '{{json .SecurityOptions}}'
+```
+
+The final output must include `rootless`. A context name alone is not proof.
+For startup before login and persistence after logout, an administrator can enable
+lingering with `sudo loginctl enable-linger "$USER"` from this account's session.
+If the user service cannot connect to the bus, log in normally and check Docker's
+rootless troubleshooting guide instead of creating a system-wide rootless service.
+
+### 3. Reconnect Llameros and verify
+
+Set `allow_rootful_docker = false` in the Llameros startup TOML. Remove stale Docker
+environment overrides from the shell or service that launches Llameros: changing
+your interactive shell does not change an already running service's environment.
+Use the `rootless` context for that same account. If the launcher needs an explicit
+socket, rootless Docker normally uses `unix:///run/user/<uid>/docker.sock`; do not
+point it back to `/var/run/docker.sock`.
+
+Restart Llameros, select the preserved host model directory or new Docker volume,
+and start Ollama. Containers and digest-pinned images are recreated/downloaded on
+the new daemon. Confirm model inventory, CPU inference, API-key access, and any
+GPU execution before removing backups. GPU access and resource-limit support need
+separate host validation; do not fix permission failures with `chmod 777` or sudo.
+
+**Rollback:** stop the new Llameros server and rootless runtimes first. Restore the
+previous launcher context/environment and storage selection; re-enable the original
+daemon only if you disabled it and its owner approves. Using rootful Docker again
+also requires explicit `allow_rootful_docker = true` risk acceptance. Changes made
+to the new model store are not automatically synchronized back to the old one.
+
+References: Docker's [rootless installation](https://docs.docker.com/engine/security/rootless/),
+[user-service and context setup](https://docs.docker.com/engine/security/rootless/tips/),
+[troubleshooting](https://docs.docker.com/engine/security/rootless/troubleshoot/), and
+[volume backup/restore](https://docs.docker.com/engine/storage/volumes/#back-up-restore-or-migrate-data-volumes).
+
 ## First model and daily workflow
 
 1. **Start Ollama.** The first start may download the runtime image; progress and
@@ -194,7 +293,8 @@ root to work around a failure. Login-disabled service accounts cannot sign in.
 2. Reapply the model-storage selection while stopped, then restart to recreate
    containers with private runtime access. Preserve model volumes and backups.
 3. When switching to rootless Docker, arrange model storage separately: containers
-   and volumes do not migrate automatically between daemons.
+   and volumes do not migrate automatically between daemons. Follow the
+   [rootless migration steps](#switch-an-existing-installation-to-rootless-docker).
 4. Replace mutable image tags with digest pins from the example configuration;
    remove obsolete `pdf_max_*` options and replace unsupported user wildcard or
    non-expiring keys with granted, expiring keys.
