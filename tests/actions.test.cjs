@@ -6,6 +6,7 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const path = require('node:path');
 const vm = require('node:vm');
 const Feedback = require('../src/llameros/static/actions.js');
 
@@ -61,7 +62,7 @@ test('successful job creates no error; stale failure does not match newer job', 
 
 test('safe captures actual form submitter before await and attributes failures to it', async () => {
   const ui = fixture(), submitter = ui.button('generate-form');
-  const source = fs.readFileSync('/home/keuper/Projekte/Llameros/src/llameros/static/app.js', 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '../src/llameros/static/app.js'), 'utf8');
   const context = vm.createContext({sessionEpoch: 0, actionFeedback: ui.feedback});
   vm.runInContext(source.slice(source.indexOf('function actionControl('), source.indexOf('function element(')), context);
   context.event = {currentTarget: {tagName: 'FORM'}, submitter, preventDefault() {}};
