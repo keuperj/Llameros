@@ -95,14 +95,14 @@ async function copyKeySecret() {
     $('api-key-feedback').textContent = 'Clipboard unavailable. The masked key is selected; press Ctrl+C or Command+C.';
   }
 }
+let modelUsageTable = null, keyUsageTable = null;
 function renderKeyUsage(keys) {
-  $('key-usage').replaceChildren();
-  for (const key of keys) {
-    const row = element('tr', '');
-    const state = keyState(key);
-    for (const value of [key.name, state, key.requests, key.failed, key.prompt_tokens, key.output_tokens, key.unknown_usage, key.seconds.toFixed(1)]) row.append(element('td', value));
-    $('key-usage').append(row);
-  }
+  if (!keyUsageTable) keyUsageTable = UsageTable.create($('key-usage'), UsageTable.keyColumns);
+  keyUsageTable.update(keys.map(key => ({...key, status: keyState(key)})));
+}
+function renderModelUsage(models) {
+  if (!modelUsageTable) modelUsageTable = UsageTable.create($('usage'), UsageTable.modelColumns);
+  modelUsageTable.update(models);
 }
 function updateControls() {
   const state = JobProgress.controls(runtimeState, busy);
@@ -196,12 +196,13 @@ $('model-info-close').addEventListener('click', () => closeModelInfo());
 $('model-info-overlay').addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeModelInfo(); } });
 $('generate-model').addEventListener('change', updateControls);
 $('image-availability').addEventListener('click', safe(refresh));
-function signedOut() { clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function signedOut() { clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); if (keyUsageTable) keyUsageTable.update([]); if (modelUsageTable) modelUsageTable.update([]); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
   clearInterval(timer); timer = setInterval(safe(refresh), 5000); clearInterval(jobTimer); jobTimer = setInterval(pollJob, 1000);
-  await refresh(); await catalogue(); await refreshKeys();
+  // Load keys independently: unavailable runtimes/catalogue must not leave the table empty.
+  await Promise.all([refreshKeys(), refresh(), catalogue()]);
 }
 $('login-form').addEventListener('submit', safe(async () => {
   try { const data = await api('/api/login', {username: $('username').value, password: $('password').value}); await signedIn(data); }
@@ -425,8 +426,7 @@ async function refresh() {
       }
       row.append(actions); $('installed').append(row);
     });
-    $('usage').replaceChildren();
-    history.models.forEach(model => { const row = element('tr', ''); [model.model, model.requests, model.prompt_tokens, model.output_tokens, model.tokens_per_second.toFixed(1), model.seconds.toFixed(1)].forEach(value => row.append(element('td', value))); $('usage').append(row); });
+    renderModelUsage(history.models);
     const eventScroll = $('events').scrollTop, eventHorizontal = $('events').scrollLeft;
     $('events').replaceChildren(); history.events.forEach(event => $('events').append(element('div', `${new Date(event.timestamp * 1000).toLocaleString()} · ${event.kind} · ${event.model} ${event.detail}`, 'event')));
     $('events').scrollTop = eventScroll; $('events').scrollLeft = eventHorizontal;

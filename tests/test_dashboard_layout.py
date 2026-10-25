@@ -18,7 +18,7 @@ def test_playground_closed_and_scroll_regions_accessible():
     parser.feed((static / "index.html").read_text())
     tag, attrs = parser.nodes["try-model"]
     assert tag == "details" and "open" not in attrs
-    for name in ("events", "installed"):
+    for name in ("events", "installed", "model-usage-scroll", "key-usage-scroll"):
         attrs = parser.nodes[name][1]
         assert attrs["tabindex"] == "0" and attrs["role"] == "region"
     assert parser.nodes["runtime"][1]["aria-live"] == "polite"
@@ -26,3 +26,7 @@ def test_playground_closed_and_scroll_regions_accessible():
     assert "max-height:calc(10 * var(--event-height))" in css
     assert "height:var(--event-height)" in css
     assert "overflow-y:auto" in css
+    assert "10 * var(--usage-row-height)" in css
+    assert "height:var(--usage-row-height)" in css
+    html = (static / "index.html").read_text()
+    assert html.index("/static/usage.js") < html.index("/static/app.js")

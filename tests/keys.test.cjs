@@ -100,3 +100,29 @@ test('model dropdown preserves selection and key status handles no expiry', () =
   assert.equal(ui.run('keyState({expires: 1})'), 'expired');
   assert.equal(ui.run('keyState({expires: 0, revoked: true})'), 'revoked');
 });
+
+test('startup loads existing keys without waiting for dashboard or catalogue', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/llameros/static/app.js'), 'utf8');
+  for (const failure of ['refresh', 'catalogue', null]) {
+    const ui = keyPanel();
+    ui.setKeys([{id: 'persisted-key', name: 'Existing client', models: ['*'], expires: 0}]);
+    let finishRefresh, finishCatalogue;
+    const refresh = new Promise(resolve => { finishRefresh = resolve; });
+    const catalogue = new Promise(resolve => { finishCatalogue = resolve; });
+    const context = vm.createContext({$: ui.get, csrf: '', timer: null, jobTimer: null,
+      clearInterval() {}, setInterval() { return 1; }, safe: fn => fn, notice() {}, pollJob() {},
+      refresh: () => failure === 'refresh' ? Promise.reject(new Error('runtime unavailable')) : refresh,
+      catalogue: () => failure === 'catalogue' ? Promise.reject(new Error('catalogue unavailable')) : catalogue,
+      refreshKeys: () => ui.run('refreshKeys()')});
+    vm.runInContext(source.slice(source.indexOf('async function signedIn('), source.indexOf("$('login-form')")), context);
+    const startup = vm.runInContext('signedIn({csrf: "session-token", username: "test-user"})', context);
+    const outcome = startup.catch(error => error);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(ui.calls[0].url, '/api/keys');
+    assert.equal(ui.get('api-keys').children[0].children[0].children[0].textContent, 'Existing client');
+    finishRefresh(); finishCatalogue();
+    const result = await outcome;
+    if (failure) assert.match(result.message, /unavailable/);
+    else assert.equal(result, undefined);
+  }
+});
