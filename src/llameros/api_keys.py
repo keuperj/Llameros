@@ -2,13 +2,12 @@
 
 import hashlib
 import json
+import re
 import secrets
 import time
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from .catalog import validate_model
 
 
 class KeyRequest(BaseModel):
@@ -38,7 +37,18 @@ class KeyRequest(BaseModel):
 
 
 def normalize(model):
-    name = validate_model(model)
+    # Inference accepts namespaced local models; catalogue/lifecycle rules stay stricter.
+    if (
+        not isinstance(model, str)
+        or len(model) > 256
+        or not re.fullmatch(
+            r"[a-zA-Z0-9][a-zA-Z0-9._-]*(?:/[a-zA-Z0-9][a-zA-Z0-9._-]*)*(?::[a-zA-Z0-9][a-zA-Z0-9._-]*)?",
+            model,
+        )
+        or any(part in {".", ".."} for part in model.split("/"))
+    ):
+        raise ValueError("Valid local model name required")
+    name = model
     return name if ":" in name else name + ":latest"
 
 

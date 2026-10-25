@@ -488,7 +488,7 @@ def test_embeddings_permissions_batched_translation_and_accounting(gateway, path
         {"truncate": "yes"},
         {"stream": True},
         {"options": {"num_gpu": 9}},
-        {"encoding_format": "base64"},
+        {"encoding_format": "invalid"},
     ],
 )
 def test_embedding_validation(gateway, fields):

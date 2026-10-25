@@ -114,7 +114,8 @@ The gateway supports authenticated `POST /inference/api/embed` and
 `POST /inference/v1/embeddings` with the same model/target permissions as chat.
 Provide `input` as text or 1–64 strings (up to 32,000 characters each; total JSON
 body limit 128 KiB). Truncation defaults to false. OpenAI compatibility accepts
-float vectors, not base64 or token-ID input. Input tokens are accounted without
+float or base64 vectors, but not token-ID input. See [API compatibility](api-compatibility.md)
+for the expanded protocols and API-only image/PDF handling. Input tokens are accounted without
 storing texts or vectors; embedding output tokens are zero. Missing upstream
 input counts remain unknown. Output-token caps apply to generation, not vectors.
 

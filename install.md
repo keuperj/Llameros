@@ -223,13 +223,18 @@ extension `target` also works and takes precedence. Without a target, exactly
 one permitted instance of the model must be loaded, otherwise the request gets
 409. Models must be loaded through the dashboard first; the gateway never
 intentionally loads a different model. All gateway generation and dashboard
-jobs share one global lock; concurrent jobs return 409 instead of queueing.
+jobs share per-device reservations. Each device executes one request at a time,
+with up to 16 queued requests and a 120-second wait timeout. Independent devices
+can execute concurrently; conflicting lifecycle operations return 409.
 
 Ollama requests default to streaming; OpenAI requests default to non-streaming.
 Use `stream: true` for streaming and OpenAI `stream_options.include_usage: true`
-for a usage chunk. OpenAI compatibility covers chat completions, **not** the
-Responses, embeddings, audio, or full OpenAI API. Unsupported fields return 400.
-Limits: 128 KiB JSON request, output 1–4096 tokens (default 256), configured
+for a usage chunk. OpenAI compatibility covers chat completions, completions,
+stateless Responses, and text embeddings; Anthropic Messages is also exposed.
+This is not the full OpenAI API: audio and stateful Responses are excluded.
+Unsupported fields return 400. See [API compatibility](api-compatibility.md).
+Limits: 128 KiB text-only JSON request; bounded inline image/PDF requests default
+to 16 MiB. Output is 1–4096 tokens (default 256), configured
 context length only, and allowlisted sampling options. Client residency hints
 are ignored; Ollama-style gateway generation keeps the loaded model resident.
 These are guardrails, not hard CPU/RAM quotas or a public-service rate limiter.

@@ -28,9 +28,27 @@ class Settings:
     allow_rootful_docker: bool = True
     context_length: int = 4096
     max_loaded_models: int = 2
+    inference_body_bytes: int = 16 * 1024 * 1024
+    image_max_bytes: int = 8 * 1024 * 1024
+    image_max_count: int = 8
+    image_max_pixels: int = 40_000_000
+    pdf_max_bytes: int = 8 * 1024 * 1024
+    pdf_max_pages: int = 64
+    pdf_max_text_bytes: int = 1024 * 1024
 
     def __post_init__(self):
         object.__setattr__(self, "state_dir", Path(self.state_dir).expanduser().absolute())
+        for name, ceiling in {
+            "inference_body_bytes": 64 * 1024 * 1024,
+            "image_max_bytes": 32 * 1024 * 1024,
+            "image_max_count": 64,
+            "image_max_pixels": 100_000_000,
+            "pdf_max_bytes": 32 * 1024 * 1024,
+            "pdf_max_pages": 256,
+            "pdf_max_text_bytes": 4 * 1024 * 1024,
+        }.items():
+            if type(getattr(self, name)) is not int or not 1 <= getattr(self, name) <= ceiling:
+                raise ValueError(f"{name} must be 1–{ceiling}")
         for name in ("port", "ollama_port"):
             if not 1024 <= getattr(self, name) <= 65535:
                 raise ValueError(f"{name} must be between 1024 and 65535")

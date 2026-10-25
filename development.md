@@ -19,6 +19,10 @@ for script in src/llameros/static/*.js; do node --check "$script"; done
 node --test tests/*.test.cjs
 ```
 
+The inference contract reference is recorded in `tests/ollama-compatibility.json`.
+See [API compatibility](api-compatibility.md) for offline coverage, restrictions,
+and opt-in HTTPS/model checks using `scripts/check_api_compatibility.py`.
+
 Tests use fake PAM/Docker/catalogue services; they do not use your password,
 download large models, or modify your Docker daemon. A successful real PAM login
 and GPU/container inference need local acceptance testing on the target host.
