@@ -34,7 +34,7 @@ uv run llameros
 ```
 
 Open **https://127.0.0.1:8443**, verify/trust your generated certificate, and sign in
-with the Linux account running Llameros. Start Ollama, download a model, select a
+with your Linux account. The account running Llameros defaults to admin; other login accounts default to users. Start Ollama, download a model, select a
 free CPU/GPU slot, and load it.
 
 > Rootless Docker is recommended. The application currently allows rootful Docker
@@ -159,3 +159,20 @@ For a custom fixed dataset, `--corpus /absolute/path/to/corpus.json` accepts
 small: this is an execution/latency benchmark, not a retrieval-quality evaluation
 or large-index performance test. Retrieval uses an in-memory exact cosine scan;
 production document ingestion and persistent vector storage remain outside Llameros.
+
+## Multiple users
+
+The admin dashboard is restricted by server-side role checks. Other Linux login
+accounts get a user dashboard with running models, CPU/RAM history, their own
+inference totals, and their own API keys. Every key has a Linux `user` owner;
+existing keys are migrated to the account running Llameros without changing secrets.
+
+In **Configuration → User access**, admins can promote/demote accounts and block
+users. Blocking invalidates dashboard sessions and permanently revokes all of that
+user's keys; unblocking does not restore them. Admins cannot block or demote
+themselves. Admins can switch between admin and user boards using the header button.
+Roles and blocks persist in the private SQLite state database.
+
+PAM must permit authentication of other accounts from the unprivileged Llameros
+process. This depends on host policy; Llameros does not modify PAM or elevate
+privileges. See the installation guide for deployment limitations.

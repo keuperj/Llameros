@@ -25,6 +25,7 @@ from .hardware import assess_fit, snapshot
 from .runtimes import Runtimes
 from .scheduling import InferenceScheduler
 from .storage import Store
+from .users import Users, UserUpdate
 
 log = logging.getLogger(__name__)
 
@@ -134,6 +135,7 @@ def create_app(
     cfg = settings or Settings()
     cfg.prepare()
     store = Store(cfg.state_dir / "history.sqlite3")
+    users = Users(store)
     supplied_docker = docker
     catalog = catalog or Catalog()
     authenticate = authenticator or verify_password
@@ -177,6 +179,7 @@ def create_app(
         title="Llameros", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
     )
     app.state.store, app.state.jobs = store, jobs
+    app.state.users = users
 
     @app.middleware("http")
     async def security(request: Request, call_next):
@@ -232,21 +235,33 @@ def create_app(
 
     def require_session(request: Request):
         session = sessions.get(request.cookies.get(COOKIE, ""))
-        if not session:
-            raise HTTPException(401, "Sign in with the Linux account running Llameros")
+        account = users.get(session["username"]) if session else None
+        if not session or account["blocked"]:
+            if session:
+                sessions.remove(request.cookies.get(COOKIE, ""))
+            raise HTTPException(401, "Sign in with an allowed Linux account")
+        return {**session, "role": account["role"]}
+
+    def require_admin(session=Depends(require_session)):
+        if session["role"] != "admin":
+            raise HTTPException(403, "Administrator access required")
         return session
 
-    protected = [Depends(require_session)]
+    protected = [Depends(require_admin)]
+    signed_in = [Depends(require_session)]
 
     @app.post("/api/login")
     def login(body: Login, request: Request, response: Response):
         if not sessions.allow_attempt():
             store.event("login:failed", detail="Too many login attempts; wait one minute")
             raise HTTPException(429, "Too many login attempts; wait one minute")
-        if not authenticate(body.username, body.password, cfg.pam_service):
+        if users.get(body.username)["blocked"] or not authenticate(
+            body.username, body.password, cfg.pam_service
+        ):
             store.event("login:failed", detail="Linux authentication failed")
             raise HTTPException(401, "Linux authentication failed")
         sessions.remove(request.cookies.get(COOKIE, ""))
+        users.remember(body.username)
         token, session = sessions.create(body.username)
         response.set_cookie(
             COOKIE,
@@ -257,17 +272,85 @@ def create_app(
             max_age=cfg.session_seconds,
             path="/",
         )
-        return {"username": session["username"], "csrf": session["csrf"]}
+        return {
+            "username": body.username,
+            "csrf": session["csrf"],
+            "role": users.get(body.username)["role"],
+        }
 
     @app.get("/api/session")
     def session_info(session=Depends(require_session)):
-        return {"username": session["username"], "csrf": session["csrf"]}
+        return {"username": session["username"], "csrf": session["csrf"], "role": session["role"]}
 
-    @app.post("/api/logout", dependencies=protected)
+    @app.post("/api/logout", dependencies=signed_in)
     def logout(request: Request, response: Response):
         sessions.remove(request.cookies.get(COOKIE, ""))
         response.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
         return {"ok": True}
+
+    @app.get("/api/users", dependencies=protected)
+    def list_users():
+        return {"users": users.list()}
+
+    @app.post("/api/users/{username}", dependencies=protected)
+    def update_user(username: str, body: UserUpdate, session=Depends(require_admin)):
+        result = users.update(username, body, session["username"])
+        if body.blocked:
+            sessions.remove_user(username)
+        return result
+
+    @app.get("/api/user/dashboard", dependencies=signed_in)
+    def user_dashboard(session=Depends(require_session)):
+        try:
+            runtime = runtime_status()
+        except (DockerError, httpx.HTTPError):
+            runtime = {"running": False, "loaded": []}
+        # Never expose direct unauthenticated runtime URLs or administrative data.
+        models = (
+            [
+                {
+                    field: model[field]
+                    for field in ("name", "model", "target", "hardware")
+                    if field in model
+                }
+                for model in runtime.get("loaded", [])
+            ]
+            if runtime.get("running")
+            else []
+        )
+        history = store.history()
+        own_keys = app.state.api_keys.list(session["username"])
+        with store.connect() as db:
+            totals = [
+                dict(row)
+                for row in db.execute(
+                    """
+                SELECT u.model,COUNT(*) AS requests,COALESCE(SUM(u.prompt_tokens),0) AS prompt_tokens,
+                    COALESCE(SUM(u.output_tokens),0) AS output_tokens,SUM(u.duration) AS seconds,
+                    0 AS tokens_per_second
+                FROM api_usage u JOIN api_keys k ON u.key_id=k.id
+                WHERE k.user=? GROUP BY u.model
+            """,
+                    (session["username"],),
+                )
+            ]
+        return {
+            "models": models,
+            "keys": own_keys,
+            "history": {
+                "models": totals,
+                "samples": [
+                    {
+                        "timestamp": sample["timestamp"],
+                        "hardware": {
+                            field: sample.get("hardware", {}).get(field, 0)
+                            for field in ("cpu_percent", "memory_percent")
+                        },
+                    }
+                    for sample in history["samples"]
+                ],
+            },
+        }
 
     @app.get("/api/status", dependencies=protected)
     def status():
@@ -530,7 +613,16 @@ def create_app(
         return jobs.submit("generate", name, work)
 
     install_gateway(
-        app, cfg, store, jobs, protected, runtime_status, runtimes, docker, gateway_transport
+        app,
+        cfg,
+        store,
+        jobs,
+        signed_in,
+        runtime_status,
+        runtimes,
+        docker,
+        gateway_transport,
+        require_session=require_session,
     )
 
     static = Path(__file__).parent / "static"

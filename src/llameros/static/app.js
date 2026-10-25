@@ -183,6 +183,7 @@ const cpuOnly = () => $('cpu-only').checked;
 const bytes = n => n == null ? 'unknown' : `${(n / 1073741824).toFixed(1)} GiB`;
 function notice(message = '') { $('notice').textContent = message; }
 async function api(path, body, method) {
+  if (typeof userBoard !== 'undefined' && userBoard && path.startsWith('/api/keys')) path += (path.includes('?') ? '&' : '?') + 'board=user';
   const response = await fetch(path, {method: method || (body === undefined ? 'GET' : 'POST'),
     headers: body === undefined ? {} : {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
     body: body === undefined ? undefined : JSON.stringify(body)});
@@ -238,11 +239,14 @@ $('model-info-close').addEventListener('click', () => closeModelInfo());
 $('model-info-overlay').addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeModelInfo(); } });
 $('generate-model').addEventListener('change', updateControls);
 $('image-availability').addEventListener('click', safe(refresh));
-function signedOut() { actionFeedback.reset(); localActionEvents.length = 0; serverEvents = [];  clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); if (keyUsageTable) keyUsageTable.update([]); if (modelUsageTable) modelUsageTable.update([]); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function signedOut() { if (typeof dashboardIdentity !== 'undefined') { dashboardIdentity = null; userBoard = false; $('board-switch').hidden = true; $('users').replaceChildren(); }  actionFeedback.reset(); localActionEvents.length = 0; serverEvents = [];  clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); if (keyUsageTable) keyUsageTable.update([]); if (modelUsageTable) modelUsageTable.update([]); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
+  if (data.role) configureBoard(data);
   clearInterval(timer); timer = setInterval(safe(refresh), 5000); clearInterval(jobTimer); jobTimer = setInterval(pollJob, 1000);
+  if (data.role === 'user') { clearInterval(jobTimer); jobTimer = null; await Promise.all([refreshKeys(), refresh()]); return; }
+  if (data.role === 'admin') await refreshUsers();
   // Load keys independently: unavailable runtimes/catalogue must not leave the table empty.
   await Promise.all([refreshKeys(), refresh(), catalogue()]);
 }
@@ -264,6 +268,7 @@ async function refreshKeys() {
     const row = element('tr', ''), state = keyState(key);
     const name = element('td', ''), models = element('td', ''), status = element('td', '');
     const nameText = element('span', key.name, 'key-cell-text'); nameText.title = key.name; name.append(nameText);
+    if (key.user) name.append(element('small', key.user, 'key-cell-text'));
     const modelText = key.models.includes('*') ? 'All models' : key.models.join(', ');
     const modelLabel = element('span', modelText, 'key-cell-text'); modelLabel.title = modelText; models.append(modelLabel);
     const badge = element('span', state, 'key-status'); badge.dataset.state = state; status.append(badge);
@@ -284,7 +289,8 @@ async function refreshKeys() {
 }
 $('api-key-form').addEventListener('submit', safe(async () => {
   clearKeySecret();
-  const result = await api('/api/keys', {name: $('api-key-name').value.trim(), models: [$('api-key-models').value || '*'], max_tokens: null, expires_days: $('api-key-days').value === 'never' ? null : Number($('api-key-days').value)});
+  const owner = typeof dashboardIdentity !== 'undefined' && dashboardIdentity ? {user: userBoard ? dashboardIdentity.username : $('api-key-user').value.trim() || dashboardIdentity.username} : {};
+  const result = await api('/api/keys', {...owner, name: $('api-key-name').value.trim(), models: [$('api-key-models').value || '*'], max_tokens: null, expires_days: $('api-key-days').value === 'never' ? null : Number($('api-key-days').value)});
   if (!csrf) return;
   $('api-key-secret').value = result.key; $('api-key-result').hidden = false; $('api-key-copy').disabled = false;
   $('api-key-feedback').textContent = 'Key generated. Copy it now; only its digest is stored.';
@@ -408,6 +414,13 @@ $('generate-form').addEventListener('submit', safe(async (event, control) => {
 async function refresh() {
   if (refreshing || !csrf) return; refreshing = true;
   try {
+    const session = await api('/api/session');
+    if (!csrf) return;
+    if (dashboardIdentity && session.role !== dashboardIdentity.role) {
+      configureBoard(session); clearInterval(jobTimer); jobTimer = userBoard ? null : setInterval(pollJob, 1000);
+      await refreshKeys();
+    }
+    if (userBoard) { await refreshUserBoard(); return; }
     const [data, history, inventory, keyUsage] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage')]);
     if (!csrf) return;
     renderKeyUsage(keyUsage.keys); renderKeyModels(inventory.models || []);

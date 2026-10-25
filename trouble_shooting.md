@@ -45,7 +45,7 @@ If readiness fails, inspect the managed container's logs. See
 
 ## Sign-in or certificate problems
 
-Use the same Linux username and password as the user who started Llameros.
+Use your Linux login username and password. The account starting Llameros defaults to admin; other login accounts default to users. Blocked accounts cannot log in. Cross-account PAM authentication may be restricted by host policy; see the multi-user section of the installation guide.
 There is no default password. Verify/trust the locally generated certificate
 before submitting credentials. PAM must support ordinary username/password
 authentication; locked, passwordless, expired, or MFA-only accounts may not work.

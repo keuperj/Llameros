@@ -1,17 +1,22 @@
 """PAM verification and short-lived, server-side sessions."""
 
+import pwd
 import secrets
 import threading
 import time
 from collections import deque
 
-from .config import current_user
-
 COOKIE = "__Host-llameros"
 
 
 def verify_password(username: str, password: str, service: str) -> bool:
-    if username != current_user() or not password or "\x00" in username + password:
+    if not username or not password or "\x00" in username + password:
+        return False
+    try:
+        account = pwd.getpwnam(username)
+    except KeyError:
+        return False
+    if not account.pw_shell or account.pw_shell.rsplit("/", 1)[-1] in {"nologin", "false"}:
         return False
     import pam
 
@@ -27,7 +32,7 @@ class Sessions:
         self.lock = threading.Lock()
 
     def allow_attempt(self) -> bool:
-        # Global limit as well as single-user authorization: source IP spoofing cannot bypass it.
+        # Global limit: source IP spoofing cannot bypass it.
         with self.lock:
             now = time.monotonic()
             while self.attempts and self.attempts[0] < now - 60:
@@ -65,3 +70,11 @@ class Sessions:
     def remove(self, token: str):
         with self.lock:
             self.sessions.pop(token, None)
+
+    def remove_user(self, username: str):
+        with self.lock:
+            self.sessions = {
+                token: session
+                for token, session in self.sessions.items()
+                if session["username"] != username
+            }

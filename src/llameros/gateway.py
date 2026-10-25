@@ -35,7 +35,17 @@ class InferenceStream(StreamingResponse):
 
 
 def install_gateway(
-    app, cfg, store, jobs, protected, runtime_status, runtimes, docker, transport=None
+    app,
+    cfg,
+    store,
+    jobs,
+    protected,
+    runtime_status,
+    runtimes,
+    docker,
+    transport=None,
+    *,
+    require_session,
 ):
     keys = ApiKeys(store)
     app.state.api_keys = keys
@@ -63,26 +73,43 @@ def install_gateway(
 
     app.add_exception_handler(HTTPException, api_error)
 
+    def key_owner(request, session):
+        return (
+            session["username"]
+            if session["role"] != "admin" or request.query_params.get("board") == "user"
+            else None
+        )
+
     @app.get("/api/keys", dependencies=protected)
-    def list_keys():
-        return {"keys": [key for key in keys.list() if not key["deleted"]]}
+    def list_keys(request: Request, session=Depends(require_session)):
+        return {
+            "keys": [key for key in keys.list(key_owner(request, session)) if not key["deleted"]]
+        }
 
     @app.get("/api/keys/usage", dependencies=protected)
-    def key_usage():
-        return {"keys": keys.list()}
+    def key_usage(request: Request, session=Depends(require_session)):
+        return {"keys": keys.list(key_owner(request, session))}
 
     @app.delete("/api/keys/{identity}", dependencies=protected)
-    def delete_key(identity: str):
-        keys.delete(identity)
+    def delete_key(identity: str, request: Request, session=Depends(require_session)):
+        keys.delete(identity, key_owner(request, session))
         return {"ok": True}
 
     @app.post("/api/keys", dependencies=protected, status_code=201)
-    def create_key(body: KeyRequest):
-        return keys.create(body)
+    def create_key(body: KeyRequest, request: Request, session=Depends(require_session)):
+        owner = body.user or session["username"]
+        if key_owner(request, session) and owner != session["username"]:
+            raise HTTPException(403, "You may only create your own keys")
+        if (
+            owner not in {user["username"] for user in keys.users.list()}
+            and owner != session["username"]
+        ):
+            raise HTTPException(404, "System user not found")
+        return keys.create(body, owner)
 
     @app.post("/api/keys/{identity}/revoke", dependencies=protected)
-    def revoke_key(identity: str):
-        keys.revoke(identity)
+    def revoke_key(identity: str, request: Request, session=Depends(require_session)):
+        keys.revoke(identity, key_owner(request, session))
         return {"ok": True}
 
     def bearer(request: Request):

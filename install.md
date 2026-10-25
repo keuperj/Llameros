@@ -327,3 +327,29 @@ Keep the dashboard and Ollama APIs on loopback. Never send Linux credentials to
 Ollama. Read the [security model and limitations](development.md#security-model-and-limitations)
 before changing network bindings or Docker permissions. For errors and legacy
 container migration, see [Troubleshooting](trouble_shooting.md).
+
+## Multi-user dashboard access
+
+Sign in with a system login account and its PAM password. The Linux user starting
+Llameros is initially an **admin**; other login-shell accounts are **users** by default.
+Service accounts with `nologin` or `false` shells cannot sign in. Account enumeration
+uses the system password database (including NSS where configured), not `/etc/shadow`.
+
+Users can view running models and host CPU/RAM history, see usage for their own keys,
+and create/delete their own keys. They cannot download/start/stop models, change
+configuration, use the admin playground, or see other users' keys or activity logs.
+Existing keys migrate automatically to the process account. Admins can optionally
+set a Linux key owner when generating a key; users cannot assign keys to others.
+
+Admins manage **Configuration → User access** to promote, demote, block, or unblock
+accounts. Blocking revokes all owned keys and invalidates existing sessions. These
+credentials stay revoked after unblocking. Self-blocking/self-demotion is refused.
+The header's board switch lets admins preview/use their own user dashboard and return
+to the admin board. Roles and blocks survive application restarts.
+
+**PAM deployment limitation:** cross-account password verification from an ordinary
+Linux process may be disallowed by your distribution's PAM/shadow policy, even with
+the correct password. This feature does not install a privileged authentication
+helper, read shadow hashes, or modify PAM. Test with a second real account on the
+host. If policy refuses it, multi-user password login requires a separately reviewed
+host authentication solution; do not run Llameros as root or weaken PAM as a workaround.

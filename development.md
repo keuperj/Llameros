@@ -59,7 +59,7 @@ and hardware-assignment checks when changing container lifecycle code.
 ## Security model and limitations
 
 - The application does not sudo, read shadow files, switch identity, or create
-  privileged host helpers. Linux PAM authenticates the current user and checks
+  privileged host helpers. Linux PAM authenticates system login accounts and checks
   account policy. PAM configuration differs by distribution; test it locally.
   Passwordless, locked, MFA-only, and expired-password accounts may not support
   this simple username/password flow. Do not weaken PAM or run as root to fix it.
@@ -141,3 +141,28 @@ and hardware-assignment checks when changing container lifecycle code.
   contents are controlled by the user/OS and are not cleared by logout.
 - Run the standalone HTTPS smoke test described in the README against a trusted
   certificate and loaded model for live acceptance; automated tests use mocks.
+
+### Dashboard user authorization
+
+`users.py` persists admin/user roles and blocks in the history database. The process
+account is seeded as admin once; later role changes survive restart. Login-shell
+accounts discovered through the system password database default to user. PAM still
+checks credentials and account policy; no password hashes are read by Llameros.
+Admin dependencies protect lifecycle, catalogue, storage, playground, full history,
+and user-management endpoints. Key endpoints use session authorization and SQL
+owner scoping for users. `?board=user` additionally scopes admins' key operations
+while viewing the user board; it is not a role elevation mechanism.
+
+`GET /api/user/dashboard` returns allowlisted running-model fields, CPU/RAM samples,
+and the signed-in owner's API-key aggregates. It excludes host events, raw runtime
+addresses, other users' statistics, and stored credential digests. `POST /api/users/{username}`
+is admin/CSRF protected and takes `role` (`admin` or `user`) and `blocked` (boolean).
+Blocks and key revocation commit together; key creation checks blocks in a write
+transaction. Blocking deletes existing sessions; unblocking restores neither keys
+nor sessions. Role checks are refreshed on each request. Already-executing inference
+cannot be undone; queued admission continues to honor the existing revocation checks.
+
+The user board has no playground or runtime-management controls. Admin board
+switching does not change the authenticated user's actual role. Offline tests use
+injected authenticators; successful cross-account PAM login must be verified on the
+deployment host without weakening PAM or running the service as root.

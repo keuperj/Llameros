@@ -9,11 +9,14 @@ import time
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .users import Users
+
 
 class KeyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=80)
+    user: str | None = Field(default=None, min_length=1, max_length=256)
     models: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
     max_tokens: int | None = Field(default=None, ge=1, le=4096, strict=True)
     targets: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
@@ -55,6 +58,7 @@ def normalize(model):
 class ApiKeys:
     def __init__(self, store):
         self.store = store
+        self.users = Users(store)
         with store.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS api_keys (
@@ -74,14 +78,23 @@ class ApiKeys:
                 db.execute("ALTER TABLE api_keys ADD COLUMN max_tokens INTEGER")
             if "deleted" not in columns:
                 db.execute("ALTER TABLE api_keys ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+            if "user" not in columns:
+                db.execute("ALTER TABLE api_keys ADD COLUMN user TEXT NOT NULL DEFAULT ''")
+                db.execute("UPDATE api_keys SET user=?", (self.users.owner,))
+            db.execute("CREATE INDEX IF NOT EXISTS api_keys_user ON api_keys(user)")
 
-    def create(self, body):
+    def create(self, body, user=None):
         token = "llm_" + secrets.token_urlsafe(32)
         identity = secrets.token_hex(12)
         now = time.time()
+        owner = user or body.user or self.users.owner
         with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            account = db.execute("SELECT blocked FROM users WHERE username=?", (owner,)).fetchone()
+            if account and account["blocked"]:
+                raise HTTPException(403, "User is blocked")
             db.execute(
-                "INSERT INTO api_keys(id,name,digest,models,targets,created,expires,max_tokens) VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO api_keys(id,name,digest,models,targets,created,expires,max_tokens,user) VALUES(?,?,?,?,?,?,?,?,?)",
                 (
                     identity,
                     body.name,
@@ -91,6 +104,7 @@ class ApiKeys:
                     now,
                     now + body.expires_days * 86400 if body.expires_days is not None else 0,
                     body.max_tokens,
+                    owner,
                 ),
             )
         return {"id": identity, "key": token}
@@ -106,7 +120,7 @@ class ApiKeys:
                 "SELECT * FROM api_keys WHERE digest=? AND revoked=0 AND (expires=0 OR expires>?)",
                 (hashlib.sha256(token.encode()).hexdigest(), time.time()),
             ).fetchone()
-        if not row:
+        if not row or self.users.get(row["user"])["blocked"]:
             raise HTTPException(
                 401, "Invalid, expired or revoked API key", headers={"WWW-Authenticate": "Bearer"}
             )
@@ -121,9 +135,12 @@ class ApiKeys:
             "*" in key["targets"] or target in key["targets"]
         )
 
-    def revoke(self, identity):
+    def revoke(self, identity, user=None):
         with self.store.connect() as db:
-            if not db.execute("UPDATE api_keys SET revoked=1 WHERE id=?", (identity,)).rowcount:
+            if not db.execute(
+                "UPDATE api_keys SET revoked=1 WHERE id=?" + (" AND user=?" if user else ""),
+                (identity, user) if user else (identity,),
+            ).rowcount:
                 raise HTTPException(404, "API key not found")
 
     def record(self, identity, model, target, status, counts, duration):
@@ -142,27 +159,33 @@ class ApiKeys:
                 ),
             )
 
-    def delete(self, identity):
+    def delete(self, identity, user=None):
         # Retain a tombstone and usage for history, including in-flight requests.
         with self.store.connect() as db:
             if not db.execute(
-                "UPDATE api_keys SET deleted=1,revoked=1 WHERE id=? AND deleted=0", (identity,)
+                "UPDATE api_keys SET deleted=1,revoked=1 WHERE id=? AND deleted=0"
+                + (" AND user=?" if user else ""),
+                (identity, user) if user else (identity,),
             ).rowcount:
                 raise HTTPException(404, "API key not found")
 
-    def list(self):
+    def list(self, user=None):
         with self.store.connect() as db:
-            keys = db.execute("""
-                SELECT k.id,k.name,k.models,k.targets,k.created,k.expires,k.revoked,k.deleted,k.max_tokens,
+            keys = db.execute(
+                """
+                SELECT k.id,k.name,k.user,k.models,k.targets,k.created,k.expires,k.revoked,k.deleted,k.max_tokens,
                     COUNT(u.id) AS requests,
                     COALESCE(SUM(u.prompt_tokens),0) AS prompt_tokens,
                     COALESCE(SUM(u.output_tokens),0) AS output_tokens,
                     COALESCE(SUM(u.duration),0) AS seconds,
                     SUM(CASE WHEN u.id IS NOT NULL AND u.status!='completed' THEN 1 ELSE 0 END) AS failed,
                     SUM(CASE WHEN u.id IS NOT NULL AND (u.prompt_tokens IS NULL OR u.output_tokens IS NULL) THEN 1 ELSE 0 END) AS unknown_usage
-                FROM api_keys k LEFT JOIN api_usage u ON k.id=u.key_id GROUP BY k.id
+                FROM api_keys k LEFT JOIN api_usage u ON k.id=u.key_id
+                WHERE (? IS NULL OR k.user=?) GROUP BY k.id
                 ORDER BY k.created DESC
-            """).fetchall()
+            """,
+                (user, user),
+            ).fetchall()
         return [
             {
                 **dict(row),
