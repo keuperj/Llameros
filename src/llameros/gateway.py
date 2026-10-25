@@ -1,4 +1,7 @@
-"""Allowlisted inference proxy. Never forwards credentials or lifecycle commands."""
+"""Authenticated Ollama/OpenAI/Anthropic inference routes for Llameros model sharing.
+
+Allowlisted inference proxy. Never forwards credentials or lifecycle commands.
+"""
 
 import asyncio
 import base64
@@ -24,10 +27,12 @@ class InferenceStream(StreamingResponse):
     """Release the inference lock even if disconnect precedes generator iteration."""
 
     def __init__(self, *args, cleanup, **kwargs):
+        """Attach an idempotent cleanup callback to the streaming response."""
         super().__init__(*args, **kwargs)
         self.cleanup = cleanup
 
     async def __call__(self, scope, receive, send):
+        """Run the ASGI stream and shield final cleanup even if the client disconnects early."""
         try:
             await super().__call__(scope, receive, send)
         finally:
@@ -47,10 +52,16 @@ def install_gateway(
     *,
     require_session,
 ):
+    """Install key-management and inference routes with shared authorization/runtime services.
+
+    Dashboard key routes use the supplied session dependency and owner scoping; inference uses
+    bearer keys, bounded admission, and per-device scheduling.
+    """
     keys = ApiKeys(store)
     app.state.api_keys = keys
 
     async def api_error(request, exc):
+        """Render HTTP errors in dashboard, Ollama, OpenAI, or Anthropic-compatible envelopes."""
         if not request.url.path.startswith(PREFIX + "/"):
             return JSONResponse(
                 {"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers
@@ -74,6 +85,7 @@ def install_gateway(
     app.add_exception_handler(HTTPException, api_error)
 
     def key_owner(request, session):
+        """Return the enforced owner for users/user-board views, or None for unrestricted admins."""
         return (
             session["username"]
             if session["role"] != "admin" or request.query_params.get("board") == "user"
@@ -82,21 +94,25 @@ def install_gateway(
 
     @app.get("/api/keys", dependencies=protected)
     def list_keys(request: Request, session=Depends(require_session)):
+        """List nondeleted key metadata within the caller's permitted owner scope."""
         return {
             "keys": [key for key in keys.list(key_owner(request, session)) if not key["deleted"]]
         }
 
     @app.get("/api/keys/usage", dependencies=protected)
     def key_usage(request: Request, session=Depends(require_session)):
+        """List scoped key usage including deleted-key tombstones, never stored digests."""
         return {"keys": keys.list(key_owner(request, session))}
 
     @app.delete("/api/keys/{identity}", dependencies=protected)
     def delete_key(identity: str, request: Request, session=Depends(require_session)):
+        """Revoke and tombstone a key only within the caller's permitted owner scope."""
         keys.delete(identity, key_owner(request, session))
         return {"ok": True}
 
     @app.post("/api/keys", dependencies=protected, status_code=201)
     def create_key(body: KeyRequest, request: Request, session=Depends(require_session)):
+        """Authorize the requested Linux owner and return a newly generated one-time key secret."""
         owner = body.user or session["username"]
         if key_owner(request, session) and owner != session["username"]:
             raise HTTPException(403, "You may only create your own keys")
@@ -109,16 +125,19 @@ def install_gateway(
 
     @app.post("/api/keys/{identity}/revoke", dependencies=protected)
     def revoke_key(identity: str, request: Request, session=Depends(require_session)):
+        """Disable a key within the caller's scope while retaining its usage history."""
         keys.revoke(identity, key_owner(request, session))
         return {"ok": True}
 
     def bearer(request: Request):
+        """Authenticate a bearer header, also allowing x-api-key on Anthropic Messages requests."""
         authorization = request.headers.get("authorization", "")
         if not authorization and request.url.path.endswith("/v1/messages"):
             authorization = "Bearer " + request.headers.get("x-api-key", "")
         return keys.authenticate(authorization)
 
     async def read_body(request):
+        """Read bounded streamed JSON and require an object before protocol-specific validation."""
         raw = bytearray()
         async for chunk in request.stream():
             if len(raw) + len(chunk) > cfg.inference_body_bytes:
@@ -134,6 +153,7 @@ def install_gateway(
 
     @app.post(PREFIX + "/api/documents/extract")
     async def document_extract(request: Request, key=Depends(bearer)):
+        """Extract bounded inline PDF text and overlapping chunks for an authenticated key."""
         body = await read_body(request)
         if set(body) - {"data", "chunk_size", "overlap"}:
             raise HTTPException(400, "Unsupported extraction fields")
@@ -155,6 +175,7 @@ def install_gateway(
         }
 
     def permitted_models(key):
+        """Filter loaded model/device instances by key permissions and runtime availability."""
         state = runtime_status()
         return [
             {**model, "target": model.get("target", "cpu")}
@@ -166,9 +187,11 @@ def install_gateway(
     @app.get(PREFIX + "/api/ps")
     @app.get(PREFIX + "/v1/models")
     def models(request: Request, key=Depends(bearer)):
+        """Return permission-filtered discovery in the requested Ollama or OpenAI representation."""
         loaded = permitted_models(key)
 
         def created(model):
+            """Convert optional model timestamps into Unix seconds, tolerating malformed metadata."""
             try:
                 return int(
                     datetime.fromisoformat(
@@ -202,6 +225,7 @@ def install_gateway(
         }
 
     async def metadata(request, key, model, target, path, payload=None):
+        """Resolve one permitted loaded instance and fetch validated metadata without forwarding credentials."""
         try:
             model = normalize(model)
         except (ValueError, TypeError):
@@ -243,6 +267,7 @@ def install_gateway(
 
     @app.post(PREFIX + "/api/show")
     async def show_model(request: Request, key=Depends(bearer)):
+        """Validate an Ollama metadata request and route it to one permitted loaded runtime."""
         body = await read_body(request)
         if (
             set(body) - {"model", "verbose", "target"}
@@ -260,12 +285,14 @@ def install_gateway(
 
     @app.get(PREFIX + "/v1/models/{model:path}")
     async def model_detail(model: str, request: Request, key=Depends(bearer)):
+        """Fetch one permitted loaded model's OpenAI metadata using an optional target header."""
         return await metadata(
             request, key, model, request.headers.get("x-llameros-target", ""), "/v1/models/" + model
         )
 
     @app.get(PREFIX + "/api/version")
     async def version(request: Request, key=Depends(bearer)):
+        """Read the selected permitted runtime version without exposing administrative discovery."""
         loaded = await run_in_threadpool(permitted_models, key)
         if not loaded:
             raise HTTPException(404, "No permitted loaded runtime")
@@ -288,6 +315,11 @@ def install_gateway(
         )
 
     async def infer(request: Request, key=Depends(bearer)):
+        """Validate and route a supported inference request to exactly one permitted loaded instance.
+
+        Apply protocol/token/media restrictions before admission, recheck revocation after
+        queueing, and account/clean up all completion, failure, and disconnect paths.
+        """
         body = await read_body(request)
         original_size = len(json.dumps(body).encode())
         try:
@@ -546,6 +578,7 @@ def install_gateway(
         finished = False
 
         async def finish():
+            """Idempotently close upstream resources, record content-free usage, and release the device permit."""
             nonlocal finished
             if finished:
                 return
@@ -576,6 +609,7 @@ def install_gateway(
                                 jobs.job.update(state="failed", error="API routing failed")
 
         def usage(event):
+            """Validate response/embedding structure and collect only nonnegative known token counts."""
             if not isinstance(event, dict):
                 raise ValueError("Invalid upstream event")
             if event.get("error"):
@@ -735,6 +769,11 @@ def install_gateway(
                 return JSONResponse(data)
 
             async def events():
+                """Yield protocol-specific stream frames and require a valid terminal event.
+
+                Represent upstream stream failures in-band and shield accounting/permit release
+                during disconnect cleanup.
+                """
                 nonlocal outcome
                 terminal = False
                 try:

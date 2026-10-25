@@ -1,3 +1,6 @@
-"""Llameros: a local Ollama control panel."""
+"""Package metadata for Llameros, the local Ollama dashboard and inference gateway.
+
+Llameros: a local Ollama control panel.
+"""
 
 __version__ = "0.1.0"

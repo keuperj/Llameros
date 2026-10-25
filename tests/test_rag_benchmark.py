@@ -1,3 +1,5 @@
+"""Offline rag benchmark regression tests for Llameros behavior and integration boundaries."""
+
 import importlib.util
 import io
 from pathlib import Path
@@ -12,6 +14,8 @@ SPEC.loader.exec_module(rag)
 
 
 class FakeClient:
+    """Deterministic in-memory RAG benchmark client returning fixed vectors/timing metrics."""
+
     def __init__(self):
         self.calls = []
 
@@ -28,6 +32,7 @@ class FakeClient:
 
 
 def test_benchmark_batches_once_excludes_warmup_and_reports_timings():
+    """Verify benchmark batches once excludes warmup and reports timings."""
     client = FakeClient()
     result = rag.benchmark(client, "embed:latest", "llm:latest", repeats=2, concurrency=2)
     assert result["queries"] == 8
@@ -40,6 +45,7 @@ def test_benchmark_batches_once_excludes_warmup_and_reports_timings():
 
 
 def test_preflight_rejects_unloaded_model_before_work():
+    """Verify preflight rejects unloaded model before work."""
     client = FakeClient()
     with pytest.raises(ValueError, match="loaded"):
         rag.benchmark(client, "absent:latest", "llm:latest")
@@ -48,11 +54,13 @@ def test_preflight_rejects_unloaded_model_before_work():
 
 @pytest.mark.parametrize("vector", [[], [0.0, 0.0], [float("nan")], [True]])
 def test_invalid_vectors(vector):
+    """Verify invalid vectors."""
     with pytest.raises(ValueError):
         rag.unit_vector(vector)
 
 
 def test_https_and_cli(monkeypatch, capsys):
+    """Verify https and cli."""
     with pytest.raises(ValueError, match="HTTPS"):
         rag.Client("http://localhost/inference", "key")
     monkeypatch.delenv("LLAMEROS_API_KEY", raising=False)
@@ -61,6 +69,7 @@ def test_https_and_cli(monkeypatch, capsys):
 
 
 def test_streaming_client_measures_terminal_usage_without_retaining_content():
+    """Verify streaming client measures terminal usage without retaining content."""
     client = rag.Client("https://localhost/inference", "test-key")
     calls = []
 
@@ -80,6 +89,7 @@ def test_streaming_client_measures_terminal_usage_without_retaining_content():
 
 
 def test_streaming_client_rejects_incomplete_response():
+    """Verify streaming client rejects incomplete response."""
     client = rag.Client("https://localhost/inference", "test-key")
     client.open = lambda *args: io.BytesIO(b'{"message":{"content":"partial"}}\n')
     with pytest.raises(ValueError, match="terminal"):

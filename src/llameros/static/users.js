@@ -1,6 +1,16 @@
+/**
+ * @file Llameros admin/user board presentation and account-policy controls.
+ * Switching an admin to the personal board never changes the authenticated server role.
+ */
 'use strict';
 let userBoard = false, dashboardIdentity = null;
 
+/**
+ * Switch dashboard presentation and clear scoped data/secrets without changing the server role.
+ *
+ * @param {Object} data - Current session identity and actual role.
+ * @param {boolean} [asUser] - Defaults to true for ordinary users; admins may preview their board.
+ */
 function configureBoard(data, asUser = data.role !== 'admin') {
   dashboardIdentity = data; userBoard = asUser;
   const switcher = document.getElementById('board-switch');
@@ -24,6 +34,11 @@ function configureBoard(data, asUser = data.role !== 'admin') {
   document.getElementById('users').replaceChildren();
 }
 
+/**
+ * Render allowlisted resident models, overall model totals, and owner-only key statistics.
+ *
+ * @returns {Promise<void>} Ignores results after logout or a switch back to the admin board.
+ */
 async function refreshUserBoard() {
   const data = await api('/api/user/dashboard');
   if (!csrf || !userBoard) return;
@@ -39,6 +54,11 @@ async function refreshUserBoard() {
   renderKeyModels(data.models); renderKeyUsage(data.keys); renderModelUsage(data.history.models); draw(data.history.samples);
 }
 
+/**
+ * Render administrator account controls while preserving scroll and disabling self-mutations.
+ *
+ * @returns {Promise<void>} Resolves after account rows and policy-save handlers are installed.
+ */
 async function refreshUsers() {
   const data = await api('/api/users');
   if (!csrf || userBoard) return;

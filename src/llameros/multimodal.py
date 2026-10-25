@@ -1,4 +1,7 @@
-"""Bounded inline media admission. Never fetch URLs or retain attachments."""
+"""Bounded inline image validation and PDF-to-text preprocessing for Llameros inference.
+
+Bounded inline media admission. Never fetch URLs or retain attachments.
+"""
 
 import base64
 import binascii
@@ -16,6 +19,11 @@ PDF_WORKERS = threading.BoundedSemaphore(2)
 
 
 def decode_inline(value, maximum, media=None):
+    """Decode bounded base64 or a matching data URI to bytes; reject remote references.
+
+    Check encoded length before decoding and raise HTTP 400/413 for malformed or oversized
+    attachments.
+    """
     if not isinstance(value, str):
         raise HTTPException(400, "Inline base64 data required")
     if value.startswith("data:"):
@@ -91,9 +99,14 @@ def image_dimensions(data):
 
 
 def validate_images(body, cfg):
+    """Validate supported inline image blocks and return their count without fetching URLs.
+
+    Enforce configured bytes, count, and header pixel limits; this is not a full raster decoder.
+    """
     count = 0
 
     def image(value, declared=None):
+        """Validate one inline image against byte, declared media-type, and header dimension limits."""
         nonlocal count
         count += 1
         if count > cfg.image_max_count:
@@ -112,6 +125,7 @@ def validate_images(body, cfg):
             raise HTTPException(413, "Image exceeds configured pixel limit")
 
     def visit(node, depth=0):
+        """Walk bounded content nesting and validate recognized inline image representations."""
         if depth > 64:
             raise HTTPException(400, "Content nesting too deep")
         if isinstance(node, list):
@@ -145,6 +159,11 @@ def validate_images(body, cfg):
 
 
 def extract_pdf(value, cfg):
+    """Return bounded UTF-8 text from an inline PDF using installed Poppler pdftotext.
+
+    Use private temporary files, two worker slots, a 15-second deadline, and configured
+    page/text ceilings. Always reap the subprocess; no OCR or sandbox is provided.
+    """
     data = decode_inline(value, cfg.pdf_max_bytes, "application/pdf")
     if not data.startswith(b"%PDF-"):
         raise HTTPException(400, "PDF signature required")
@@ -205,6 +224,7 @@ def preprocess_documents(body, cfg):
     total = 0
 
     def visit(node, depth=0):
+        """Walk bounded content nesting and replace supported inline PDF blocks with text in place."""
         nonlocal count, total
         if depth > 64:
             raise HTTPException(400, "Content nesting too deep")

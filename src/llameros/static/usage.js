@@ -1,5 +1,16 @@
+/**
+ * @file Accessible sortable usage tables for the Llameros admin and user dashboards.
+ * Receives already-authorized aggregates; sorting is presentation, not access control.
+ */
 'use strict';
 const UsageTable = {
+  /**
+   * Bind accessible sortable headings and retain sort/scroll state across usage updates.
+   *
+   * @param {HTMLTableSectionElement} body - Destination tbody in a scroll-wrapped table.
+   * @param {Array<{field: string, numeric?: boolean, decimal?: boolean}>} columns - Ordered field definitions.
+   * @returns {{update: function(Array<Object>): void}} Table controller accepting fresh scoped rows.
+   */
   create(body, columns) {
     const table = body.closest('table'), scroll = table.parentElement;
     let rows = [], field = 'output_tokens', direction = 'descending';
@@ -18,6 +29,9 @@ const UsageTable = {
       header.scope = 'col';
       return {button, label};
     });
+    /**
+     * Stably sort the current rows, paint text-only cells, and restore scroll and aria-sort state.
+     */
     function render() {
       const top = scroll.scrollTop, left = scroll.scrollLeft;
       const column = columns.find(item => item.field === field);

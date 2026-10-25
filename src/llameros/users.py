@@ -1,4 +1,7 @@
-"""Persisted dashboard roles and blocks; passwords remain exclusively with PAM."""
+"""Persisted dashboard roles and account blocks for Llameros multi-user authorization.
+
+Persisted dashboard roles and blocks; passwords remain exclusively with PAM.
+"""
 
 import pwd
 from typing import Literal
@@ -10,6 +13,8 @@ from .config import current_user
 
 
 class UserUpdate(BaseModel):
+    """Strict admin mutation payload for a dashboard role and blocked state."""
+
     model_config = ConfigDict(extra="forbid", strict=True)
     role: Literal["admin", "user"]
     blocked: bool
@@ -17,6 +22,7 @@ class UserUpdate(BaseModel):
 
 def login_accounts():
     # Include named local/NSS accounts with a login shell, not daemon identities.
+    """Return local/NSS account names with login shells, excluding daemon-only shells."""
     return {
         entry.pw_name
         for entry in pwd.getpwall()
@@ -25,7 +31,10 @@ def login_accounts():
 
 
 class Users:
+    """Persist role overrides and blocks while defaulting other login accounts to users."""
+
     def __init__(self, store):
+        """Create the role table and seed the process account as admin only when absent."""
         self.store = store
         self.owner = current_user()
         with store.connect() as db:
@@ -41,21 +50,29 @@ class Users:
             )
 
     def get(self, username):
+        """Return persisted account policy or an unblocked user default for an unknown name."""
         with self.store.connect() as db:
             row = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         return dict(row) if row else {"username": username, "role": "user", "blocked": 0}
 
     def list(self):
+        """Combine discovered login accounts, the process owner, and remembered policy records."""
         names = login_accounts() | {self.owner}
         with self.store.connect() as db:
             names.update(row[0] for row in db.execute("SELECT username FROM users"))
         return [self.get(name) for name in sorted(names)]
 
     def remember(self, username):
+        """Persist a successful login without overwriting an existing role or block."""
         with self.store.connect() as db:
             db.execute("INSERT OR IGNORE INTO users(username,role) VALUES(?, 'user')", (username,))
 
     def update(self, username, body, actor):
+        """Change account policy and revoke all owned keys atomically when blocking.
+
+        Reject unknown accounts and self-block/demotion; the route separately invalidates active
+        sessions.
+        """
         if username not in {user["username"] for user in self.list()}:
             raise HTTPException(404, "System user not found")
         if username == actor and (body.blocked or body.role != "admin"):

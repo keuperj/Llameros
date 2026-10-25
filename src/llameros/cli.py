@@ -1,3 +1,5 @@
+"""Command-line entry point that starts the Llameros HTTPS service as an ordinary Linux user."""
+
 import argparse
 import os
 from dataclasses import replace
@@ -10,6 +12,7 @@ from .tls import certificates
 
 
 def main():
+    """Parse local settings, refuse root/setuid execution, and start Uvicorn with mandatory TLS."""
     parser = argparse.ArgumentParser(
         description="Llameros HTTPS dashboard (run as your Linux user, not root)"
     )

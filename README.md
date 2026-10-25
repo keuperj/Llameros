@@ -48,6 +48,7 @@ free CPU/GPU slot, and load it.
 | [Installation & usage](install.md) | Setup, configuration, storage, model workflow, GPU runtimes, and client access |
 | [Troubleshooting](trouble_shooting.md) | Unavailable CPU/GPU slots, container migration, login, downloads, and API issues |
 | [Development](development.md) | Architecture, tests, acceptance checklist, security model, and limitations |
+| [Development guide](development-guide.md) | Contributor setup, code navigation, documentation conventions, and validation workflow |
 
 CPU utilization does not block loading; available memory and slot assignment do.
 For **CPU unavailable**, follow the [migration and diagnostic guide](trouble_shooting.md#cpu-shows-unavailable-despite-low-utilization).

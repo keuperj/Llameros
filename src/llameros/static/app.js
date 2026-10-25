@@ -1,4 +1,9 @@
+/**
+ * @file Llameros dashboard controller: session lifecycle, API calls, model/key views, and telemetry.
+ * Uses the helper scripts loaded by index.html; server-side checks remain authoritative.
+ */
 'use strict';
+/** @param {string} id - Dashboard element ID. @returns {?HTMLElement} Matching page element. */
 const $ = id => document.getElementById(id);
 let csrf = '', timer = null, lastResult = '', selectedFit = null, fitVersion = 0, refreshing = false;
 let storageInitialized = false;
@@ -7,12 +12,33 @@ let loadedCatalogueQuery = '';
 let busy = false, jobTimer = null, pollingJob = false;
 let runtimeState = null, infoVersion = 0;
 let accessConfig = null, accessContext = 4096;
+/**
+ * Encode a resident instance identity so identical names on different devices remain distinct.
+ * @param {Object} model - Runtime model metadata with an optional target.
+ * @returns {string} Stable selector/card identity.
+ */
 const modelKey = model => model.target ? JSON.stringify([model.name || model.model, model.target]) : (model.name || model.model);
+/**
+ * Decode a selector value into a model and optional hardware target.
+ *
+ * @param {string} value - Plain model name or JSON-encoded model/target pair.
+ * @returns {{model: string, target?: string}} Selection sent to the API.
+ */
 function selectedModel(value) { if (value.startsWith('[')) { const [model, target] = JSON.parse(value); return {model, target}; } return {model: value}; }
+/**
+ * Return resident model instances only when the latest runtime state is healthy.
+ *
+ * @returns {Array<Object>} Loaded instances, including hardware target metadata.
+ */
 function loadedChoices() { return runtimeState && runtimeState.running && !runtimeState.error ? (runtimeState.loaded || []) : []; }
 const modelBoxes = new Map();
 const localActionEvents = [];
 const actionFeedback = ActionFeedback.create({document, notice, log: logActionError});
+/**
+ * Merge local and persisted events, retaining scroll position and a 240-event limit.
+ *
+ * @param {Array<Object>} [events=[]] - Content-free server activity records.
+ */
 function renderEvents(events = []) {
   const panel = $('events'), top = panel.scrollTop, left = panel.scrollLeft;
   const merged = [...localActionEvents, ...events].sort((a, b) => b.timestamp - a.timestamp).slice(0, 240);
@@ -21,6 +47,12 @@ function renderEvents(events = []) {
   panel.scrollTop = top; panel.scrollLeft = left;
 }
 let serverEvents = [];
+/**
+ * Show an action failure locally and optionally persist bounded metadata; never retry logging failures.
+ *
+ * @param {{action: string, message: string}} failure - Safe control identity and error text.
+ * @param {boolean} persist - False when the lifecycle worker already recorded the failure.
+ */
 function logActionError({action, message}, persist) {
   const event = {timestamp: Date.now() / 1000, kind: 'dashboard-action:failed', model: action, detail: message};
   localActionEvents.unshift(event); localActionEvents.splice(240); renderEvents(serverEvents);
@@ -30,11 +62,22 @@ function logActionError({action, message}, persist) {
       .then(() => { event.persisted = true; }).catch(() => {});
   } else if (!persist) event.persisted = true;
 }
+/**
+ * Submit lifecycle work and associate its returned job ID with the triggering control.
+ *
+ * @param {HTMLElement} control - Control receiving eventual job errors.
+ * @param {string} path - Dashboard API endpoint.
+ * @param {Object} body - Operation payload, not retained by action feedback.
+ * @returns {Promise<Object>} Initial job snapshot.
+ */
 async function submitAction(control, path, body) {
   const result = await api(path, body);
   actionFeedback.track(control, result);
   return result;
 }
+/**
+ * Reconcile running-model cards by model/target identity without rebuilding unchanged controls.
+ */
 function renderAccess() {
   const active = loadedChoices();
   const identities = new Set(active.map(modelKey));
@@ -90,6 +133,11 @@ function renderAccess() {
     box.updateAccess();
   }
 }
+/**
+ * Refresh the key-permission selector while retaining an existing explicit model selection.
+ *
+ * @param {Array<Object>} models - Loaded model metadata.
+ */
 function renderKeyModels(models) {
   const select = $('api-key-models'), previous = select.value || '*';
   const names = [...new Set(models.map(model => model.name || model.model))].sort();
@@ -103,13 +151,27 @@ function renderKeyModels(models) {
   }
   select.value = previous;
 }
+/**
+ * Derive display status with deletion and revocation taking precedence over expiry.
+ *
+ * @param {Object} key - Safe key metadata; expiry is Unix seconds.
+ * @returns {string} Human-readable lifecycle state.
+ */
 function keyState(key) {
   return key.deleted ? 'deleted' : key.revoked ? 'revoked' : key.expires && key.expires * 1000 <= Date.now() ? 'expired' : 'active';
 }
+/**
+ * Discard the one-time plaintext key from the form and disable copying; never persist it.
+ */
 function clearKeySecret() {
   $('api-key-secret').value = ''; $('api-key-copy').disabled = true;
   $('api-key-result').hidden = true; $('api-key-feedback').textContent = '';
 }
+/**
+ * Copy the masked one-time key, falling back to masked keyboard selection on clipboard denial.
+ *
+ * @returns {Promise<void>} Resolves after copy or visible fallback feedback.
+ */
 async function copyKeySecret() {
   actionFeedback.clear($('api-key-copy'));
   const field = $('api-key-secret');
@@ -125,14 +187,27 @@ async function copyKeySecret() {
   }
 }
 let modelUsageTable = null, keyUsageTable = null;
+/**
+ * Update the reusable key-usage table from server-scoped aggregates.
+ *
+ * @param {Array<Object>} keys - Safe metadata and usage, including deleted-key tombstones.
+ */
 function renderKeyUsage(keys) {
   if (!keyUsageTable) keyUsageTable = UsageTable.create($('key-usage'), UsageTable.keyColumns);
   keyUsageTable.update(keys.map(key => ({...key, status: keyState(key)})));
 }
+/**
+ * Update overall model totals, shared by both boards rather than filtered by key owner.
+ *
+ * @param {Array<Object>} models - Per-model generation aggregates.
+ */
 function renderModelUsage(models) {
   if (!modelUsageTable) modelUsageTable = UsageTable.create($('usage'), UsageTable.modelColumns);
   modelUsageTable.update(models);
 }
+/**
+ * Recompute lifecycle/playground button availability from known runtime state and active work.
+ */
 function updateControls() {
   const state = JobProgress.controls(runtimeState, busy);
   $('container-start').disabled = !state.start;
@@ -147,6 +222,12 @@ function updateControls() {
   });
   document.querySelectorAll('#runtime-models button[data-stop]').forEach(button => { button.disabled = busy; });
 }
+/**
+ * Create a labeled progress indicator, supporting indeterminate values.
+ *
+ * @param {string} label - Accessible progress description.
+ * @param {?number} value - Percentage, or null when unknown.
+ */
 function progressBar(label, value) {
   const wrapper = element('div', '', 'progress-row');
   wrapper.append(element('div', label));
@@ -154,6 +235,11 @@ function progressBar(label, value) {
   if (value !== null) bar.value = value;
   wrapper.append(bar); return wrapper;
 }
+/**
+ * Paint lifecycle phase/layer progress and update the global busy state and action feedback.
+ *
+ * @param {Object} job - Current server job snapshot.
+ */
 function renderJob(job) {
   actionFeedback.job(job);
   busy = job.state === 'running';
@@ -173,15 +259,36 @@ function renderJob(job) {
   $('pull').disabled = busy || !selectedFit || !selectedFit.fits;
   if (busy) document.querySelectorAll('#installed button, #generate-form button, #storage-save').forEach(button => { button.disabled = true; });
 }
+/**
+ * Poll lifecycle progress without overlapping requests and refresh the dashboard on completion.
+ *
+ * @returns {Promise<void>} Resolves after this poll, including guarded error handling.
+ */
 async function pollJob() {
   if (!csrf || pollingJob) return;
   pollingJob = true;
   try { const job = await api('/api/job'); if (csrf) { const finished = busy && job.state !== 'running'; renderJob(job); if (finished) await refresh(); } } catch (error) { notice(error.message); }
   finally { pollingJob = false; }
 }
+/** @returns {boolean} Whether catalogue estimates are restricted to CPU RAM fit. */
 const cpuOnly = () => $('cpu-only').checked;
+/** @param {?number} n - Byte count. @returns {string} GiB label or an explicit unknown marker. */
 const bytes = n => n == null ? 'unknown' : `${(n / 1073741824).toFixed(1)} GiB`;
+/**
+ * Replace the dashboard-wide status message using text content.
+ *
+ * @param {string} [message=""] - Message or empty string to clear.
+ */
 function notice(message = '') { $('notice').textContent = message; }
+/**
+ * Call a session API, attach CSRF on writes, and clear local state on session expiry.
+ * Personal-board key calls add board=user so admins also receive owner-scoped results.
+ *
+ * @param {string} path - Same-origin API path.
+ * @param {Object} [body] - JSON payload; absence defaults to GET.
+ * @param {string} [method] - Explicit HTTP method override.
+ * @returns {Promise<Object>} Decoded JSON; rejects with a displayable API error.
+ */
 async function api(path, body, method) {
   if (typeof userBoard !== 'undefined' && userBoard && path.startsWith('/api/keys')) path += (path.includes('?') ? '&' : '?') + 'board=user';
   const response = await fetch(path, {method: method || (body === undefined ? 'GET' : 'POST'),
@@ -194,11 +301,23 @@ async function api(path, body, method) {
   }
   return data;
 }
+/**
+ * Capture the actual triggering button before asynchronous event dispatch clears currentTarget.
+ *
+ * @param {Event} event - Browser event, optionally a form submission.
+ * @returns {?HTMLElement} Button/control to associate with action feedback.
+ */
 function actionControl(event) {
   if (!event || !event.currentTarget) return null;
   const node = event.currentTarget;
   return node.tagName === 'FORM' ? (event.submitter || node.querySelector('button[type=submit], button:not([type])')) : node;
 }
+/**
+ * Wrap an async handler with preventDefault and control-local error feedback.
+ *
+ * @param {Function} fn - Handler receiving the event and captured control.
+ * @returns {Function} Async event handler that displays failures instead of leaking rejections.
+ */
 function safe(fn) { return async event => {
   if (event) event.preventDefault();
   // Capture before await: browsers clear currentTarget after event dispatch.
@@ -207,16 +326,39 @@ function safe(fn) { return async event => {
   try { await fn(event, control); }
   catch (error) { actionFeedback.fail(control, error.message || 'Operation failed'); }
 }; }
+/**
+ * Build an element using textContent, never interpreting server strings as HTML.
+ *
+ * @param {string} tag - Element tag name.
+ * @param {string} text - Plain text content.
+ * @param {string} [className] - Optional CSS classes.
+ * @returns {HTMLElement} Detached DOM element.
+ */
 function element(tag, text, className) { const node = document.createElement(tag); node.textContent = text; if (className) node.className = className; return node; }
+/**
+ * Replace a select with literal values and an optional empty placeholder.
+ *
+ * @param {HTMLSelectElement} select - Destination control.
+ * @param {string[]} values - Labels and values.
+ * @param {string} [placeholder] - Empty-choice label.
+ */
 function options(select, values, placeholder) {
   select.replaceChildren(); if (placeholder) select.add(new Option(placeholder, ''));
   values.forEach(value => select.add(new Option(value, value)));
 }
+/**
+ * Enable model information only for a valid official catalogue selection.
+ */
 function updateModelInfo() {
   const link = $('model-info');
   const url = Catalogue.modelInfoUrl($('tags').value || $('families').value);
   link.disabled = !url;
 }
+/**
+ * Hide the info overlay and invalidate pending responses, optionally restoring focus.
+ *
+ * @param {boolean} [restore=true] - Return focus to the model-info trigger.
+ */
 function closeModelInfo(restore = true) {
   infoVersion++; $('model-info-overlay').hidden = true;
   if (restore) $('model-info').focus();
@@ -239,7 +381,16 @@ $('model-info-close').addEventListener('click', () => closeModelInfo());
 $('model-info-overlay').addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeModelInfo(); } });
 $('generate-model').addEventListener('change', updateControls);
 $('image-availability').addEventListener('click', safe(refresh));
+/**
+ * Clear session UI, timers, stale async versions, telemetry, and one-time secrets on logout.
+ */
 function signedOut() { if (typeof dashboardIdentity !== 'undefined') { dashboardIdentity = null; userBoard = false; $('board-switch').hidden = true; $('users').replaceChildren(); }  actionFeedback.reset(); localActionEvents.length = 0; serverEvents = [];  clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); if (keyUsageTable) keyUsageTable.update([]); if (modelUsageTable) modelUsageTable.update([]); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+/**
+ * Initialize identity/board state, start polling, and refresh session-visible data.
+ *
+ * @param {Object} data - Session identity, CSRF token, and current role.
+ * @returns {Promise<void>} Resolves when initial dashboard data has loaded.
+ */
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
@@ -259,6 +410,11 @@ $('login-form').addEventListener('submit', safe(async () => {
 }));
 $('logout').addEventListener('click', safe(async () => { await api('/api/logout', {}); signedOut(); }));
 $('refresh').addEventListener('click', safe(refresh));
+/**
+ * Fetch scoped keys and reconcile the management table without retaining any plaintext secret.
+ *
+ * @returns {Promise<void>} Resolves after authorized key metadata is rendered.
+ */
 async function refreshKeys() {
   const data = await api('/api/keys');
   if (!csrf) return;
@@ -307,6 +463,14 @@ $('storage-form').addEventListener('submit', safe(async (event, control) => {
   await refresh();
 }));
 for (const action of ['start', 'stop']) $('container-' + action).addEventListener('click', safe(async (event, control) => { await submitAction(control, '/api/container/' + action, {}); await refresh(); }));
+/**
+ * Search families and progressively check compatibility with bounded request concurrency.
+ * Version counters ignore stale responses after a new search, selection, or logout.
+ *
+ * @param {Event} [event] - Optional triggering event.
+ * @param {HTMLElement} [control] - Control receiving partial-search error feedback.
+ * @returns {Promise<void>} Resolves after this search and its workers finish.
+ */
 async function catalogue(event, control) {
   const version = ++catalogueVersion;
   familyVersion++; fitVersion++; selectedFit = null; $('pull').disabled = true;
@@ -326,6 +490,11 @@ async function catalogue(event, control) {
     $('catalog-progress').textContent = `Checked ${checked}/${catalogueEntries.length} families${failures ? ` · ${failures} unavailable` : ''} · ${visible.length} shown${cpu ? ' · CPU-only RAM fit filter' : ''}. ${checked < catalogueEntries.length ? 'Checking in popularity order…' : 'No results? Try another family or tag, clear CPU-only to see oversized/unknown variants, or free RAM and recheck.'}`;
   };
   render();
+  /**
+   * Consume catalogue families until the shared queue ends or this search becomes stale.
+   *
+   * @returns {Promise<void>} Completion of one bounded-concurrency worker.
+   */
   async function worker() {
     while (version === catalogueVersion && csrf && next < catalogueEntries.length) {
       const entry = catalogueEntries[next++];
@@ -340,6 +509,13 @@ async function catalogue(event, control) {
   // Bound network concurrency; no registry request per tag or blocking full-catalogue scan.
   await Promise.all(Array.from({length: 3}, worker));
 }
+/**
+ * Render estimated-fit options while preserving a still-valid selection.
+ *
+ * @param {HTMLSelectElement} select - Destination selector.
+ * @param {Array<Object>} entries - Fit-annotated catalogue entries.
+ * @param {string} placeholder - Empty-choice label.
+ */
 function compatibleOptions(select, entries, placeholder) {
   const current = select.value;
   select.replaceChildren(new Option(placeholder, ''));
@@ -350,10 +526,16 @@ function compatibleOptions(select, entries, placeholder) {
   }
   if (entries.some(entry => entry.name === current)) select.value = current;
 }
+/**
+ * Render currently visible catalogue families with fit-priority labels.
+ */
 function renderFamilies() {
   compatibleOptions($('families'), Catalogue.sort(Catalogue.visible(catalogueEntries, loadedCatalogueQuery, cpuOnly())), 'Select a family');
   updateModelInfo();
 }
+/**
+ * Render at most six fitting recommendations and their selection actions.
+ */
 function renderRecommendations() {
   $('recommended').replaceChildren();
   for (const entry of Catalogue.recommendations(Catalogue.visible(catalogueEntries, loadedCatalogueQuery, cpuOnly()))) {
@@ -378,6 +560,12 @@ $('search').addEventListener('input', () => {
 });
 $('cpu-only').addEventListener('change', safe(catalogue));
 $('search-form').addEventListener('submit', safe(catalogue));
+/**
+ * Load a selected family's variants and ignore results superseded by newer selections.
+ *
+ * @param {string} [preferred=""] - Optional variant to select after loading.
+ * @returns {Promise<void>} Resolves after tags and model-info availability are updated.
+ */
 async function selectFamily(preferred = '') {
   const version = ++familyVersion;
   fitVersion++; selectedFit = null; $('pull').disabled = true; options($('tags'), [], 'Loading variants…');
@@ -393,6 +581,11 @@ async function selectFamily(preferred = '') {
   if (preferred && variants.some(v => v.name === preferred)) { $('tags').value = preferred; await checkSelectedFit(); }
 }
 $('families').addEventListener('change', safe(() => selectFamily()));
+/**
+ * Check selected variant memory fit and suppress stale results before enabling download.
+ *
+ * @returns {Promise<void>} Resolves after the advisory fit is displayed.
+ */
 async function checkSelectedFit() {
   updateModelInfo();
   const version = ++fitVersion, model = $('tags').value; selectedFit = null; $('pull').disabled = true;
@@ -411,6 +604,12 @@ $('generate-form').addEventListener('submit', safe(async (event, control) => {
   await submitAction(control, '/api/generate', {...selectedModel($('generate-model').value), prompt: $('prompt').value, max_tokens: 256});
   $('output').textContent = 'Generating…'; await refresh();
 }));
+/**
+ * Refresh the active board without overlapping refreshes or painting after logout.
+ * The user board uses its allowlisted endpoint instead of requesting admin-only data.
+ *
+ * @returns {Promise<void>} Resolves after the current dashboard snapshot is rendered.
+ */
 async function refresh() {
   if (refreshing || !csrf) return; refreshing = true;
   try {
@@ -503,6 +702,11 @@ async function refresh() {
     draw(history.samples);
   } finally { refreshing = false; }
 }
+/**
+ * Draw CPU/RAM percentage history on the dashboard canvas from chronological samples.
+ *
+ * @param {Array<Object>} samples - Timestamped host samples; missing values are tolerated.
+ */
 function draw(samples) {
   const canvas = $('chart'), ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h); ctx.strokeStyle = '#303e35'; ctx.fillStyle = '#a1b2a6'; ctx.font = '12px system-ui';

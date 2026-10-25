@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Opt-in HTTPS smoke tests. Never load models or change runtime containers."""
+"""Opt-in protocol smoke checks against an existing Llameros HTTPS inference gateway.
+
+Opt-in HTTPS smoke tests. Never load models or change runtime containers.
+"""
 
 import argparse
 import base64
@@ -13,6 +16,11 @@ import httpx
 
 
 def main(argv=None):
+    """Run explicitly requested live protocol/media checks against existing loaded runtimes.
+
+    Read the key from the environment, require a trusted CA, and return nonzero if a check
+    fails; never change containers or load models.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="https://127.0.0.1:8443/inference")
     parser.add_argument("--ca", required=True, help="Trusted Llameros certificate PEM")
@@ -40,6 +48,7 @@ def main(argv=None):
     ) as client:
 
         def check(label, path, body=None, stream=False):
+            """Validate one JSON/stream terminal response and emit only a pass/fail record."""
             nonlocal failed
             try:
                 result = client.request("POST" if body is not None else "GET", path, json=body)

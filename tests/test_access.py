@@ -1,3 +1,5 @@
+"""Offline access regression tests for Llameros behavior and integration boundaries."""
+
 from fastapi.testclient import TestClient
 from test_core import HARDWARE, FakeDocker, sign_in
 
@@ -6,6 +8,7 @@ from llameros.config import Settings
 
 
 def test_access_endpoints_use_configured_port_and_require_login(tmp_path):
+    """Verify access endpoints use configured port and require login."""
     app = create_app(
         Settings(state_dir=tmp_path, ollama_port=12567),
         docker=FakeDocker(),
@@ -26,6 +29,7 @@ def test_access_endpoints_use_configured_port_and_require_login(tmp_path):
 
 
 def test_model_boxes_and_independent_keys_precede_configuration():
+    """Verify model boxes and independent keys precede configuration."""
     from pathlib import Path
 
     static = Path(__file__).resolve().parents[1] / "src/llameros/static"
@@ -42,6 +46,7 @@ def test_model_boxes_and_independent_keys_precede_configuration():
 
 
 def test_key_table_collapsed_form_and_masked_secret():
+    """Verify key table collapsed form and masked secret."""
     from html.parser import HTMLParser
     from pathlib import Path
 

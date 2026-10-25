@@ -1,4 +1,7 @@
-"""Narrow Docker CLI wrapper. Never executes a shell or accepts arbitrary flags."""
+"""Restricted local Docker operations used by Llameros to manage owned Ollama containers.
+
+Narrow Docker CLI wrapper. Never executes a shell or accepts arbitrary flags.
+"""
 
 import json
 import os
@@ -14,24 +17,32 @@ from .model_storage import ModelStorage, validate_directory
 
 
 class DockerError(RuntimeError):
+    """Represent a managed Docker/runtime failure safe for dashboard error handling."""
+
     pass
 
 
 class Docker:
+    """Operate one owned Ollama container through fixed CLI arguments and loopback HTTP."""
+
     def __init__(self, settings: Settings, *, target=None, name=None, storage=None):
+        """Bind settings, optional device assignment, container name, and shared model storage."""
         self.settings = settings
         self.target = target
         self.name = name or settings.container_name
         self.storage = storage or ModelStorage(settings)
 
     def storage_info(self) -> dict:
+        """Return storage metadata without changing the selected model location."""
         return self.storage.info()
 
     def inventory(self) -> dict:
+        """Read an offline inventory or matching cache through the shared storage service."""
         return self.storage.inventory()
 
     @property
     def image(self) -> str:
+        """Resolve the configured image, using the ROCm default for AMD when appropriate."""
         cfg = self.settings
         return (
             "ollama/ollama:rocm"
@@ -40,6 +51,7 @@ class Docker:
         )
 
     def image_available(self) -> bool:
+        """Check local image/tag or digest presence without pulling from a registry."""
         images = self.command("image", "ls", "--quiet", "--filter", f"reference={self.image}")
         if images:
             return True
@@ -105,6 +117,10 @@ class Docker:
                     )
 
     def configure_storage(self, directory: str, confirmed: bool):
+        """Validate a confirmed selection and remove the stopped owned container for recreation.
+
+        Existing model files stay in place; this operation does not copy or delete weights.
+        """
         if not confirmed:
             raise ValueError(
                 "Confirm that changing storage does not move or delete existing models"
@@ -130,6 +146,7 @@ class Docker:
         return self.storage.info()
 
     def command(self, *args: str, timeout: int = 30) -> str:
+        """Run a bounded Docker CLI command without a shell and raise DockerError on failure."""
         try:
             result = subprocess.run(
                 ["docker", *args],
@@ -145,6 +162,7 @@ class Docker:
         return result.stdout.strip()
 
     def check_daemon(self):
+        """Require a local Unix-socket daemon and enforce the configured rootful-Docker policy."""
         endpoint = os.environ.get("DOCKER_HOST")
         if not endpoint:
             endpoint = self.command("context", "inspect", "--format", "{{.Endpoints.docker.Host}}")
@@ -159,6 +177,7 @@ class Docker:
 
     def inspect(self) -> dict | None:
         # Listing first distinguishes a missing container from daemon/permission failures.
+        """Return container metadata only after checking UID ownership and optional target labels."""
         names = self.command("container", "ls", "-a", "--format", "{{.Names}}").splitlines()
         if self.name not in names:
             return None
@@ -173,6 +192,7 @@ class Docker:
         return data
 
     def run_args(self) -> list[str]:
+        """Build fixed isolation, storage, loopback-port, and device flags for a managed container."""
         cfg = self.settings
         if self.storage.directory:
             directory = validate_directory(self.storage.directory, cfg.state_dir)
@@ -246,6 +266,7 @@ class Docker:
         return [*args, self.image]
 
     def start(self, progress=lambda value: None):
+        """Pull missing images, create/start the owned container, and wait for API readiness."""
         progress({"status": "Checking local Docker daemon and container"})
         self.check_daemon()
         data = self.inspect()
@@ -278,18 +299,21 @@ class Docker:
         raise DockerError("Ollama did not become ready within 60 seconds; inspect container logs")
 
     def stop(self):
+        """Stop a running owned container with a bounded grace period; keep its model storage."""
         self.check_daemon()
         data = self.inspect()
         if data and data["State"]["Running"]:
             self.command("stop", "--time", "20", self.name, timeout=30)
 
     def ensure_running(self):
+        """Check daemon ownership/state and raise DockerError unless the managed container runs."""
         self.check_daemon()
         data = self.inspect()
         if not data or not data["State"]["Running"]:
             raise DockerError("The managed Ollama container is not running")
 
     def api(self, method: str, path: str, body: dict | None = None, timeout: int = 600) -> dict:
+        """Call the configured loopback Ollama endpoint and return JSON, rejecting runtime errors."""
         with httpx.Client(
             base_url=self.settings.ollama_url, timeout=timeout, trust_env=False
         ) as client:
@@ -301,6 +325,7 @@ class Docker:
         return data
 
     def pull(self, name: str, progress):
+        """Stream a model download to the progress callback and refresh inventory only after success."""
         self.ensure_running()
         with httpx.Client(
             base_url=self.settings.ollama_url, timeout=httpx.Timeout(120, read=900), trust_env=False
@@ -322,6 +347,7 @@ class Docker:
         self.storage.remember(self.api("GET", "/api/tags", timeout=5).get("models", []))
 
     def status(self) -> dict:
+        """Collect container/image availability, inventory, loaded models, and resource measurements."""
         self.check_daemon()
         data = self.inspect()
         availability = {

@@ -1,6 +1,20 @@
+/**
+ * @file Client-example generator for the Llameros model-access cards.
+ * Shared with offline Node tests; generated examples never embed real credentials.
+ */
 'use strict';
 const ModelAccess = {
   frameworks: {ollama: 'Ollama Python', openai: 'OpenAI-compatible Python', langchain: 'LangChain', llamaindex: 'LlamaIndex'},
+  /**
+   * Build a Python client example with environment-based credentials and verified TLS for gateway URLs.
+   *
+   * @param {string} framework - One of the advertised framework IDs.
+   * @param {string} model - Exact model name/tag.
+   * @param {string} baseUrl - Gateway or direct local Ollama base URL.
+   * @param {number} contextLength - Positive context size, otherwise 4096.
+   * @param {string} [target=""] - Hardware slot; gateway examples default to CPU.
+   * @returns {?{install: string, code: string}} Install command/code, or null for invalid selection.
+   */
   example(framework, model, baseUrl, contextLength, target = '') {
     if (!Object.hasOwn(this.frameworks, framework) || !model || !baseUrl) return null;
     // JSON string literals are also valid Python literals for these strings.

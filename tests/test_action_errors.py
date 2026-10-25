@@ -1,8 +1,11 @@
+"""Offline action errors regression tests for Llameros behavior and integration boundaries."""
+
 from test_core import client as client  # noqa: F401
 from test_core import sign_in, wait_job
 
 
 def test_action_errors_require_session_csrf_and_persist_bounded_text(client):
+    """Verify action errors require session csrf and persist bounded text."""
     payload = {"action": "refresh", "message": "Runtime unavailable"}
     assert client.post("/api/action-errors", json=payload).status_code == 403
     sign_in(client)
@@ -20,6 +23,7 @@ def test_action_errors_require_session_csrf_and_persist_bounded_text(client):
 
 
 def test_failed_job_has_submission_identity_and_existing_log(client):
+    """Verify failed job has submission identity and existing log."""
     sign_in(client)
     # Fake Docker is stopped: a load is accepted, then fails asynchronously.
     response = client.post("/api/models/load", json={"model": "gemma3:270m"})
@@ -34,6 +38,7 @@ def test_failed_job_has_submission_identity_and_existing_log(client):
 
 
 def test_login_failure_logged_without_submitted_credentials(client):
+    """Verify login failure logged without submitted credentials."""
     result = client.post(
         "/api/login", json={"username": "private-name", "password": "private-password"}
     )

@@ -1,8 +1,12 @@
+"""Offline dashboard layout regression tests for Llameros behavior and integration boundaries."""
+
 from html.parser import HTMLParser
 from pathlib import Path
 
 
 def test_playground_closed_and_scroll_regions_accessible():
+    """Verify playground closed and scroll regions accessible."""
+
     class Parser(HTMLParser):
         def __init__(self):
             super().__init__()
@@ -37,6 +41,8 @@ def test_playground_closed_and_scroll_regions_accessible():
 
 
 def test_usage_tables_have_compact_matching_headers():
+    """Verify usage tables have compact matching headers."""
+
     class Headers(HTMLParser):
         def __init__(self):
             super().__init__()

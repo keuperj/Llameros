@@ -1,3 +1,5 @@
+"""Offline core regression tests for Llameros behavior and integration boundaries."""
+
 import json
 import time
 from dataclasses import replace
@@ -30,6 +32,8 @@ HARDWARE = {
 
 
 class FakeDocker:
+    """In-memory runtime fake recording calls without invoking the host Docker daemon."""
+
     def __init__(self):
         self.running = False
         self.calls = []
@@ -100,6 +104,8 @@ class FakeDocker:
 
 
 class FakeCatalog:
+    """Deterministic official-model catalogue fake that makes no network requests."""
+
     def list(self, query):
         return ["gemma3"]
 
@@ -112,6 +118,7 @@ class FakeCatalog:
 
 @pytest.fixture
 def client(tmp_path):
+    """Yield an HTTPS test client with temporary state and injected PAM/runtime/catalogue fakes."""
     app = create_app(
         Settings(state_dir=tmp_path),
         docker=FakeDocker(),
@@ -129,6 +136,7 @@ def client(tmp_path):
 
 
 def sign_in(client):
+    """Authenticate the process-account fixture and attach its CSRF token to later requests."""
     response = client.post(
         "/api/login", json={"username": current_user(), "password": "test-secret"}
     )
@@ -138,6 +146,7 @@ def sign_in(client):
 
 
 def wait_job(client):
+    """Poll the fake-backed lifecycle worker until terminal state, failing on a bounded timeout."""
     for _ in range(100):
         result = client.get("/api/job").json()
         if result["state"] != "running":
@@ -147,6 +156,7 @@ def wait_job(client):
 
 
 def test_landing_page_branding_and_repository_link(client):
+    """Verify landing page branding and repository link."""
     response = client.get("/")
     assert response.status_code == 200
     assert '<img class="brand-logo" src="/static/logo.svg"' in response.text
@@ -161,6 +171,7 @@ def test_landing_page_branding_and_repository_link(client):
 
 
 def test_footer_logos_are_small_public_local_images(client):
+    """Verify footer logos are small public local images."""
     from html.parser import HTMLParser
 
     class Images(HTMLParser):
@@ -190,6 +201,7 @@ def test_footer_logos_are_small_public_local_images(client):
 
 
 def test_logo_is_public_svg_and_shared_with_readme(client):
+    """Verify logo is public svg and shared with readme."""
     response = client.get("/static/logo.svg")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
@@ -202,6 +214,7 @@ def test_logo_is_public_svg_and_shared_with_readme(client):
 
 
 def test_authentication_and_cookie_flags(client):
+    """Verify authentication and cookie flags."""
     assert client.get("/api/status").status_code == 401
     assert (
         client.post(
@@ -223,6 +236,7 @@ def test_authentication_and_cookie_flags(client):
 
 
 def test_csrf_and_origin(client):
+    """Verify csrf and origin."""
     sign_in(client)
     assert (
         client.post("/api/container/start", json={}, headers={"X-CSRF-Token": "bad"}).status_code
@@ -241,6 +255,7 @@ def test_csrf_and_origin(client):
 
 
 def test_http_rejected_and_security_headers(client):
+    """Verify http rejected and security headers."""
     assert client.get("http://testserver/").status_code == 400
     response = client.get("/")
     assert response.status_code == 200 and "Llameros" in response.text
@@ -249,6 +264,7 @@ def test_http_rejected_and_security_headers(client):
 
 
 def test_login_rate_limit(client):
+    """Verify login rate limit."""
     for _ in range(5):
         assert (
             client.post(
@@ -265,6 +281,7 @@ def test_login_rate_limit(client):
 
 
 def test_lifecycle_generation_and_history(client):
+    """Verify lifecycle generation and history."""
     sign_in(client)
     assert client.post("/api/container/start", json={}).status_code == 202
     assert wait_job(client)["state"] == "completed"
@@ -292,6 +309,7 @@ def test_lifecycle_generation_and_history(client):
 
 
 def test_catalog_and_validation(client):
+    """Verify catalog and validation."""
     sign_in(client)
     assert client.get("/api/catalog").json()["models"] == ["gemma3"]
     assert client.get("/api/catalog/gemma3/tags").json()["tags"] == ["gemma3:270m"]
@@ -305,11 +323,13 @@ def test_catalog_and_validation(client):
     ["../escape", "x/y", "x;id", "--privileged", "https://host/model", "gemma3:\n", "x:tag/path"],
 )
 def test_invalid_model_names(name):
+    """Verify invalid model names."""
     with pytest.raises(ValueError):
         validate_model(name)
 
 
 def test_catalog_html_and_manifest():
+    """Verify catalog html and manifest."""
     parser = Links()
     parser.feed(
         '<a href="/library/gemma3">a</a><a href="/library/gemma3">b</a><a href="/library/../bad">bad</a>'
@@ -324,6 +344,7 @@ def test_catalog_html_and_manifest():
 
 
 def test_memory_fit():
+    """Verify memory fit."""
     assert assess_fit(GIB, HARDWARE)["fits"]
     assert not assess_fit(30 * GIB, HARDWARE)["fits"]
     gpu_hw = {**HARDWARE, "gpus": [{"vendor": "nvidia", "free": 8 * GIB}]}
@@ -332,6 +353,7 @@ def test_memory_fit():
 
 
 def test_sessions_expire_and_rate_limit():
+    """Verify sessions expire and rate limit."""
     sessions = Sessions(60)
     token, session = sessions.create("tester")
     assert sessions.get(token)["username"] == "tester"
@@ -342,12 +364,14 @@ def test_sessions_expire_and_rate_limit():
 
 
 def test_pam_rejects_other_users_and_empty_passwords():
+    """Verify pam rejects other users and empty passwords."""
     assert not verify_password("not-the-current-user", "password", "login")
     assert not verify_password(current_user(), "", "login")
     assert not verify_password(current_user(), "bad\x00password", "login")
 
 
 def test_docker_arguments_and_gpu_modes(tmp_path):
+    """Verify docker arguments and gpu modes."""
     cfg = Settings(state_dir=tmp_path)
     args = Docker(cfg).run_args()
     assert "127.0.0.1:11435:11434" in args
@@ -360,6 +384,7 @@ def test_docker_arguments_and_gpu_modes(tmp_path):
 
 
 def test_rootful_guard_and_remote_daemon(tmp_path, monkeypatch):
+    """Verify rootful guard and remote daemon."""
     monkeypatch.delenv("DOCKER_HOST", raising=False)
     docker = Docker(Settings(state_dir=tmp_path, allow_rootful_docker=False))
     docker.command = lambda *args, **kwargs: (
@@ -375,6 +400,7 @@ def test_rootful_guard_and_remote_daemon(tmp_path, monkeypatch):
 
 
 def test_container_ownership(tmp_path):
+    """Verify container ownership."""
     docker = Docker(Settings(state_dir=tmp_path))
 
     def command(*args, **kwargs):
@@ -388,6 +414,7 @@ def test_container_ownership(tmp_path):
 
 
 def test_store_retention(tmp_path):
+    """Verify store retention."""
     store = Store(tmp_path / "history.sqlite3")
     store.event("start", "gemma3:270m")
     store.sample({"hardware": HARDWARE}, 30)
@@ -400,6 +427,7 @@ def test_store_retention(tmp_path):
 
 
 def test_tls_generation_and_reuse(tmp_path):
+    """Verify tls generation and reuse."""
     settings = Settings(state_dir=tmp_path)
     cert, key = certificates(settings)
     initial = cert.read_bytes()
@@ -413,6 +441,7 @@ def test_tls_generation_and_reuse(tmp_path):
 
 
 def test_config(tmp_path):
+    """Verify config."""
     path = tmp_path / "config.toml"
     path.write_text('host = "0.0.0.0"\nport = 9443\n')
     assert load_settings(path).port == 9443
@@ -427,6 +456,7 @@ def test_config(tmp_path):
 
 
 def test_example_config_uses_current_home(tmp_path, monkeypatch):
+    """Verify example config uses current home."""
     monkeypatch.setenv("HOME", str(tmp_path))
     example = Path(__file__).resolve().parents[1] / "config.example.toml"
     settings = load_settings(example)
@@ -435,6 +465,7 @@ def test_example_config_uses_current_home(tmp_path, monkeypatch):
 
 
 def test_default_config_discovery_uses_current_home(tmp_path, monkeypatch):
+    """Verify default config discovery uses current home."""
     monkeypatch.setenv("HOME", str(tmp_path))
     config = tmp_path / ".config/llameros/config.toml"
     config.parent.mkdir(parents=True)
@@ -445,6 +476,8 @@ def test_default_config_discovery_uses_current_home(tmp_path, monkeypatch):
 
 
 def test_docker_errors_visible(tmp_path):
+    """Verify docker errors visible."""
+
     class BrokenDocker(FakeDocker):
         def status(self):
             raise DockerError("Rootful Docker refused")

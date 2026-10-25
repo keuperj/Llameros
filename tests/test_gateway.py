@@ -1,3 +1,5 @@
+"""Offline gateway regression tests for Llameros behavior and integration boundaries."""
+
 import asyncio
 import json
 import time
@@ -16,6 +18,7 @@ from llameros.storage import Store
 
 @pytest.fixture
 def gateway(tmp_path):
+    """Yield an isolated app/client, runtime fake, and captured upstream requests/response fixture."""
     docker = FakeDocker()
     docker.running = True
     docker.loaded = [{"name": "gemma3:270m", "target": "cpu"}]
@@ -47,6 +50,7 @@ def gateway(tmp_path):
 
 
 def issue(client, **kwargs):
+    """Sign in as the test admin and create a scoped bearer key with optional payload overrides."""
     client.headers["Origin"] = "https://testserver"
     csrf = sign_in(client).json()["csrf"]
     result = client.post(
@@ -68,6 +72,7 @@ def post(client, key, **body):
 
 
 def test_keys_default_to_all_models_without_runtime(gateway):
+    """Verify keys default to all models without runtime."""
     app, client, docker, calls, response = gateway
     docker.running, docker.loaded = False, []
     created, _ = issue(client, models=["*"])
@@ -76,6 +81,7 @@ def test_keys_default_to_all_models_without_runtime(gateway):
 
 
 def test_key_token_limits_apply_to_all_protocols(gateway):
+    """Verify key token limits apply to all protocols."""
     app, client, docker, calls, response = gateway
     created, _ = issue(client, max_tokens=8)
     token = created["key"]
@@ -99,6 +105,7 @@ def test_key_token_limits_apply_to_all_protocols(gateway):
 
 
 def test_delete_rejects_new_requests_and_retains_usage(gateway):
+    """Verify delete rejects new requests and retains usage."""
     app, client, docker, calls, response = gateway
     created, csrf = issue(client)
     assert post(client, created["key"]).status_code == 200
@@ -116,6 +123,7 @@ def test_delete_rejects_new_requests_and_retains_usage(gateway):
 
 
 def test_existing_key_database_migration(tmp_path):
+    """Verify existing key database migration."""
     store = Store(tmp_path / "history.sqlite")
     with store.connect() as db:
         db.execute(
@@ -128,6 +136,7 @@ def test_existing_key_database_migration(tmp_path):
 
 
 def test_authentication_management_and_no_credential_forwarding(gateway):
+    """Verify authentication management and no credential forwarding."""
     app, client, docker, calls, response = gateway
     assert client.get("/api/keys").status_code == 401
     assert post(client, "invalid").status_code == 401
@@ -166,6 +175,7 @@ def test_authentication_management_and_no_credential_forwarding(gateway):
 
 
 def test_permissions_routing_and_job_lock(gateway):
+    """Verify permissions routing and job lock."""
     app, client, docker, calls, response = gateway
     created, _ = issue(client)
     key = created["key"]
@@ -203,6 +213,7 @@ def test_permissions_routing_and_job_lock(gateway):
     ],
 )
 def test_request_guardrails(gateway, fields):
+    """Verify request guardrails."""
     _, client, _, calls, _ = gateway
     created, _ = issue(client)
     assert post(client, created["key"], **fields).status_code == 400
@@ -210,6 +221,7 @@ def test_request_guardrails(gateway, fields):
 
 
 def test_body_size_https_and_lifecycle_exclusion(gateway):
+    """Verify body size https and lifecycle exclusion."""
     _, client, _, _, _ = gateway
     created, _ = issue(client)
     key = created["key"]
@@ -226,6 +238,7 @@ def test_body_size_https_and_lifecycle_exclusion(gateway):
 
 
 def test_openai_nonstream_and_usage(gateway):
+    """Verify openai nonstream and usage."""
     _, client, _, calls, response = gateway
     created, _ = issue(client)
     response.clear()
@@ -254,6 +267,7 @@ def test_openai_nonstream_and_usage(gateway):
     "openai,broken", [(False, False), (True, False), (False, True), (True, True)]
 )
 def test_streams_and_failed_stream_accounting(tmp_path, openai, broken):
+    """Verify streams and failed stream accounting."""
     docker = FakeDocker()
     docker.running, docker.loaded = True, [{"name": "gemma3:270m"}]
     if openai:
@@ -304,6 +318,7 @@ def test_streams_and_failed_stream_accounting(tmp_path, openai, broken):
 
 
 def test_keys_persist_expire_and_validate(tmp_path):
+    """Verify keys persist expire and validate."""
     store = Store(tmp_path / "keys.sqlite3")
     keys = ApiKeys(store)
     created = keys.create(KeyRequest(name="one", models=["gemma3"], targets=["cpu"]))
@@ -320,6 +335,7 @@ def test_keys_persist_expire_and_validate(tmp_path):
 
 @pytest.mark.parametrize("days", [None, 7, 30, 365])
 def test_key_expiry_presets_and_unlimited_default(gateway, days):
+    """Verify key expiry presets and unlimited default."""
     app, client, docker, calls, response = gateway
     before = time.time()
     created, _ = issue(client, expires_days=days)
@@ -339,6 +355,7 @@ def test_key_expiry_presets_and_unlimited_default(gateway, days):
 
 @pytest.mark.parametrize("days", [0, -1, 366, True, "never"])
 def test_invalid_key_expiry(days):
+    """Verify invalid key expiry."""
     with pytest.raises(ValueError):
         KeyRequest(name="invalid", expires_days=days)
 
@@ -353,6 +370,7 @@ def test_invalid_key_expiry(days):
     ],
 )
 def test_upstream_failures_release_lock_without_leaking_errors(tmp_path, status, content):
+    """Verify upstream failures release lock without leaking errors."""
     docker = FakeDocker()
     docker.running, docker.loaded = True, [{"name": "gemma3:270m"}]
     app = create_app(
@@ -372,6 +390,8 @@ def test_upstream_failures_release_lock_without_leaking_errors(tmp_path, status,
 
 
 def test_disconnect_before_stream_iteration_runs_cleanup():
+    """Verify disconnect before stream iteration runs cleanup."""
+
     async def scenario():
         cleaned = []
 
@@ -398,6 +418,7 @@ def test_disconnect_before_stream_iteration_runs_cleanup():
 
 
 def test_device_routing_uses_registered_slot_url(tmp_path, monkeypatch):
+    """Verify device routing uses registered slot url."""
     from types import SimpleNamespace
 
     gpu = "gpu-0123456789abcdef"
@@ -445,6 +466,7 @@ def test_device_routing_uses_registered_slot_url(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("path", ["/api/embed", "/v1/embeddings"])
 def test_embeddings_permissions_batched_translation_and_accounting(gateway, path):
+    """Verify embeddings permissions batched translation and accounting."""
     app, client, docker, calls, response = gateway
     created, _ = issue(client)
     response.clear()
@@ -492,6 +514,7 @@ def test_embeddings_permissions_batched_translation_and_accounting(gateway, path
     ],
 )
 def test_embedding_validation(gateway, fields):
+    """Verify embedding validation."""
     _, client, _, calls, _ = gateway
     created, _ = issue(client)
     result = client.post(
@@ -504,6 +527,7 @@ def test_embedding_validation(gateway, fields):
 
 
 def test_malformed_embedding_response_releases_device(gateway):
+    """Verify malformed embedding response releases device."""
     app, client, _, _, response = gateway
     created, _ = issue(client)
     response.clear()

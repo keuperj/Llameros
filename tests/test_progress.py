@@ -1,3 +1,5 @@
+"""Offline progress regression tests for Llameros behavior and integration boundaries."""
+
 import json
 import threading
 
@@ -11,6 +13,7 @@ from llameros.storage import Store
 
 
 def test_start_cached_image_skips_download_and_reports_stages(tmp_path):
+    """Verify start cached image skips download and reports stages."""
     docker = Docker(Settings(state_dir=tmp_path))
     docker.check_daemon = lambda: None
     docker.inspect = lambda: None
@@ -26,6 +29,7 @@ def test_start_cached_image_skips_download_and_reports_stages(tmp_path):
 
 
 def test_start_downloads_missing_image_before_creating_container(tmp_path):
+    """Verify start downloads missing image before creating container."""
     docker = Docker(Settings(state_dir=tmp_path))
     docker.check_daemon = lambda: None
     docker.inspect = lambda: None
@@ -40,6 +44,7 @@ def test_start_downloads_missing_image_before_creating_container(tmp_path):
 
 @pytest.mark.parametrize("local", [True, False])
 def test_stopped_status_reports_image_and_container_availability(tmp_path, local):
+    """Verify stopped status reports image and container availability."""
     docker = Docker(Settings(state_dir=tmp_path))
     docker.check_daemon = lambda: None
     docker.image_available = lambda: local
@@ -52,6 +57,7 @@ def test_stopped_status_reports_image_and_container_availability(tmp_path, local
 
 
 def mock_pull_client(monkeypatch, events, status=200):
+    """Replace daemon HTTP with supplied JSON progress events and return captured requests."""
     original = httpx.Client
     requests = []
 
@@ -72,6 +78,7 @@ def mock_pull_client(monkeypatch, events, status=200):
 
 
 def test_docker_pull_stream_reports_real_layer_download_and_extraction(tmp_path, monkeypatch):
+    """Verify docker pull stream reports real layer download and extraction."""
     monkeypatch.setenv("DOCKER_HOST", "unix:///example/docker.sock")
     docker = Docker(Settings(state_dir=tmp_path))
     docker.check_daemon = lambda: None
@@ -102,6 +109,7 @@ def test_docker_pull_stream_reports_real_layer_download_and_extraction(tmp_path,
 
 @pytest.mark.parametrize("events", [[{"error": "registry denied"}], []])
 def test_docker_pull_rejects_stream_errors_or_empty_stream(tmp_path, monkeypatch, events):
+    """Verify docker pull rejects stream errors or empty stream."""
     monkeypatch.setenv("DOCKER_HOST", "unix:///example/docker.sock")
     docker = Docker(Settings(state_dir=tmp_path))
     docker.check_daemon = lambda: None
@@ -112,6 +120,7 @@ def test_docker_pull_rejects_stream_errors_or_empty_stream(tmp_path, monkeypatch
 
 
 def test_job_tracks_layers_finishes_at_100_and_status_is_a_snapshot(tmp_path):
+    """Verify job tracks layers finishes at 100 and status is a snapshot."""
     store = Store(tmp_path / "history.sqlite3")
     jobs = Jobs(store)
     entered, release = threading.Event(), threading.Event()

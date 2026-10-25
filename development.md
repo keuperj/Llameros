@@ -6,6 +6,10 @@ Llameros helps users **manage and securely share their local Ollama models**.
 Keep this local-first theme consistent across the dashboard, key management, and
 client examples; bearer authentication does not imply supported public hosting.
 
+For a step-by-step contributor workflow, code navigation, and medium-detail
+docstring/JSDoc conventions, see the [development guide](development-guide.md).
+This page remains the architecture, security, and acceptance reference.
+
 ## Setup and checks
 
 ```bash

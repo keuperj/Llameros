@@ -1,3 +1,5 @@
+"""Offline model storage regression tests for Llameros behavior and integration boundaries."""
+
 import json
 import threading
 from pathlib import Path
@@ -13,6 +15,7 @@ from llameros.model_storage import ModelStorage, scan_models, validate_directory
 
 
 def make_model(directory: Path):
+    """Create a complete tiny Ollama manifest/blob layout inside a private test directory."""
     manifest = directory / "manifests/registry.ollama.ai/library/gemma3/270m"
     manifest.parent.mkdir(parents=True)
     directory.chmod(0o700)
@@ -26,6 +29,7 @@ def make_model(directory: Path):
 
 
 def test_offline_inventory_and_incomplete_download(tmp_path):
+    """Verify offline inventory and incomplete download."""
     models = tmp_path / "models"
     manifest = make_model(models)
     result = scan_models(models)
@@ -39,6 +43,7 @@ def test_offline_inventory_and_incomplete_download(tmp_path):
 
 
 def test_storage_persistence_and_cache_identity(tmp_path):
+    """Verify storage persistence and cache identity."""
     cfg = Settings(state_dir=tmp_path / "state")
     cfg.prepare()
     storage = ModelStorage(cfg)
@@ -59,11 +64,13 @@ def test_storage_persistence_and_cache_identity(tmp_path):
     "value", ["relative/path", "/", "~/../models", "/tmp/models,readonly", "bad\npath"]
 )
 def test_invalid_directory(value, tmp_path):
+    """Verify invalid directory."""
     with pytest.raises(ValueError):
         validate_directory(value, tmp_path / "state", create=True)
 
 
 def test_reject_home_state_symlinks_and_unrelated_files(tmp_path, monkeypatch):
+    """Verify reject home state symlinks and unrelated files."""
     monkeypatch.setenv("HOME", str(tmp_path))
     state = tmp_path / "state"
     for target in [tmp_path, state, state / "models"]:
@@ -85,6 +92,7 @@ def test_reject_home_state_symlinks_and_unrelated_files(tmp_path, monkeypatch):
 
 
 def test_storage_change_requires_stop_and_preserves_old_files(tmp_path):
+    """Verify storage change requires stop and preserves old files."""
     cfg = Settings(state_dir=tmp_path / "state")
     cfg.prepare()
     docker = Docker(cfg)
@@ -112,6 +120,7 @@ def test_storage_change_requires_stop_and_preserves_old_files(tmp_path):
 
 
 def test_failed_container_removal_restores_preference(tmp_path):
+    """Verify failed container removal restores preference."""
     cfg = Settings(state_dir=tmp_path / "state")
     cfg.prepare()
     docker = Docker(cfg)
@@ -129,6 +138,7 @@ def test_failed_container_removal_restores_preference(tmp_path):
 
 
 def test_storage_api_auth_csrf_and_downloaded_models(tmp_path):
+    """Verify storage api auth csrf and downloaded models."""
     app = create_app(
         Settings(state_dir=tmp_path),
         docker=FakeDocker(),
@@ -170,6 +180,7 @@ def test_storage_api_auth_csrf_and_downloaded_models(tmp_path):
 
 
 def test_storage_changes_share_lifecycle_job_lock(tmp_path):
+    """Verify storage changes share lifecycle job lock."""
     docker = FakeDocker()
     entered, release = threading.Event(), threading.Event()
 
@@ -199,6 +210,7 @@ def test_storage_changes_share_lifecycle_job_lock(tmp_path):
 
 
 def test_directory_inventory_available_without_docker(tmp_path):
+    """Verify directory inventory available without docker."""
     cfg = Settings(state_dir=tmp_path / "state")
     cfg.prepare()
     models = tmp_path / "models"
@@ -231,6 +243,7 @@ def test_directory_inventory_available_without_docker(tmp_path):
 
 
 def test_volume_cache_not_reused_for_different_location(tmp_path):
+    """Verify volume cache not reused for different location."""
     cfg = Settings(state_dir=tmp_path / "state")
     cfg.prepare()
     storage = ModelStorage(cfg)

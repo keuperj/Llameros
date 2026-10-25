@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Benchmark fixed, already-loaded RAG models over authenticated HTTPS (stdlib only)."""
+"""Opt-in RAG benchmark against already-loaded models through the Llameros HTTPS gateway.
+
+Benchmark fixed, already-loaded RAG models over authenticated HTTPS (stdlib only).
+"""
 
 import argparse
 import concurrent.futures
@@ -33,12 +36,18 @@ QUERIES = [
 
 
 class NoRedirect(HTTPRedirectHandler):
+    """Prevent bearer credentials from following redirects during live benchmark requests."""
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Decline urllib redirect handling so credentials stay at the configured endpoint."""
         return None
 
 
 class Client:
+    """Minimal verified-HTTPS client for loaded-model discovery, embeddings, and streamed generation."""
+
     def __init__(self, url, key, ca_cert=None, timeout=600):
+        """Validate the HTTPS base URL/key and construct a trusted TLS context."""
         parsed = urlsplit(url)
         if (
             parsed.scheme != "https"
@@ -58,6 +67,7 @@ class Client:
 
     def open(self, path, body=None, target=None):
         # Separate opener per request so concurrent benchmark workers share no connection state.
+        """Open one authenticated request with optional target selection and no proxy/redirect inheritance."""
         opener = build_opener(ProxyHandler({}), HTTPSHandler(context=self.context), NoRedirect())
         headers = {"Authorization": "Bearer " + self.key}
         if target:
@@ -69,10 +79,12 @@ class Client:
         return opener.open(with_error, timeout=self.timeout)
 
     def models(self):
+        """Return key-permitted loaded model/device entries from OpenAI discovery."""
         with self.open("/v1/models") as response:
             return json.load(response)["data"]
 
     def embed(self, model, texts, target):
+        """Request one vector per text and return validated unit vectors for cosine retrieval."""
         with self.open(
             "/api/embed", {"model": model, "input": texts, "truncate": False}, target
         ) as response:
@@ -83,6 +95,7 @@ class Client:
         return [unit_vector(vector) for vector in vectors]
 
     def generate(self, model, question, documents, target, max_tokens):
+        """Measure streamed generation timing and known tokens without retaining response text."""
         prompt = (
             "Use only the following context to answer briefly. If insufficient, say so.\n\n"
             + "\n\n".join(documents)
@@ -123,6 +136,7 @@ class Client:
 
 
 def unit_vector(vector):
+    """Validate a finite, nonzero numeric vector and return its normalized components."""
     if (
         not isinstance(vector, list)
         or not vector
@@ -136,6 +150,7 @@ def unit_vector(vector):
 
 
 def select_target(models, model, target):
+    """Resolve one loaded model target or require explicit disambiguation."""
     matches = [
         item
         for item in models
@@ -149,6 +164,7 @@ def select_target(models, model, target):
 
 
 def summarize(values):
+    """Return mean/p50/p95 latency in seconds, or None when no measurements are available."""
     if not values:
         return None
     ordered = sorted(values)
@@ -175,6 +191,11 @@ def benchmark(
     documents=None,
     queries=None,
 ):
+    """Embed a corpus, retrieve context, and benchmark warmed concurrent RAG queries.
+
+    Require already-loaded models; report timings and token counts without storing generated
+    content.
+    """
     documents = DOCUMENTS if documents is None else documents
     queries = QUERIES if queries is None else queries
     if (
@@ -211,6 +232,7 @@ def benchmark(
     index_seconds = time.perf_counter() - index_start
 
     def query(index):
+        """Measure one embedding/retrieval/generation pass against the in-memory corpus index."""
         text = queries[index % len(queries)]
         start = time.perf_counter()
         vector = client.embed(embedding_model, [query_prefix + text], embedding_target)[0]
@@ -272,6 +294,7 @@ def benchmark(
 
 
 def main(argv=None):
+    """Parse benchmark options, run verified-HTTPS checks, and print JSON metrics or a safe failure."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="https://127.0.0.1:8443/inference")
     parser.add_argument("--ca-cert", default=os.environ.get("LLAMEROS_CA_CERT"))

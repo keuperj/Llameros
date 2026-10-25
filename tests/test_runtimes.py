@@ -1,3 +1,5 @@
+"""Offline runtimes regression tests for Llameros behavior and integration boundaries."""
+
 from dataclasses import replace
 
 import pytest
@@ -32,6 +34,7 @@ GPUS = [
 
 @pytest.fixture
 def pool(tmp_path, monkeypatch):
+    """Build isolated runtime slots with fake Docker state and test-controlled hardware."""
     states = {}
 
     class FakeSlot:
@@ -106,6 +109,7 @@ def pool(tmp_path, monkeypatch):
 
 
 def test_cpu_and_two_gpu_models_coexist_with_stable_ports_and_routing(pool):
+    """Verify cpu and two gpu models coexist with stable ports and routing."""
     manager, states, cfg, hw = pool
     manager.client("cpu", register=True).start()
     ids = [slot["id"] for slot in manager.status()["slots"] if slot["supported"]]
@@ -134,6 +138,7 @@ def test_cpu_and_two_gpu_models_coexist_with_stable_ports_and_routing(pool):
 
 
 def test_gpu_fit_unknown_target_and_cpu_fallback_rejected(pool):
+    """Verify gpu fit unknown target and cpu fallback rejected."""
     manager, _, _, _ = pool
     target = next(
         key for key, value in manager.targets.items() if value.get("device") == "GPU-aaaa-1111"
@@ -163,6 +168,7 @@ def test_gpu_fit_unknown_target_and_cpu_fallback_rejected(pool):
 
 
 def test_isolated_container_arguments_share_storage_but_not_devices(tmp_path, monkeypatch):
+    """Verify isolated container arguments share storage but not devices."""
     cfg = Settings(state_dir=tmp_path, gpu="nvidia")
     target = {"id": "gpu-test", "device": "GPU-aaaa-1111"}
     args = Docker(cfg, target=target, name=cfg.container_name + "-gpu-test").run_args()
@@ -186,6 +192,7 @@ def test_isolated_container_arguments_share_storage_but_not_devices(tmp_path, mo
 
 @pytest.mark.parametrize("cpu_percent", [0, 75, 100])
 def test_cpu_load_ignores_utilization_without_reserving_all_threads(pool, cpu_percent):
+    """Verify cpu load ignores utilization without reserving all threads."""
     manager, states, cfg, hw = pool
     hw["cpu_percent"] = cpu_percent
     slot = next(slot for slot in manager.status()["slots"] if slot["id"] == "cpu")
@@ -204,6 +211,7 @@ def test_cpu_load_ignores_utilization_without_reserving_all_threads(pool, cpu_pe
 
 
 def test_app_routes_inference_and_stop_to_selected_slot(pool):
+    """Verify app routes inference and stop to selected slot."""
     _, states, cfg, hw = pool
     app = create_app(
         cfg, hardware_provider=lambda: hw, authenticator=lambda *args: True, sampling=False
@@ -248,6 +256,7 @@ def test_app_routes_inference_and_stop_to_selected_slot(pool):
 
 
 def test_legacy_container_requires_explicit_recreation(tmp_path):
+    """Verify legacy container requires explicit recreation."""
     import json
     import os
 
@@ -267,6 +276,7 @@ def test_legacy_container_requires_explicit_recreation(tmp_path):
 
 
 def test_hardware_detection_keeps_uuid_and_lists_other_vendors(monkeypatch):
+    """Verify hardware detection keeps uuid and lists other vendors."""
     import subprocess
 
     from llameros.hardware import gpu_info
@@ -284,6 +294,7 @@ def test_hardware_detection_keeps_uuid_and_lists_other_vendors(monkeypatch):
 
 
 def test_two_models_share_gpu_embedding_warmup_and_individual_stop(pool):
+    """Verify two models share gpu embedding warmup and individual stop."""
     manager, states, cfg, hw = pool
     target = next(key for key, value in manager.targets.items() if value.get("vendor") == "nvidia")
     manager.load("one:latest", 300_000_000, target, 4096, lambda value: None)

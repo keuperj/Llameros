@@ -1,3 +1,4 @@
+<!-- Llameros vector logo used by the shared dashboard header; presentation only, with no application logic. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" fill="none" role="img" aria-labelledby="title desc">
   <title id="title">Llameros logo</title>
   <desc id="desc">A lime llama carrying a circuit-patterned saddle in front of Andean peaks on a dark forest-green tile.</desc>

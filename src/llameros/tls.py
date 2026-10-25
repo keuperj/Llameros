@@ -1,4 +1,7 @@
-"""Generate a private self-signed certificate with host/IP subject alternatives."""
+"""TLS certificate validation and private self-signed certificate creation for the Llameros HTTPS service.
+
+Generate a private self-signed certificate with host/IP subject alternatives.
+"""
 
 import ipaddress
 import os
@@ -15,6 +18,11 @@ from .config import Settings
 
 
 def certificates(settings: Settings) -> tuple[Path, Path]:
+    """Return certificate/key paths, validating configured files or maintaining a private local pair.
+
+    Generated certificates include host/IP alternatives and are renewed when near expiry or
+    missing required names. No trust-store changes are made.
+    """
     if settings.cert_file:
         cert, key = (
             Path(settings.cert_file).expanduser().absolute(),

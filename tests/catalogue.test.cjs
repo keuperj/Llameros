@@ -1,3 +1,7 @@
+/**
+ * @file Offline Node regression tests for Llameros catalogue dashboard behavior.
+ * Uses built-in test/assert and local stubs; no browser, live server, or npm install is needed.
+ */
 'use strict';
 const {test} = require('node:test');
 const assert = require('node:assert/strict');

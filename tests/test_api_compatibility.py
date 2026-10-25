@@ -27,6 +27,7 @@ PNG = base64.b64decode(
 
 
 def headers(client, **kwargs):
+    """Create a test key and return its bearer Authorization header."""
     created, _ = issue(client, **kwargs)
     return {"Authorization": "Bearer " + created["key"]}
 
@@ -59,6 +60,7 @@ def headers(client, **kwargs):
     ],
 )
 def test_inference_protocols(gateway, path, fields):
+    """Verify inference protocols."""
     app, client, _, calls, response = gateway
     auth = headers(client)
     response.clear()
@@ -85,6 +87,7 @@ def test_inference_protocols(gateway, path, fields):
     ],
 )
 def test_new_protocols_preserve_key_limits(gateway, path, fields):
+    """Verify new protocols preserve key limits."""
     _, client, _, calls, _ = gateway
     auth = headers(client, max_tokens=8)
     result = client.post("/inference" + path, headers=auth, json={"model": "gemma3:270m", **fields})
@@ -109,6 +112,7 @@ def test_new_protocols_preserve_key_limits(gateway, path, fields):
     ],
 )
 def test_no_stateful_or_server_tools(gateway, path, fields):
+    """Verify no stateful or server tools."""
     _, client, _, calls, _ = gateway
     result = client.post(
         "/inference" + path, headers=headers(client), json={"model": "gemma3:270m", **fields}
@@ -118,6 +122,7 @@ def test_no_stateful_or_server_tools(gateway, path, fields):
 
 
 def test_legacy_and_base64_embeddings(gateway):
+    """Verify legacy and base64 embeddings."""
     _, client, _, calls, response = gateway
     auth = headers(client)
     response.clear()
@@ -139,6 +144,7 @@ def test_legacy_and_base64_embeddings(gateway):
 
 
 def test_namespaced_inference_not_urls():
+    """Verify namespaced inference not urls."""
     assert normalize("organization/model") == "organization/model:latest"
     for value in ("../model", "https://evil/model", "model?x=1", "org//model", None):
         with pytest.raises(ValueError):
@@ -146,6 +152,7 @@ def test_namespaced_inference_not_urls():
 
 
 def test_filtered_metadata(gateway):
+    """Verify filtered metadata."""
     _, client, docker, calls, response = gateway
     auth = headers(client)
     docker.loaded.append({"name": "private:latest", "target": "cpu", "base_url": "http://secret"})
@@ -188,11 +195,13 @@ def test_filtered_metadata(gateway):
     ],
 )
 def test_media_rejects_malformed_and_remote(body):
+    """Verify media rejects malformed and remote."""
     with pytest.raises(HTTPException):
         validate_images(body, Settings())
 
 
 def test_raster_dimensions_and_limits():
+    """Verify raster dimensions and limits."""
     assert image_dimensions(PNG) == ("image/png", 1, 1)
     data = base64.b64encode(PNG).decode()
     assert validate_images({"images": [data]}, Settings()) == 1
@@ -211,6 +220,7 @@ def test_raster_dimensions_and_limits():
 
 @pytest.mark.parametrize("vision", [True, False])
 def test_large_inline_image_and_model_capability(gateway, vision):
+    """Verify large inline image and model capability."""
     app, client, _, calls, response = gateway
     auth = headers(client)
     response["capabilities"] = ["vision"] if vision else ["completion"]
@@ -235,6 +245,7 @@ def test_large_inline_image_and_model_capability(gateway, vision):
     [(p, b) for p in ("responses", "messages", "completions") for b in (False, True)],
 )
 def test_protocol_streams(tmp_path, protocol, broken):
+    """Verify protocol streams."""
     docker = FakeDocker()
     docker.running, docker.loaded = True, [{"name": "gemma3:270m"}]
     if protocol == "responses":
@@ -306,6 +317,7 @@ def test_protocol_streams(tmp_path, protocol, broken):
 
 
 def pdf_bytes(text="Hello PDF"):
+    """Build a minimal valid single-page text PDF for offline extraction checks."""
     stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -326,6 +338,7 @@ def pdf_bytes(text="Hello PDF"):
 
 @pytest.mark.skipif(not shutil.which("pdftotext"), reason="Poppler not installed")
 def test_real_pdf_extraction_and_inline_translation(gateway):
+    """Verify real pdf extraction and inline translation."""
     _, client, _, calls, response = gateway
     response.clear()
     response.update(usage={"input_tokens": 2, "output_tokens": 3})
@@ -386,6 +399,7 @@ def test_real_pdf_extraction_and_inline_translation(gateway):
 
 
 def test_pdf_unavailable_and_invalid(gateway, monkeypatch):
+    """Verify pdf unavailable and invalid."""
     _, client, _, _, _ = gateway
     auth = headers(client)
     monkeypatch.setattr("llameros.multimodal.shutil.which", lambda _: None)
@@ -421,12 +435,14 @@ def test_pdf_unavailable_and_invalid(gateway, monkeypatch):
     ],
 )
 def test_media_config_bounds(name):
+    """Verify media config bounds."""
     for value in (0, -1, True, 10000000000):
         with pytest.raises(ValueError):
             Settings(**{name: value})
 
 
 def test_live_checker_contract_and_pin(tmp_path, monkeypatch):
+    """Verify live checker contract and pin."""
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]

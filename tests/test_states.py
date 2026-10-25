@@ -1,3 +1,5 @@
+"""Offline states regression tests for Llameros behavior and integration boundaries."""
+
 import pytest
 from fastapi.testclient import TestClient
 from test_core import HARDWARE, FakeDocker, sign_in, wait_job
@@ -10,6 +12,7 @@ client = pytest.fixture(core_client.__wrapped__)
 
 
 def test_container_rejects_same_state_operations(client):
+    """Verify container rejects same state operations."""
     sign_in(client)
     client.post("/api/container/stop", json={})
     assert "already stopped" in wait_job(client)["error"]
@@ -20,6 +23,7 @@ def test_container_rejects_same_state_operations(client):
 
 
 def test_only_loaded_models_can_generate_and_model_transitions_are_guarded(client):
+    """Verify only loaded models can generate and model transitions are guarded."""
     sign_in(client)
     client.post("/api/container/start", json={})
     wait_job(client)
@@ -38,6 +42,8 @@ def test_only_loaded_models_can_generate_and_model_transitions_are_guarded(clien
 
 
 def test_second_model_requires_unloading_first_without_implicit_eviction(tmp_path):
+    """Verify second model requires unloading first without implicit eviction."""
+
     class TwoModelsDocker(FakeDocker):
         def status(self):
             return {

@@ -1,4 +1,7 @@
-"""Best-effort, non-privileged Linux hardware inspection."""
+"""Unprivileged hardware sampling and model-fit estimates for Llameros runtime placement.
+
+Best-effort, non-privileged Linux hardware inspection.
+"""
 
 import csv
 import platform
@@ -11,6 +14,11 @@ GIB = 1024**3
 
 
 def gpu_info() -> list[dict]:
+    """Discover GPU identity, memory bytes, and utilization using NVIDIA tools and Linux sysfs.
+
+    Unavailable probes are tolerated; missing metrics remain unknown rather than implying safe
+    capacity.
+    """
     devices = []
     try:
         result = subprocess.run(
@@ -73,6 +81,7 @@ def gpu_info() -> list[dict]:
 
 
 def snapshot() -> dict:
+    """Return CPU identity/load, RAM byte counts/percentage, and best-effort GPU measurements."""
     memory = psutil.virtual_memory()
     cpu = platform.processor() or platform.machine()
     try:
@@ -97,6 +106,11 @@ def snapshot() -> dict:
 def assess_fit(size: int, hardware: dict, gpu_mode: str = "cpu") -> dict:
     # Fixed 2 GiB runtime + 1 GiB reserve excluded even tiny CPU models. Scale
     # runtime headroom with weights while retaining a floor and OS reserve.
+    """Estimate model memory headroom and placement from weight bytes and a hardware snapshot.
+
+    RAM and VRAM are not added together; a positive fit is advisory, not a guarantee of
+    residency or architecture support.
+    """
     runtime = max(256 * 1024**2, min(2 * GIB, int(size * 0.25)))
     required = int(size * 1.25 + runtime)
     available = max(0, hardware["memory_available"] - 512 * 1024**2)

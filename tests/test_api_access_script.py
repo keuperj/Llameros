@@ -1,3 +1,5 @@
+"""Offline api access script regression tests for Llameros behavior and integration boundaries."""
+
 import importlib.util
 import io
 import json
@@ -14,6 +16,7 @@ spec.loader.exec_module(smoke)
 
 @pytest.mark.parametrize("stream", [False, True])
 def test_smoke_script_discovery_auth_and_generation(monkeypatch, stream):
+    """Verify smoke script discovery auth and generation."""
     calls = []
 
     class Opener:
@@ -45,11 +48,13 @@ def test_smoke_script_discovery_auth_and_generation(monkeypatch, stream):
     ["http://localhost/inference", "https://user:secret@localhost", "https://localhost?key=secret"],
 )
 def test_smoke_rejects_unsafe_urls(url):
+    """Verify smoke rejects unsafe urls."""
     with pytest.raises(ValueError):
         smoke.check_access(url, "llm_secret")
 
 
 def test_smoke_missing_key_returns_failure(monkeypatch, capsys):
+    """Verify smoke missing key returns failure."""
     monkeypatch.delenv("LLAMEROS_API_KEY", raising=False)
     assert smoke.main([]) == 1
     assert "LLAMEROS_API_KEY" in capsys.readouterr().err

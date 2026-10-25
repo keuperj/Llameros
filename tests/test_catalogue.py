@@ -1,3 +1,5 @@
+"""Offline catalogue regression tests for Llameros behavior and integration boundaries."""
+
 from fastapi.testclient import TestClient
 from test_core import HARDWARE, FakeDocker, sign_in
 
@@ -17,6 +19,7 @@ TAGS = """
 
 
 def test_parser_sizes_duplicates_and_cloud():
+    """Verify parser sizes duplicates and cloud."""
     parser = Links()
     parser.feed(TAGS)
     assert parser.names.count("example:small") == 1
@@ -27,6 +30,7 @@ def test_parser_sizes_duplicates_and_cloud():
 
 
 def test_variants_compatible_first_unknown_last_and_memory_reassessed():
+    """Verify variants compatible first unknown last and memory reassessed."""
     catalog = Catalog()
     catalog._get = lambda *args, **kwargs: TAGS
     variants = catalog.variants("example", HARDWARE, "cpu")
@@ -45,6 +49,7 @@ def test_variants_compatible_first_unknown_last_and_memory_reassessed():
 
 
 def test_popularity_order_and_search():
+    """Verify popularity order and search."""
     catalog = Catalog()
     seen = []
 
@@ -60,6 +65,7 @@ def test_popularity_order_and_search():
 
 
 def test_search_queries_upstream_and_handles_explicit_tags():
+    """Verify search queries upstream and handles explicit tags."""
     catalog = Catalog()
     urls = []
 
@@ -76,6 +82,7 @@ def test_search_queries_upstream_and_handles_explicit_tags():
 
 
 def test_small_cpu_models_fit_without_gpu_or_multi_gib_fixed_overhead():
+    """Verify small cpu models fit without gpu or multi gib fixed overhead."""
     from llameros.hardware import GIB, assess_fit
 
     hardware = {**HARDWARE, "memory_available": int(1.3 * GIB), "gpus": []}
@@ -89,6 +96,7 @@ def test_small_cpu_models_fit_without_gpu_or_multi_gib_fixed_overhead():
 
 
 def test_cpu_only_api_reports_ram_fit_without_gpu_and_uses_same_exact_estimate(tmp_path):
+    """Verify cpu only api reports ram fit without gpu and uses same exact estimate."""
     from llameros.hardware import GIB
 
     hardware = {
@@ -125,6 +133,7 @@ def test_cpu_only_api_reports_ram_fit_without_gpu_and_uses_same_exact_estimate(t
 
 
 def test_compatibility_api_authentication_family_and_unknown(tmp_path):
+    """Verify compatibility api authentication family and unknown."""
     catalog = Catalog()
     catalog._get = lambda *args, **kwargs: TAGS
     app = create_app(
@@ -151,6 +160,7 @@ def test_compatibility_api_authentication_family_and_unknown(tmp_path):
 
 
 def test_config_menu_contains_storage_and_is_collapsed(tmp_path):
+    """Verify config menu contains storage and is collapsed."""
     from html.parser import HTMLParser
 
     class MenuParser(HTMLParser):
@@ -181,6 +191,7 @@ def test_config_menu_contains_storage_and_is_collapsed(tmp_path):
 
 
 def test_model_info_and_maintainer_links(tmp_path):
+    """Verify model info and maintainer links."""
     from html.parser import HTMLParser
 
     class LinkParser(HTMLParser):
@@ -220,6 +231,7 @@ def test_model_info_and_maintainer_links(tmp_path):
 
 
 def test_model_description_text_extraction_and_api(tmp_path):
+    """Verify model description text extraction and api."""
     from llameros.catalog import Description
 
     html = '<meta name="description" content="Summary"><div id="readme"><h2>About</h2><p>Useful model</p><script>evil()</script><form>Private editor<textarea>draft</textarea></form><p>Usage</p></div><footer>Unrelated</footer>'

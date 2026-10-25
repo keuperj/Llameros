@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Standalone HTTPS bearer-access smoke test; uses only Python's standard library."""
+"""Standalone HTTPS access smoke test for Llameros bearer authentication and chat inference.
+
+Standalone HTTPS bearer-access smoke test; uses only Python's standard library.
+"""
 
 import argparse
 import json
@@ -12,7 +15,10 @@ from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Requ
 
 
 class NoRedirect(HTTPRedirectHandler):
+    """Keep smoke-test bearer credentials from being forwarded to redirect destinations."""
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Decline urllib redirects instead of forwarding an authenticated request."""
         return None
 
 
@@ -37,6 +43,7 @@ def check_access(base_url, key, ca_cert=None, model=None, target=None, max_token
     opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context), NoRedirect())
 
     def request(path, payload=None, authenticated=True):
+        """Issue one verified-HTTPS request with bounded timeout and optional bearer authentication."""
         headers = {"Accept": "application/json"}
         if authenticated:
             headers["Authorization"] = "Bearer " + key
@@ -105,6 +112,7 @@ def check_access(base_url, key, ca_cert=None, model=None, target=None, max_token
 
 
 def main(argv=None):
+    """Parse smoke-test options, read the environment key, and return a success/failure exit code."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="https://127.0.0.1:8443/inference")
     parser.add_argument("--ca-cert", default=os.environ.get("LLAMEROS_CA_CERT"))

@@ -1,3 +1,5 @@
+"""Offline users regression tests for Llameros behavior and integration boundaries."""
+
 from types import SimpleNamespace
 
 import pytest
@@ -47,12 +49,14 @@ def login(client, username):
 
 
 def issue(client, **kwargs):
+    """Sign in as the test admin and create a scoped bearer key with optional payload overrides."""
     response = client.post("/api/keys", json={"name": "Personal key", **kwargs})
     assert response.status_code == 201, response.text
     return response.json()
 
 
 def test_default_roles_and_admin_endpoints_are_server_protected(multiuser):
+    """Verify default roles and admin endpoints are server protected."""
     app, admin, user = multiuser
     assert admin.get("/api/session").json()["role"] == "admin"
     assert user.get("/api/session").json()["role"] == "user"
@@ -80,6 +84,7 @@ def test_default_roles_and_admin_endpoints_are_server_protected(multiuser):
 
 
 def test_owner_isolation_and_admin_user_board_scope(multiuser):
+    """Verify owner isolation and admin user board scope."""
     app, admin, user = multiuser
     admin_key = issue(admin)
     alice_key = issue(user)
@@ -114,6 +119,7 @@ def test_owner_isolation_and_admin_user_board_scope(multiuser):
 
 
 def test_usage_and_running_model_redaction(multiuser):
+    """Verify usage and running model redaction."""
     app, admin, user = multiuser
     own = issue(user)
     other = issue(admin, user="bob")
@@ -153,6 +159,7 @@ def test_usage_and_running_model_redaction(multiuser):
 
 
 def test_block_revokes_all_keys_sessions_and_persists(multiuser):
+    """Verify block revokes all keys sessions and persists."""
     app, admin, user = multiuser
     first = issue(user)
     second = issue(admin, user="alice")
@@ -182,6 +189,7 @@ def test_block_revokes_all_keys_sessions_and_persists(multiuser):
 
 
 def test_promotion_demotion_and_self_protection(multiuser):
+    """Verify promotion demotion and self protection."""
     app, admin, user = multiuser
     assert (
         admin.post("/api/users/alice", json={"role": "admin", "blocked": False}).status_code == 200
@@ -211,6 +219,7 @@ def test_promotion_demotion_and_self_protection(multiuser):
 
 
 def test_legacy_keys_migrate_owner_without_changing_secret(tmp_path):
+    """Verify legacy keys migrate owner without changing secret."""
     store = Store(tmp_path / "history.sqlite3")
     import hashlib
 
@@ -238,6 +247,7 @@ def test_legacy_keys_migrate_owner_without_changing_secret(tmp_path):
 
 
 def test_pam_supports_other_login_accounts_and_rejects_daemons(monkeypatch):
+    """Verify pam supports other login accounts and rejects daemons."""
     import pam
 
     calls = []

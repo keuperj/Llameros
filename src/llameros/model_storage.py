@@ -1,4 +1,7 @@
-"""Private storage preferences and offline inventory for Ollama model stores."""
+"""Private model-storage preferences and offline Ollama inventory for Llameros runtimes.
+
+Private storage preferences and offline inventory for Ollama model stores.
+"""
 
 import json
 import os
@@ -13,6 +16,7 @@ DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 def write_json(path: Path, data: dict):
+    """Atomically replace private JSON state via a flushed temporary file in the same directory."""
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
     try:
         with os.fdopen(fd, "w") as stream:
@@ -25,6 +29,11 @@ def write_json(path: Path, data: dict):
 
 
 def validate_directory(value: str, state_dir: Path, *, create: bool = False) -> Path:
+    """Return a safe dedicated model directory, optionally creating it.
+
+    Reject symlinks, unsafe ownership/permissions, unrelated contents, and overlap with
+    application state.
+    """
     if not value or any(char in value for char in (",", "\n", "\r", "\x00")):
         raise ValueError("Choose a non-empty directory path without commas or control characters")
     path = Path(value).expanduser()
@@ -124,7 +133,10 @@ def scan_models(path: Path) -> dict:
 
 
 class ModelStorage:
+    """Track the selected host directory or Docker volume and its last known inventory."""
+
     def __init__(self, settings: Settings):
+        """Load private storage preferences and locate the inventory cache in the state directory."""
         self.settings = settings
         self.preference_file = settings.state_dir / "model-storage.json"
         self.cache_file = settings.state_dir / "model-inventory.json"
@@ -134,9 +146,11 @@ class ModelStorage:
 
     @property
     def identity(self) -> str:
+        """Return the selected host path or UID-scoped volume name used to match cached data."""
         return self.directory or f"{self.settings.container_name}-models"
 
     def info(self) -> dict:
+        """Describe storage mode, location, and a suggested dedicated host directory."""
         return {
             "mode": "directory" if self.directory else "volume",
             "directory": self.directory,
@@ -145,15 +159,18 @@ class ModelStorage:
         }
 
     def save(self, directory: str):
+        """Atomically persist a storage selection and update the in-memory directory."""
         write_json(self.preference_file, {"directory": directory})
         self.directory = directory
 
     def remember(self, models: list):
+        """Cache a live inventory with its storage identity and observation timestamp."""
         write_json(
             self.cache_file, {"location": self.identity, "timestamp": time.time(), "models": models}
         )
 
     def inventory(self) -> dict:
+        """Read validated host manifests or a matching volume cache, marking the source explicitly."""
         if self.directory:
             path = validate_directory(self.directory, self.settings.state_dir)
             return {**scan_models(path), "source": "disk", "cached_at": None}

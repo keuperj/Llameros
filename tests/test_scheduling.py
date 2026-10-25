@@ -1,3 +1,5 @@
+"""Offline scheduling regression tests for Llameros behavior and integration boundaries."""
+
 import asyncio
 
 import pytest
@@ -7,6 +9,8 @@ from llameros.app import Jobs
 
 
 def test_fifo_separate_devices_queue_limit_timeout_and_cancellation():
+    """Verify fifo separate devices queue limit timeout and cancellation."""
+
     async def scenario():
         jobs = Jobs(None)
         scheduler = jobs.scheduler
@@ -43,6 +47,8 @@ def test_fifo_separate_devices_queue_limit_timeout_and_cancellation():
 
 
 def test_scoped_lifecycle_and_disconnected_queue():
+    """Verify scoped lifecycle and disconnected queue."""
+
     class Disconnected:
         async def is_disconnected(self):
             return True

@@ -1,4 +1,7 @@
-"""PAM verification and short-lived, server-side sessions."""
+"""PAM password verification and in-memory sessions for Llameros dashboard authentication.
+
+PAM verification and short-lived, server-side sessions.
+"""
 
 import pwd
 import secrets
@@ -10,6 +13,11 @@ COOKIE = "__Host-llameros"
 
 
 def verify_password(username: str, password: str, service: str) -> bool:
+    """Check a login-shell account through PAM without storing the password.
+
+    Reject missing/daemon accounts and NUL-containing credentials before invoking PAM; host
+    account policy still applies.
+    """
     if not username or not password or "\x00" in username + password:
         return False
     try:
@@ -25,7 +33,10 @@ def verify_password(username: str, password: str, service: str) -> bool:
 
 
 class Sessions:
+    """Thread-safe, expiring server-side sessions with a global login-attempt budget."""
+
     def __init__(self, lifetime: int):
+        """Initialize session storage and a monotonic rate-limit window; lifetime is in seconds."""
         self.lifetime = lifetime
         self.sessions: dict[str, dict] = {}
         self.attempts: deque[float] = deque()
@@ -33,6 +44,7 @@ class Sessions:
 
     def allow_attempt(self) -> bool:
         # Global limit: source IP spoofing cannot bypass it.
+        """Consume one of five global login attempts per minute, returning false when exhausted."""
         with self.lock:
             now = time.monotonic()
             while self.attempts and self.attempts[0] < now - 60:
@@ -43,6 +55,7 @@ class Sessions:
             return True
 
     def create(self, username: str) -> tuple[str, dict]:
+        """Return a new opaque cookie token and CSRF-bearing session; prune expired sessions."""
         with self.lock:
             now = time.monotonic()
             self.sessions = {
@@ -60,6 +73,7 @@ class Sessions:
             return token, session
 
     def get(self, token: str) -> dict | None:
+        """Return a copy of an unexpired session or remove the stale token and return None."""
         with self.lock:
             session = self.sessions.get(token)
             if session and session["expires"] > time.monotonic():
@@ -68,10 +82,12 @@ class Sessions:
             return None
 
     def remove(self, token: str):
+        """Invalidate one cookie token; unknown tokens are harmless."""
         with self.lock:
             self.sessions.pop(token, None)
 
     def remove_user(self, username: str):
+        """Invalidate all sessions for an account when an administrator blocks it."""
         with self.lock:
             self.sessions = {
                 token: session

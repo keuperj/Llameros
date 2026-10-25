@@ -1,4 +1,7 @@
-"""Hardware-isolated Ollama slots sharing a model store, never arbitrary devices."""
+"""Hardware-isolated Ollama runtime slots sharing Llameros model storage and lifecycle policy.
+
+Hardware-isolated Ollama slots sharing a model store, never arbitrary devices.
+"""
 
 import hashlib
 import json
@@ -12,7 +15,10 @@ from .model_storage import write_json
 
 
 class Runtimes:
+    """Manage persistent CPU/GPU slot identities and resolve already-loaded model instances."""
+
     def __init__(self, settings, hardware):
+        """Load the private slot registry, shared storage, and current hardware capabilities."""
         self.settings = settings
         self.hardware = hardware
         self.storage = Docker(settings).storage
@@ -22,6 +28,7 @@ class Runtimes:
         self.refresh()
 
     def refresh(self):
+        """Rebuild supported hardware targets with stable hashed GPU IDs and validated device paths."""
         targets = [{"id": "cpu", "label": "CPU", "vendor": "cpu", "supported": True}]
         for index, gpu in enumerate(self.hardware()["gpus"]):
             identity = gpu.get("id", f"unidentified-{index}")
@@ -45,10 +52,12 @@ class Runtimes:
         self.targets = {target["id"]: target for target in targets}
 
     def client(self, target_id="cpu", *, register=False):
+        """Resolve a slot under the registry lock, optionally persisting its port assignment."""
         with self.lock:
             return self._client(target_id, register=register)
 
     def _client(self, target_id="cpu", *, register=False):
+        """Build a device-bound Docker client; caller holds the registry lock for registration."""
         target = self.targets.get(target_id) or self.records.get(target_id, {}).get("target")
         if not target or not target["supported"]:
             raise ValueError("This hardware cannot be safely targeted by this Docker runtime")
@@ -78,6 +87,7 @@ class Runtimes:
         return Docker(cfg, target=target, name=name, storage=self.storage)
 
     def status(self):
+        """Merge registered runtime status with available hardware and annotate loaded models by slot."""
         self.refresh()
         loaded, slots = [], []
         main = None
@@ -141,6 +151,7 @@ class Runtimes:
         }
 
     def model_client(self, name, target=""):
+        """Return the unique runtime containing a model, requiring a target when ambiguous."""
         normalized = name if ":" in name else name + ":latest"
         matches = [
             model
@@ -153,6 +164,11 @@ class Runtimes:
         return self.client(matches[0]["target"])
 
     def load(self, name, size, target_id, context, progress):
+        """Start and warm a model on selected hardware after fit/capacity checks.
+
+        Verify residency and GPU use afterward; unload the new model if prior residency was lost
+        or GPU execution fell back.
+        """
         state = self.status()
         slot = next((slot for slot in state["slots"] if slot["id"] == target_id), None)
         if not slot or not slot["available"]:
@@ -209,6 +225,7 @@ class Runtimes:
         return result
 
     def stop(self):
+        """Attempt to stop all registered owned runtimes and report collected failures."""
         errors = []
         for identity in list(self.records):
             client = self.client(identity)
@@ -221,6 +238,7 @@ class Runtimes:
             raise DockerError("Some runtimes could not be stopped: " + "; ".join(errors))
 
     def configure_storage(self, directory, confirmed):
+        """Reconfigure shared storage only after confirmation and all runtimes are stopped."""
         if not confirmed:
             raise ValueError("Explicit confirmation required")
         if any(slot["running"] for slot in self.status()["slots"]):

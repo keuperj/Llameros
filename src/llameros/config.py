@@ -1,4 +1,7 @@
-"""Configuration is local TOML, never browser-supplied container arguments."""
+"""Validated local TOML settings shared by Llameros web, storage, and runtime services.
+
+Configuration is local TOML, never browser-supplied container arguments.
+"""
 
 import os
 import pwd
@@ -8,11 +11,14 @@ from pathlib import Path
 
 
 def current_user() -> str:
+    """Resolve the process UID through the system account database, not environment variables."""
     return pwd.getpwuid(os.getuid()).pw_name
 
 
 @dataclass(frozen=True)
 class Settings:
+    """Immutable service configuration with validated ports, runtime policy, and attachment ceilings."""
+
     host: str = "127.0.0.1"
     port: int = 8443
     state_dir: Path = Path.home() / ".local/share/llameros"
@@ -37,6 +43,7 @@ class Settings:
     pdf_max_text_bytes: int = 1024 * 1024
 
     def __post_init__(self):
+        """Normalize the state path and reject inconsistent or out-of-range settings."""
         object.__setattr__(self, "state_dir", Path(self.state_dir).expanduser().absolute())
         for name, ceiling in {
             "inference_body_bytes": 64 * 1024 * 1024,
@@ -66,13 +73,16 @@ class Settings:
 
     @property
     def container_name(self) -> str:
+        """Return the stable UID-scoped container name used for runtime ownership."""
         return f"llameros-{os.getuid()}"
 
     @property
     def ollama_url(self) -> str:
+        """Return the loopback-only upstream URL; this API is not bearer-authenticated."""
         return f"http://127.0.0.1:{self.ollama_port}"
 
     def prepare(self):
+        """Create a private state directory and refuse a directory owned by another UID."""
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         if self.state_dir.stat().st_uid != os.getuid():
             raise ValueError("State directory must be owned by the current user")
@@ -80,6 +90,7 @@ class Settings:
 
 
 def load_settings(path: Path | None = None) -> Settings:
+    """Load validated TOML or defaults when absent; reject unknown keys and wrong types."""
     path = path or Path.home() / ".config/llameros/config.toml"
     if not path.exists():
         return Settings()

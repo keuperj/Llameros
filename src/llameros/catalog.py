@@ -1,4 +1,7 @@
-"""Read public Ollama catalogue pages and registry manifests without credentials."""
+"""Public Ollama catalogue discovery and conservative sizing for the Llameros admin dashboard.
+
+Read public Ollama catalogue pages and registry manifests without credentials.
+"""
 
 from __future__ import annotations
 
@@ -15,13 +18,17 @@ MODEL = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}(?::[A-Za-z0-9][A-Za-z0-9._-]{0,1
 
 
 def validate_model(name: str) -> str:
+    """Validate an official-library lifecycle name; inference namespace rules are separate."""
     if not MODEL.fullmatch(name):
         raise ValueError("Use an official library model name, for example gemma3:270m")
     return name
 
 
 class Links(HTMLParser):
+    """Extract official model links and conservative rounded sizes from public catalogue HTML."""
+
     def __init__(self):
+        """Initialize parser state or the catalogue response cache for a fresh instance."""
         super().__init__()
         self.names: list[str] = []
         self.sizes: dict[str, int] = {}
@@ -29,6 +36,7 @@ class Links(HTMLParser):
         self.text: list[str] = []
 
     def handle_starttag(self, tag, attrs):
+        """Track relevant catalogue links or readable-description elements as HTML begins."""
         if tag != "a":
             return
         self.active = ""
@@ -42,10 +50,12 @@ class Links(HTMLParser):
                 self.active = name
 
     def handle_data(self, data):
+        """Collect only text belonging to the active link or visible README section."""
         if self.active:
             self.text.append(data)
 
     def handle_endtag(self, tag):
+        """Finalize link size text or close readable-description nesting as HTML ends."""
         if tag == "a" and self.active:
             text = " ".join(self.text)
             match = re.search(r"\b(\d+(?:\.\d+)?)\s*(KB|MB|GB|TB)\b", text)
@@ -61,10 +71,14 @@ class Links(HTMLParser):
 
 
 class Catalog:
+    """Cache public catalogue metadata for discovery, descriptions, and model-fit suggestions."""
+
     def __init__(self):
+        """Initialize parser state or the catalogue response cache for a fresh instance."""
         self.cache: dict[str, tuple[float, object]] = {}
 
     def _get(self, url: str, json: bool = False):
+        """Fetch public text/JSON without redirects or environment proxies and cache it for ten minutes."""
         cached = self.cache.get(url)
         if cached and cached[0] > time.monotonic():
             return cached[1]
@@ -76,6 +90,7 @@ class Catalog:
         return value
 
     def list(self, query: str = "") -> list[str]:
+        """Return model families in upstream popularity/search order, leaving tag selection separate."""
         query = query.strip()
         # Tags are selected from the family page; send only the family to search.
         family = query.partition(":")[0]
@@ -89,6 +104,7 @@ class Catalog:
         return [name for name in parser.names if ":" not in name]
 
     def description(self, name: str) -> dict:
+        """Return readable model information extracted from the public page, never raw HTML."""
         validate_model(name)
         url = f"https://ollama.com/library/{name}"
         parser = Description()
@@ -103,6 +119,7 @@ class Catalog:
         }
 
     def tags(self, family: str) -> list[str]:
+        """Return validated tags discovered on the selected official model family page."""
         validate_model(family)
         if ":" in family:
             raise ValueError("Choose a model family without a tag")
@@ -111,6 +128,7 @@ class Catalog:
         return [name for name in parser.names if name.startswith(family + ":")]
 
     def size(self, name: str) -> int:
+        """Sum downloadable manifest-layer bytes or reject cloud-only/unsupported manifests."""
         validate_model(name)
         family, _, tag = name.partition(":")
         manifest = self._get(
@@ -125,6 +143,7 @@ class Catalog:
         return sum(sizes)
 
     def variants(self, family: str, hardware: dict, gpu_mode: str) -> list[dict]:
+        """Return family tags with conservative CPU/runtime fit estimates and explicit unknown sizes."""
         validate_model(family)
         if ":" in family:
             raise ValueError("Choose a model family without a tag")
@@ -152,6 +171,7 @@ class Description(HTMLParser):
     """Extract readable README text only, never forward external HTML/scripts."""
 
     def __init__(self):
+        """Initialize parser state or the catalogue response cache for a fresh instance."""
         super().__init__()
         self.summary = ""
         self.content: list[str] = []
@@ -159,6 +179,7 @@ class Description(HTMLParser):
         self.hidden = 0
 
     def handle_starttag(self, tag, attrs):
+        """Track relevant catalogue links or readable-description elements as HTML begins."""
         attrs = dict(attrs)
         if tag == "meta" and attrs.get("name") == "description":
             self.summary = attrs.get("content", "")
@@ -193,6 +214,7 @@ class Description(HTMLParser):
                 self.content.append("\n")
 
     def handle_endtag(self, tag):
+        """Finalize link size text or close readable-description nesting as HTML ends."""
         if not self.stack or tag not in self.stack:
             return
         if tag in {"script", "style", "form", "textarea"}:
@@ -203,5 +225,6 @@ class Description(HTMLParser):
         self.stack = self.stack[:index]
 
     def handle_data(self, data):
+        """Collect only text belonging to the active link or visible README section."""
         if self.stack and not self.hidden:
             self.content.append(data)

@@ -1,4 +1,7 @@
-"""Bounded, cancellation-safe per-device inference queues and lifecycle reservations."""
+"""Bounded per-device inference queues coordinated with Llameros lifecycle jobs.
+
+Bounded, cancellation-safe per-device inference queues and lifecycle reservations.
+"""
 
 import asyncio
 import time
@@ -9,6 +12,8 @@ from fastapi import HTTPException
 
 @dataclass(eq=False)
 class Ticket:
+    """Identity-based reservation for one queued or executing request on a hardware target."""
+
     target: str
     model: str
     queued: float
@@ -16,16 +21,25 @@ class Ticket:
 
 
 class InferenceScheduler:
+    """FIFO admission per device using the lifecycle job lock to prevent conflicting operations."""
+
     def __init__(self, jobs, capacity=16, timeout=120):
+        """Bind job coordination with a waiting capacity per target and timeout in seconds."""
         self.jobs = jobs
         self.capacity = capacity
         self.timeout = timeout
         self.tickets = []
 
     def conflicts(self, targets=None):
+        """Check outstanding reservations against targets; callers coordinate with the job lock."""
         return any(targets is None or ticket.target in targets for ticket in self.tickets)
 
     async def acquire(self, target, model, request=None):
+        """Wait for this target's FIFO permit and return its ticket.
+
+        Reject lifecycle conflicts, queue overflow, disconnects, or timeout with HTTP errors;
+        cancellation releases the reservation.
+        """
         ticket = Ticket(target, model, time.monotonic())
         with self.jobs.lock:
             job = self.jobs.job
@@ -64,6 +78,7 @@ class InferenceScheduler:
             raise
 
     def release(self, ticket, outcome):
+        """Idempotently remove a ticket and finish API job status when no reservations remain."""
         with self.jobs.lock:
             if ticket in self.tickets:
                 self.tickets.remove(ticket)

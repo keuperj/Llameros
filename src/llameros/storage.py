@@ -1,4 +1,7 @@
-"""SQLite history. Prompts, responses, and passwords are deliberately not persisted."""
+"""Content-free SQLite events, resource samples, and generation history for Llameros dashboards.
+
+SQLite history. Prompts, responses, and passwords are deliberately not persisted.
+"""
 
 import json
 import sqlite3
@@ -8,7 +11,10 @@ from pathlib import Path
 
 
 class Store:
+    """Short-lived transactional SQLite access for telemetry; never persist prompts or passwords."""
+
     def __init__(self, path: Path):
+        """Initialize WAL-backed history tables and restrict the database file to its owner."""
         self.path = path
         with self.connect() as db:
             db.executescript("""
@@ -33,6 +39,7 @@ class Store:
 
     @contextmanager
     def connect(self):
+        """Yield a row-addressable SQLite connection, committing or rolling back and always closing."""
         db = sqlite3.connect(self.path, timeout=10)
         db.row_factory = sqlite3.Row
         try:
@@ -42,6 +49,7 @@ class Store:
             db.close()
 
     def event(self, kind: str, model: str = "", detail: str = ""):
+        """Append a timestamped lifecycle/action event without request or response bodies."""
         with self.connect() as db:
             db.execute(
                 "INSERT INTO events(timestamp,model,kind,detail) VALUES(?,?,?,?)",
@@ -49,6 +57,7 @@ class Store:
             )
 
     def sample(self, data: dict, retention_days: int):
+        """Store one resource snapshot and prune history older than retention_days."""
         with self.connect() as db:
             db.execute(
                 "INSERT INTO samples(timestamp,data) VALUES(?,?)", (time.time(), json.dumps(data))
@@ -58,6 +67,7 @@ class Store:
                 db.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))
 
     def generation(self, data: dict):
+        """Record model token counts and nanosecond timings from a completed generation."""
         with self.connect() as db:
             db.execute(
                 "INSERT INTO generations(timestamp,model,prompt_tokens,output_tokens,duration_ns,eval_ns) VALUES(?,?,?,?,?,?)",
@@ -72,6 +82,11 @@ class Store:
             )
 
     def history(self, limit: int = 240) -> dict:
+        """Return recent samples/events and overall per-model generation totals.
+
+        Samples are chronological, events newest first, and aggregate durations are converted to
+        seconds.
+        """
         with self.connect() as db:
             samples = [
                 dict(row)

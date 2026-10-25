@@ -1,3 +1,5 @@
+"""FastAPI composition root for Llameros dashboards, authorization, jobs, and gateway installation."""
+
 import asyncio
 import copy
 import logging
@@ -31,32 +33,45 @@ log = logging.getLogger(__name__)
 
 
 class Login(BaseModel):
+    """Bounded PAM username/password payload; credentials are never persisted."""
+
     username: str = Field(min_length=1, max_length=256)
     password: str = Field(min_length=1, max_length=1024)
 
 
 class ModelRequest(BaseModel):
+    """Validated lifecycle model selection with an optional hardware target."""
+
     model: str = Field(min_length=1, max_length=210)
     target: str = Field(default="", max_length=80, pattern=r"^[a-z0-9-]*$")
 
 
 class GenerateRequest(ModelRequest):
+    """Admin playground prompt and bounded output budget for a loaded model."""
+
     prompt: str = Field(min_length=1, max_length=32000)
     max_tokens: int = Field(default=256, ge=1, le=4096)
 
 
 class StorageRequest(BaseModel):
+    """Requested model directory and explicit destructive-container-recreation confirmation."""
+
     directory: str = Field(default="", max_length=4096)
     confirmed: bool = False
 
 
 class ActionError(BaseModel):
+    """Bounded dashboard action/error metadata for content-free activity reporting."""
+
     action: str = Field(min_length=1, max_length=300)
     message: str = Field(min_length=1, max_length=2000)
 
 
 class Jobs:
+    """Single-worker lifecycle execution coordinated with per-device inference reservations."""
+
     def __init__(self, store: Store):
+        """Initialize the lifecycle executor, shared coordination lock, and inference scheduler."""
         self.store = store
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llameros-job")
         self.lock = threading.Lock()
@@ -64,10 +79,16 @@ class Jobs:
         self.scheduler = InferenceScheduler(self)
 
     def status(self):
+        """Return a dashboard status snapshot without exposing mutable internal job state."""
         with self.lock:
             return copy.deepcopy(self.job)
 
     def submit(self, action, model, function, targets=None):
+        """Reserve lifecycle work and return an acceptance flag and job ID, rejecting conflicts.
+
+        The worker publishes progress and terminal state and records content-free events;
+        targets=None reserves all devices.
+        """
         with self.lock:
             if (
                 self.job["state"] == "running" and self.job.get("action") != "api-inference"
@@ -85,6 +106,7 @@ class Jobs:
             job_id = self.job["job_id"]
 
         def progress(value):
+            """Merge worker progress into job state while retaining per-layer download observations."""
             with self.lock:
                 value = dict(value)
                 layer_id = value.get("id") or value.get("digest")
@@ -101,6 +123,7 @@ class Jobs:
                 self.job["progress"] = value
 
         def work():
+            """Execute the enclosing lifecycle operation in the worker and publish progress/results."""
             try:
                 self.store.event(f"{action}:started", model)
                 result = function(progress)
@@ -132,6 +155,11 @@ def create_app(
     sampling=True,
     gateway_transport=None,
 ) -> FastAPI:
+    """Compose the HTTPS dashboard, authorization, telemetry, runtime services, and inference gateway.
+
+    Optional collaborators support offline tests; sampling controls background hardware
+    collection. Returns a configured FastAPI application.
+    """
     cfg = settings or Settings()
     cfg.prepare()
     store = Store(cfg.state_dir / "history.sqlite3")
@@ -144,12 +172,14 @@ def create_app(
     docker = supplied_docker or runtimes.client("cpu", register=True)
 
     def runtime_status():
+        """Read all isolated slots or the injected single-runtime test adapter."""
         return runtimes.status() if runtimes else docker.status()
 
     sessions = Sessions(cfg.session_seconds)
     jobs = Jobs(store)
 
     def sample_once():
+        """Persist one host/runtime observation while containing expected probe failures."""
         data = {"hardware": hardware()}
         try:
             data["ollama"] = runtime_status()
@@ -158,6 +188,7 @@ def create_app(
         store.sample(data, cfg.retention_days)
 
     async def sampler():
+        """Collect periodic observations until application shutdown requests cancellation."""
         while True:
             try:
                 await run_in_threadpool(sample_once)
@@ -167,6 +198,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app):
+        """Start optional telemetry and stop the sampler/executor during application shutdown."""
         task = asyncio.create_task(sampler()) if sampling else None
         yield
         if task:
@@ -183,6 +215,7 @@ def create_app(
 
     @app.middleware("http")
     async def security(request: Request, call_next):
+        """Require HTTPS and same-origin CSRF protection for dashboard writes, then add security headers."""
         if request.url.scheme != "https":
             return JSONResponse({"detail": "HTTPS is required"}, status_code=400)
         gateway = request.url.path == PREFIX or request.url.path.startswith(PREFIX + "/")
@@ -223,17 +256,21 @@ def create_app(
 
     @app.exception_handler(DockerError)
     async def docker_error(request, exc):
+        """Map managed-runtime failures to a dashboard service-unavailable response."""
         return JSONResponse({"detail": str(exc)}, status_code=503)
 
     @app.exception_handler(httpx.HTTPError)
     async def upstream_error(request, exc):
+        """Translate catalogue/Ollama HTTP failures to a bad-gateway response."""
         return JSONResponse({"detail": f"Ollama/catalogue request failed: {exc}"}, status_code=502)
 
     @app.exception_handler(ValueError)
     async def value_error(request, exc):
+        """Expose validation failures as dashboard HTTP 400 responses."""
         return JSONResponse({"detail": str(exc)}, status_code=400)
 
     def require_session(request: Request):
+        """Resolve the cookie and current account policy; reject expired or blocked sessions."""
         session = sessions.get(request.cookies.get(COOKIE, ""))
         account = users.get(session["username"]) if session else None
         if not session or account["blocked"]:
@@ -243,6 +280,7 @@ def create_app(
         return {**session, "role": account["role"]}
 
     def require_admin(session=Depends(require_session)):
+        """Require a current admin role independently of client-side board visibility."""
         if session["role"] != "admin":
             raise HTTPException(403, "Administrator access required")
         return session
@@ -252,6 +290,7 @@ def create_app(
 
     @app.post("/api/login")
     def login(body: Login, request: Request, response: Response):
+        """Rate-limit PAM login, remember account policy, and issue a secure session cookie and CSRF token."""
         if not sessions.allow_attempt():
             store.event("login:failed", detail="Too many login attempts; wait one minute")
             raise HTTPException(429, "Too many login attempts; wait one minute")
@@ -280,20 +319,24 @@ def create_app(
 
     @app.get("/api/session")
     def session_info(session=Depends(require_session)):
+        """Return the signed-in identity, current role, and session CSRF token."""
         return {"username": session["username"], "csrf": session["csrf"], "role": session["role"]}
 
     @app.post("/api/logout", dependencies=signed_in)
     def logout(request: Request, response: Response):
+        """Invalidate the server session and remove its secure browser cookie."""
         sessions.remove(request.cookies.get(COOKIE, ""))
         response.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
         return {"ok": True}
 
     @app.get("/api/users", dependencies=protected)
     def list_users():
+        """Expose discovered and remembered account policy to administrators only."""
         return {"users": users.list()}
 
     @app.post("/api/users/{username}", dependencies=protected)
     def update_user(username: str, body: UserUpdate, session=Depends(require_admin)):
+        """Apply an admin role/block change and invalidate all sessions for a blocked account."""
         result = users.update(username, body, session["username"])
         if body.blocked:
             sessions.remove_user(username)
@@ -301,6 +344,11 @@ def create_app(
 
     @app.get("/api/user/dashboard", dependencies=signed_in)
     def user_dashboard(session=Depends(require_session)):
+        """Return running-model allowlisted fields, overall model totals, and owner-only key usage.
+
+        Include CPU/RAM samples but omit activity logs, direct runtime URLs, and other users'
+        key metadata.
+        """
         try:
             runtime = runtime_status()
         except (DockerError, httpx.HTTPError):
@@ -340,6 +388,7 @@ def create_app(
 
     @app.get("/api/status", dependencies=protected)
     def status():
+        """Return a dashboard status snapshot without exposing mutable internal job state."""
         try:
             runtime = runtime_status()
         except (DockerError, httpx.HTTPError) as exc:
@@ -356,18 +405,22 @@ def create_app(
 
     @app.get("/api/catalog", dependencies=protected)
     def list_catalog(q: str = ""):
+        """List public model families for the admin catalogue, bounding the search query."""
         return {"models": catalog.list(q[:100])}
 
     @app.get("/api/catalog/{family}/tags", dependencies=protected)
     def tags(family: str):
+        """List selectable official tags for the requested model family."""
         return {"tags": catalog.tags(family)}
 
     @app.get("/api/model-info", dependencies=protected)
     def model_info(model: str):
+        """Return sanitized readable catalogue information for a validated model name."""
         return catalog.description(validate_model(model))
 
     @app.get("/api/catalog/{family}/compatibility", dependencies=protected)
     def compatibility(family: str, cpu_only: bool = False):
+        """Return family variants and an aggregate advisory fit for the selected CPU/GPU policy."""
         variants = catalog.variants(family, hardware(), "cpu" if cpu_only else cfg.gpu)
         if cpu_only:
             for variant in variants:
@@ -385,6 +438,7 @@ def create_app(
 
     @app.get("/api/fit", dependencies=protected)
     def fit(model: str, cpu_only: bool = False):
+        """Estimate current memory fit from a model manifest and host hardware sample."""
         size = catalog.size(validate_model(model))
         return {
             "model": model,
@@ -394,20 +448,26 @@ def create_app(
 
     @app.get("/api/history", dependencies=protected)
     def history():
+        """Return full admin telemetry history and overall model-generation aggregates."""
         return store.history()
 
     @app.post("/api/action-errors", dependencies=protected)
     def action_error(body: ActionError):
+        """Persist bounded dashboard failure metadata without prompt or credential content."""
         store.event("dashboard-action:failed", body.action, body.message)
         return {"ok": True}
 
     @app.get("/api/storage", dependencies=protected)
     def storage_info():
+        """Describe the active model storage location for the admin configuration panel."""
         return docker.storage_info()
 
     @app.post("/api/storage", dependencies=protected, status_code=202)
     def configure_storage(body: StorageRequest):
+        """Queue confirmed storage reconfiguration under lifecycle scheduling protection."""
+
         def work(progress):
+            """Execute the enclosing lifecycle operation in the worker and publish progress/results."""
             progress({"status": "Validating storage directory and reconfiguring stopped container"})
             return (
                 runtimes.configure_storage(body.directory, body.confirmed)
@@ -423,6 +483,7 @@ def create_app(
 
     @app.get("/api/models", dependencies=protected)
     def downloaded_models():
+        """Prefer live inventory, falling back to disk/cache with explicit provenance and warnings."""
         try:
             runtime = docker.status()
             if runtime["running"]:
@@ -452,14 +513,17 @@ def create_app(
 
     @app.get("/api/job", dependencies=protected)
     def job():
+        """Return the current lifecycle/inference progress snapshot for admin polling."""
         return jobs.status()
 
     @app.post("/api/container/{action}", dependencies=protected, status_code=202)
     def container(action: str):
+        """Queue an allowed start/stop action after rejecting an already-matching runtime state."""
         if action not in {"start", "stop"}:
             raise HTTPException(404, "Unknown container action")
 
         def work(progress):
+            """Execute the enclosing lifecycle operation in the worker and publish progress/results."""
             running = runtime_status()["running"]
             if running == (action == "start"):
                 raise ValueError(
@@ -473,6 +537,7 @@ def create_app(
         return jobs.submit(f"container-{action}", "", work)
 
     def installed(name: str) -> dict:
+        """Resolve a downloaded model from the running inventory or raise a validation error."""
         validate_model(name)
         docker.ensure_running()
         models = docker.api("GET", "/api/tags").get("models", [])
@@ -483,12 +548,14 @@ def create_app(
         raise ValueError("Download this model before loading or running it")
 
     def check_fit(size):
+        """Refuse lifecycle admission when the conservative current-memory estimate does not fit."""
         if not assess_fit(size, hardware(), cfg.gpu)["fits"]:
             raise ValueError(
                 "Insufficient currently available memory for the conservative fit estimate"
             )
 
     def is_loaded(name: str) -> bool:
+        """Check whether a normalized model is resident in the single-runtime adapter."""
         normalized = name if ":" in name else name + ":latest"
         return any(
             model.get("name", model.get("model")) == normalized
@@ -497,11 +564,13 @@ def create_app(
 
     @app.post("/api/models/{action}", dependencies=protected, status_code=202)
     def model_action(action: str, body: ModelRequest):
+        """Queue validated pull/load/unload work with the appropriate device reservation."""
         name = validate_model(body.model)
         if action not in {"pull", "load", "unload"}:
             raise HTTPException(404, "Unknown model action")
 
         def work(progress):
+            """Execute the enclosing lifecycle operation in the worker and publish progress/results."""
             if action == "pull":
                 progress({"status": "Checking model registry and available memory"})
                 check_fit(catalog.size(name))
@@ -556,9 +625,11 @@ def create_app(
 
     @app.post("/api/generate", dependencies=protected, status_code=202)
     def generate(body: GenerateRequest):
+        """Queue bounded admin playground inference against an already-loaded model and record totals."""
         name = validate_model(body.model)
 
         def work(progress):
+            """Execute the enclosing lifecycle operation in the worker and publish progress/results."""
             if not runtimes:
                 installed(name)
             client = runtimes.model_client(name, body.target) if runtimes else docker
@@ -616,6 +687,7 @@ def create_app(
 
     @app.get("/")
     def index():
+        """Serve the public sign-in/dashboard shell; API dependencies enforce actual access."""
         return FileResponse(static / "index.html")
 
     return app
