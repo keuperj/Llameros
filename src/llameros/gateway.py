@@ -37,7 +37,16 @@ def install_gateway(
 
     @app.get("/api/keys", dependencies=protected)
     def list_keys():
+        return {"keys": [key for key in keys.list() if not key["deleted"]]}
+
+    @app.get("/api/keys/usage", dependencies=protected)
+    def key_usage():
         return {"keys": keys.list()}
+
+    @app.delete("/api/keys/{identity}", dependencies=protected)
+    def delete_key(identity: str):
+        keys.delete(identity)
+        return {"ok": True}
 
     @app.post("/api/keys", dependencies=protected, status_code=201)
     def create_key(body: KeyRequest):
@@ -155,10 +164,13 @@ def install_gateway(
         }:
             raise HTTPException(400, "Unsupported runtime options")
         limit = body.get(
-            "max_completion_tokens", body.get("max_tokens", options.get("num_predict", 256))
+            "max_completion_tokens",
+            body.get("max_tokens", options.get("num_predict", min(256, key["max_tokens"] or 4096))),
         )
         if type(limit) is not int or not 1 <= limit <= 4096:
             raise HTTPException(400, "Output token limit must be 1–4096")
+        if key["max_tokens"] is not None and limit > key["max_tokens"]:
+            raise HTTPException(403, "Requested output tokens exceed this key's per-request limit")
         if "num_ctx" in options and options["num_ctx"] != cfg.context_length:
             raise HTTPException(400, "Context length must match the loaded runtime")
         if openai and body.get("n", 1) != 1:

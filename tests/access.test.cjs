@@ -9,71 +9,48 @@ const vm = require('node:vm');
 const Progress = require('../src/llameros/static/progress.js');
 
 function panel(clipboard) {
-  const fields = new Map();
-  const get = id => {
-    if (!fields.has(id)) fields.set(id, {value: '', options: [], textContent: '', handlers: {},
-      addEventListener(event, callback) { this.handlers[event] = callback; },
-      focus() { this.focused = true; }, select() { this.selected = true; }});
-    return fields.get(id);
-  };
-  const copies = ['access-url', 'access-openai-url', 'access-install', 'access-code'].map(id => ({...get('copy-' + id), dataset: {copy: id}}));
-  get('access-framework').value = 'ollama';
-  const context = vm.createContext({document: {getElementById: get, querySelectorAll: () => copies},
-    navigator: {clipboard}, ModelAccess: Access, JobProgress: Progress,
-    options(select, names) { select.options = names.map(value => ({value})); select.value = names[0] || ''; }});
+  class Node {
+    constructor(tag, text = '') { this.tag = tag; this.textContent = text; this.children = []; this.dataset = {}; this.handlers = {}; this.value = ''; }
+    append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); if (this.tag === 'select' && !this.value) this.value = node.value; } }
+    insertBefore(node, before) { this.children.splice(this.children.indexOf(before), 0, node); node.parent = this; }
+    remove() { this.parent.children.splice(this.parent.children.indexOf(this), 1); }
+    setAttribute(name, value) { this[name] = value; }
+    addEventListener(event, handler) { this.handlers[event] = handler; }
+    focus() { this.focused = true; }
+    select() { this.selected = true; }
+  }
+  const root = new Node('div');
+  const context = vm.createContext({document: {getElementById: () => root}, navigator: {clipboard}, ModelAccess: Access,
+    element: (tag, text, cls) => Object.assign(new Node(tag, text), {className: cls}), safe: fn => fn});
   const source = fs.readFileSync(path.join(__dirname, '../src/llameros/static/app.js'), 'utf8');
   vm.runInContext(source.split('function updateControls()')[0], context);
-  return {get, copies, context, run: code => vm.runInContext(code, context)};
+  return {root, run: code => vm.runInContext(code, context)};
 }
-
-test('access panel preserves selection and clears code when runtime stops or model unloads', () => {
-  const ui = panel();
-  ui.run('accessConfig = {base_url: "http://127.0.0.1:12567", openai_url: "http://127.0.0.1:12567/v1"}; runtimeState = {running: true, loaded: [{name: "one:latest"}, {name: "two:latest"}]}; renderAccess();');
-  assert.match(ui.get('access-code').value, /one:latest/);
-  ui.get('access-active-model').value = 'two:latest';
-  ui.get('access-active-model').handlers.change();
+function descendants(node, tag) { return node.children.flatMap(child => [...(child.tag === tag ? [child] : []), ...descendants(child, tag)]); }
+function start(ui) {
+  ui.run('accessConfig = {secure_url: "https://localhost:8443/inference"}; runtimeState = {running: true, loaded: [{name: "one:latest", target: "cpu"}, {name: "one:latest", target: "gpu-test"}]}; renderAccess();');
+}
+test('one box per model/device, secure examples and preserved state on refresh', () => {
+  const ui = panel(); start(ui);
+  assert.equal(ui.root.children.length, 2);
+  const first = ui.root.children[0], details = descendants(first, 'details')[0]; details.open = true;
+  const framework = descendants(first, 'select')[0]; framework.value = 'langchain'; framework.handlers.change();
+  assert.match(descendants(first, 'textarea')[0].value, /ChatOllama/);
+  assert.match(descendants(ui.root.children[1], 'textarea')[0].value, /gpu-test/);
   ui.run('renderAccess()');
-  assert.equal(ui.get('access-active-model').value, 'two:latest');
-  assert.match(ui.get('access-code').value, /two:latest/);
-  ui.get('access-framework').value = 'langchain';
-  ui.get('access-framework').handlers.change();
-  assert.match(ui.get('access-code').value, /ChatOllama/);
-  ui.run('runtimeState.loaded = []; renderAccess()');
-  assert.equal(ui.get('access-code').value, '');
-  assert.equal(ui.get('access-active-model').disabled, true);
-  assert.equal(ui.copies[3].disabled, true);
-  assert.equal(ui.copies[0].disabled, false); // Endpoint still useful when stopped.
-  ui.run('runtimeState = {running: false}; renderAccess()');
-  assert.match(ui.get('access-state').textContent, /stopped or unavailable/);
-  ui.run('accessConfig = null; renderAccess()');
-  assert.equal(ui.get('access-url').value, '');
-  assert.equal(ui.copies[0].disabled, true);
+  assert.equal(ui.root.children[0], first); assert.equal(details.open, true);
+  ui.run('runtimeState.loaded.pop(); renderAccess()'); assert.equal(ui.root.children.length, 1);
+  ui.run('runtimeState.running = false; renderAccess()'); assert.equal(ui.root.children.length, 0);
 });
-
-test('copy buttons write the displayed value or select it for manual copying', async () => {
-  let copied = '';
-  const ui = panel({writeText: async text => { copied = text; }});
-  ui.get('access-code').value = 'print("Hello")';
-  await ui.copies[3].handlers.click();
-  assert.equal(copied, 'print("Hello")');
-  assert.equal(ui.get('access-feedback').textContent, 'Copied to clipboard.');
-  const fallback = panel();
-  fallback.get('access-code').value = 'print("Hello")';
-  await fallback.copies[3].handlers.click();
-  assert.equal(fallback.get('access-code').focused, true);
-  assert.equal(fallback.get('access-code').selected, true);
-  assert.match(fallback.get('access-feedback').textContent, /Ctrl\+C/);
-});
-
-test('same model on two devices selects the corresponding endpoint and hardware', () => {
-  const ui = panel();
-  ui.run('accessConfig = {base_url: "http://127.0.0.1:11435", openai_url: "http://127.0.0.1:11435/v1"}; runtimeState = {running: true, loaded: [{name: "one:latest", target: "cpu", hardware: "CPU", base_url: "http://127.0.0.1:11435"}, {name: "one:latest", target: "gpu-test", hardware: "GPU 1", base_url: "http://127.0.0.1:11436"}]}; renderAccess();');
-  assert.equal(ui.get('access-active-model').options.length, 2);
-  ui.get('access-active-model').value = JSON.stringify(['one:latest', 'gpu-test']);
-  ui.get('access-active-model').handlers.change();
-  assert.equal(ui.get('access-url').value, 'http://127.0.0.1:11436');
-  assert.match(ui.get('access-code').value, /11436/);
-  assert.match(ui.get('access-code').value, /one:latest/);
+test('per-model copy supports clipboard and manual fallback', async () => {
+  let copied;
+  for (const available of [true, false]) {
+    const ui = panel(available ? {writeText: async value => { copied = value; }} : undefined); start(ui);
+    const box = ui.root.children[0], code = descendants(box, 'textarea')[0];
+    await descendants(box, 'button').at(-1).handlers.click();
+    if (available) assert.equal(copied, code.value);
+    else { assert.equal(code.focused, true); assert.equal(code.selected, true); }
+  }
 });
 
 test('each framework uses the configured host endpoint, active model and valid Python', () => {
@@ -118,10 +95,9 @@ test('secure examples use bearer credentials, TLS trust and explicit hardware ro
   }
 });
 
-test('secure access panel never selects direct runtime URLs', () => {
-  const ui = panel();
-  ui.run('accessConfig = {secure_url: "https://127.0.0.1:8443/inference"}; runtimeState = {running: true, loaded: [{name: "one:latest", target: "cpu", base_url: "http://127.0.0.1:11435"}]}; renderAccess();');
-  assert.equal(ui.get('access-url').value, 'https://127.0.0.1:8443/inference');
-  assert.match(ui.get('access-code').value, /LLAMEROS_API_KEY/);
-  assert.ok(!ui.get('access-code').value.includes('11435'));
+test('per-model access never exposes direct runtime URLs', () => {
+  const ui = panel(); start(ui);
+  ui.run('runtimeState.loaded[0].base_url = "http://127.0.0.1:11435"; renderAccess()');
+  const code = descendants(ui.root.children[0], 'textarea')[0].value;
+  assert.match(code, /LLAMEROS_API_KEY/); assert.ok(!code.includes('11435'));
 });

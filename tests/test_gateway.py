@@ -67,6 +67,66 @@ def post(client, key, **body):
     )
 
 
+def test_keys_default_to_all_models_without_runtime(gateway):
+    app, client, docker, calls, response = gateway
+    docker.running, docker.loaded = False, []
+    created, _ = issue(client, models=["*"])
+    assert app.state.api_keys.authenticate("Bearer " + created["key"])["models"] == ["*"]
+    assert KeyRequest(name="all local models").models == ["*"]
+
+
+def test_key_token_limits_apply_to_all_protocols(gateway):
+    app, client, docker, calls, response = gateway
+    created, _ = issue(client, max_tokens=8)
+    token = created["key"]
+    assert post(client, token).status_code == 200
+    assert json.loads(calls[-1].content)["options"]["num_predict"] == 8
+    assert post(client, token, options={"num_predict": 9}).status_code == 403
+    for field in ("max_tokens", "max_completion_tokens"):
+        result = client.post(
+            "/inference/v1/chat/completions",
+            headers={"Authorization": "Bearer " + token},
+            json={
+                "model": "gemma3:270m",
+                "messages": [{"role": "user", "content": "hello"}],
+                field: 9,
+            },
+        )
+        assert result.status_code == 403
+    for value in (0, 4097, True, 1.5):
+        with pytest.raises(ValueError):
+            KeyRequest(name="bad", max_tokens=value)
+
+
+def test_delete_rejects_new_requests_and_retains_usage(gateway):
+    app, client, docker, calls, response = gateway
+    created, csrf = issue(client)
+    assert post(client, created["key"]).status_code == 200
+    path = "/api/keys/" + created["id"]
+    assert client.delete(path, headers={"X-CSRF-Token": "invalid"}).status_code == 403
+    client.headers["Origin"] = "https://testserver"
+    assert client.delete(path, headers={"X-CSRF-Token": csrf}).status_code == 200
+    assert client.get("/api/keys").json()["keys"] == []
+    history = client.get("/api/keys/usage").json()["keys"][0]
+    assert history["deleted"] and history["requests"] == 1
+    assert history["output_tokens"] == 3
+    assert "digest" not in history and "key" not in history
+    assert post(client, created["key"]).status_code == 401
+    assert client.delete(path, headers={"X-CSRF-Token": csrf}).status_code == 404
+
+
+def test_existing_key_database_migration(tmp_path):
+    store = Store(tmp_path / "history.sqlite")
+    with store.connect() as db:
+        db.execute(
+            "CREATE TABLE api_keys (id TEXT PRIMARY KEY, name TEXT NOT NULL, digest TEXT UNIQUE NOT NULL, models TEXT NOT NULL, targets TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, revoked INTEGER NOT NULL DEFAULT 0)"
+        )
+    keys = ApiKeys(store)
+    created = keys.create(KeyRequest(name="migrated", max_tokens=20))
+    assert keys.authenticate("Bearer " + created["key"])["max_tokens"] == 20
+    assert ApiKeys(store).list()[0]["deleted"] == 0
+
+
 def test_authentication_management_and_no_credential_forwarding(gateway):
     app, client, docker, calls, response = gateway
     assert client.get("/api/keys").status_code == 401

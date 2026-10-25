@@ -15,7 +15,8 @@ class KeyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: str = Field(min_length=1, max_length=80)
-    models: list[str] = Field(min_length=1, max_length=100)
+    models: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
+    max_tokens: int | None = Field(default=None, ge=1, le=4096, strict=True)
     targets: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
     expires_days: int = Field(default=30, ge=1, le=365)
 
@@ -58,6 +59,11 @@ class ApiKeys:
                 );
                 CREATE INDEX IF NOT EXISTS api_usage_key ON api_usage(key_id);
             """)
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(api_keys)")}
+            if "max_tokens" not in columns:
+                db.execute("ALTER TABLE api_keys ADD COLUMN max_tokens INTEGER")
+            if "deleted" not in columns:
+                db.execute("ALTER TABLE api_keys ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
 
     def create(self, body):
         token = "llm_" + secrets.token_urlsafe(32)
@@ -65,7 +71,7 @@ class ApiKeys:
         now = time.time()
         with self.store.connect() as db:
             db.execute(
-                "INSERT INTO api_keys(id,name,digest,models,targets,created,expires) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO api_keys(id,name,digest,models,targets,created,expires,max_tokens) VALUES(?,?,?,?,?,?,?,?)",
                 (
                     identity,
                     body.name,
@@ -74,6 +80,7 @@ class ApiKeys:
                     json.dumps(body.targets),
                     now,
                     now + body.expires_days * 86400,
+                    body.max_tokens,
                 ),
             )
         return {"id": identity, "key": token}
@@ -125,10 +132,18 @@ class ApiKeys:
                 ),
             )
 
+    def delete(self, identity):
+        # Retain a tombstone and usage for history, including in-flight requests.
+        with self.store.connect() as db:
+            if not db.execute(
+                "UPDATE api_keys SET deleted=1,revoked=1 WHERE id=? AND deleted=0", (identity,)
+            ).rowcount:
+                raise HTTPException(404, "API key not found")
+
     def list(self):
         with self.store.connect() as db:
             keys = db.execute("""
-                SELECT k.id,k.name,k.models,k.targets,k.created,k.expires,k.revoked,
+                SELECT k.id,k.name,k.models,k.targets,k.created,k.expires,k.revoked,k.deleted,k.max_tokens,
                     COUNT(u.id) AS requests,
                     COALESCE(SUM(u.prompt_tokens),0) AS prompt_tokens,
                     COALESCE(SUM(u.output_tokens),0) AS output_tokens,

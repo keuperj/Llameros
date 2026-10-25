@@ -1,5 +1,3 @@
-from html.parser import HTMLParser
-
 from fastapi.testclient import TestClient
 from test_core import HARDWARE, FakeDocker, sign_in
 
@@ -27,48 +25,17 @@ def test_access_endpoints_use_configured_port_and_require_login(tmp_path):
         assert client.get("/static/access.js").status_code == 200
 
 
-def test_access_panel_is_collapsed_inside_runtime_with_readonly_copy_fields(tmp_path):
-    class Parser(HTMLParser):
-        def __init__(self):
-            super().__init__()
-            self.runtime = False
-            self.inside = False
-            self.fields = set()
-            self.copies = set()
+def test_model_boxes_and_independent_keys_precede_configuration():
+    from pathlib import Path
 
-        def handle_data(self, data):
-            if data == "Ollama runtime":
-                self.runtime = True
-
-        def handle_starttag(self, tag, attrs):
-            attrs = dict(attrs)
-            if attrs.get("id") == "access-model":
-                assert self.runtime and tag == "details" and "open" not in attrs
-                self.inside = True
-            if self.inside and attrs.get("id") in {
-                "access-url",
-                "access-openai-url",
-                "access-install",
-                "access-code",
-            }:
-                assert "readonly" in attrs
-                self.fields.add(attrs["id"])
-            if self.inside and "data-copy" in attrs:
-                assert "disabled" in attrs
-                self.copies.add(attrs["data-copy"])
-
-        def handle_endtag(self, tag):
-            if tag == "section":
-                self.runtime = False
-            if tag == "details":
-                self.inside = False
-
-    app = create_app(Settings(state_dir=tmp_path), docker=FakeDocker(), sampling=False)
-    with TestClient(app, base_url="https://testserver") as client:
-        parser = Parser()
-        parser.feed(client.get("/").text)
-        assert (
-            parser.fields
-            == parser.copies
-            == {"access-url", "access-openai-url", "access-install", "access-code"}
-        )
+    static = Path(__file__).resolve().parents[1] / "src/llameros/static"
+    html = (static / "index.html").read_text()
+    assert (
+        html.index('id="runtime-models"')
+        < html.index('id="key-management"')
+        < html.index('id="config-menu"')
+    )
+    assert 'id="key-usage"' in html
+    assert 'id="api-key-models" multiple' in html
+    assert 'id="api-key-max-tokens"' in html
+    assert 'id="access-active-model"' not in html

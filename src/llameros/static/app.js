@@ -10,52 +10,82 @@ let accessConfig = null, accessContext = 4096;
 const modelKey = model => model.target ? JSON.stringify([model.name || model.model, model.target]) : (model.name || model.model);
 function selectedModel(value) { if (value.startsWith('[')) { const [model, target] = JSON.parse(value); return {model, target}; } return {model: value}; }
 function loadedChoices() { return runtimeState && runtimeState.running && !runtimeState.error ? (runtimeState.loaded || []) : []; }
-function renderAccessExample() {
-  const choice = selectedModel($('access-active-model').value), model = choice.model;
-  const loaded = loadedChoices().find(item => modelKey(item) === $('access-active-model').value);
-  const baseUrl = accessConfig && accessConfig.secure_url || loaded && loaded.base_url || (accessConfig && accessConfig.base_url);
-  if (baseUrl) { $('access-url').value = baseUrl; $('access-openai-url').value = baseUrl + '/v1'; }
-  const active = JobProgress.controls(runtimeState, false).active;
-  const example = active.includes(model) && accessConfig
-    ? ModelAccess.example($('access-framework').value, model, baseUrl, accessContext, choice.target || 'cpu') : null;
-  for (const [id, value] of [['access-install', example ? example.install : ''], ['access-code', example ? example.code : '']]) {
-    if ($(id).value !== value) $(id).value = value;
-  }
-  document.querySelectorAll('#access-model [data-copy]').forEach(button => { button.disabled = !$(button.dataset.copy).value; });
-}
+const modelBoxes = new Map();
 function renderAccess() {
-  $('access-url').value = accessConfig ? accessConfig.secure_url || accessConfig.base_url : '';
-  $('access-openai-url').value = accessConfig ? (accessConfig.secure_url ? accessConfig.secure_url + '/v1' : accessConfig.openai_url) : '';
-  const active = loadedChoices().map(modelKey);
-  const select = $('access-active-model'), previous = select.value;
-  // Preserve selection/focus and code selection across five-second refreshes.
-  if (JSON.stringify([...select.options].map(option => option.value).filter(Boolean)) !== JSON.stringify(active)) {
-    options(select, active, active.length ? null : 'Load a model first');
-    if (active.includes(previous)) select.value = previous;
+  const active = loadedChoices();
+  const identities = new Set(active.map(modelKey));
+  for (const [identity, box] of modelBoxes) {
+    if (!identities.has(identity)) { box.remove(); modelBoxes.delete(identity); }
   }
-  for (const option of select.options) { const model = loadedChoices().find(item => modelKey(item) === option.value); if (model) option.textContent = `${model.name || model.model}${model.hardware ? ' · ' + model.hardware : ''}`; }
-  select.disabled = !active.length;
-  $('access-state').textContent = runtimeState && runtimeState.running && !runtimeState.error
-    ? (active.length ? 'Select an active model and copy an example below.' : 'Ollama is running. Load a downloaded model to see its example.')
-    : 'Ollama is stopped or unavailable. Start Ollama and load a model to use the API.';
-  renderAccessExample();
-}
-$('access-active-model').addEventListener('change', () => { $('access-feedback').textContent = ''; renderAccessExample(); });
-$('access-framework').addEventListener('change', () => { $('access-feedback').textContent = ''; renderAccessExample(); });
-document.querySelectorAll('#access-model [data-copy]').forEach(button => {
-  button.addEventListener('click', async () => {
-    const field = $(button.dataset.copy);
-    if (!field.value) return;
-    try {
-      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('Clipboard unavailable');
-      await navigator.clipboard.writeText(field.value);
-      $('access-feedback').textContent = 'Copied to clipboard.';
-    } catch (error) {
-      field.focus(); field.select();
-      $('access-feedback').textContent = 'Clipboard access unavailable. Text selected: press Ctrl+C (or Command+C) to copy.';
+  for (const model of active) {
+    const identity = modelKey(model), name = model.name || model.model;
+    let box = modelBoxes.get(identity);
+    if (!box) {
+      box = element('section', '', 'card running-model');
+      box.dataset.identity = identity;
+      const head = element('div', '', 'section-head');
+      head.append(element('h3', name));
+      const stop = element('button', '■ Stop model'); stop.type = 'button'; stop.dataset.stop = 'true';
+      stop.setAttribute('aria-label', `Stop ${name} on ${model.hardware || model.target || 'CPU'}`);
+      stop.addEventListener('click', safe(async () => { await api('/api/models/unload', {model: name, target: model.target || ''}); await refresh(); }));
+      head.append(stop); box.append(head);
+      box.append(element('p', `Status: loaded · ${model.hardware || model.target || 'CPU'} · ${model.target || 'cpu'}`, 'model-status'));
+      const details = element('details', '', 'access-menu');
+      details.append(element('summary', 'Access model · API URL & Python examples'));
+      details.append(element('p', 'Use a bearer key from Key Management. Set LLAMEROS_API_KEY and LLAMEROS_CA_CERT; never disable TLS verification.'));
+      const fields = {};
+      const feedback = element('p', ''); feedback.setAttribute('role', 'status');
+      for (const [field, title] of [['url', 'Ollama API base URL'], ['openai', 'OpenAI-compatible base URL'], ['install', 'Install command'], ['code', 'Python example']]) {
+        const label = element('label', title), input = element(field === 'code' ? 'textarea' : 'input', '');
+        input.readOnly = true;
+        if (field === 'code') { input.rows = 16; input.className = 'access-code'; input.spellcheck = false; }
+        label.append(input); details.append(label); fields[field] = input;
+        const copy = element('button', 'Copy ' + title); copy.type = 'button';
+        copy.addEventListener('click', async () => {
+          try { await navigator.clipboard.writeText(input.value); feedback.textContent = 'Copied to clipboard.'; }
+          catch { input.focus(); input.select(); feedback.textContent = 'Text selected; press Ctrl+C or Command+C.'; }
+        }); details.append(copy);
+      }
+      const label = element('label', 'Python client / framework'), framework = element('select', '');
+      for (const [value, title] of Object.entries(ModelAccess.frameworks)) { const option = element('option', title); option.value = value; framework.append(option); }
+      label.append(framework); details.insertBefore(label, details.children[2]);
+      const update = () => {
+        const url = accessConfig.secure_url;
+        const example = ModelAccess.example(framework.value, name, url, accessContext, model.target || 'cpu');
+        for (const [field, value] of Object.entries({url, openai: url + '/v1', install: example.install, code: example.code})) {
+          if (fields[field].value !== value) fields[field].value = value;
+        }
+      };
+      framework.addEventListener('change', update); box.updateAccess = update;
+      details.append(feedback); box.append(details);
+      modelBoxes.set(identity, box); $('runtime-models').append(box);
     }
-  });
-});
+    box.updateAccess();
+  }
+}
+function renderKeyModels(models) {
+  const select = $('api-key-models');
+  const previous = [...select.selectedOptions].map(option => option.value);
+  const names = [...new Set(models.map(model => model.name || model.model))].sort();
+  // Preserve explicitly selected permissions if storage/model inventory changes.
+  for (const value of previous) if (value !== '*' && !names.includes(value)) names.push(value);
+  const values = ['*', ...names];
+  if (JSON.stringify([...select.options].map(option => option.value)) === JSON.stringify(values)) return;
+  select.replaceChildren();
+  for (const value of values) {
+    const option = element('option', value === '*' ? 'All models' : value); option.value = value;
+    option.selected = previous.length ? previous.includes(value) : value === '*'; select.append(option);
+  }
+}
+function renderKeyUsage(keys) {
+  $('key-usage').replaceChildren();
+  for (const key of keys) {
+    const row = element('tr', '');
+    const state = key.deleted ? 'deleted' : key.revoked ? 'revoked' : key.expires * 1000 <= Date.now() ? 'expired' : 'active';
+    for (const value of [key.name, state, key.requests, key.failed, key.prompt_tokens, key.output_tokens, key.unknown_usage, key.seconds.toFixed(1)]) row.append(element('td', value));
+    $('key-usage').append(row);
+  }
+}
 function updateControls() {
   const state = JobProgress.controls(runtimeState, busy);
   $('container-start').disabled = !state.start;
@@ -68,7 +98,7 @@ function updateControls() {
     button.disabled = !controls[button.dataset.action];
     button.title = button.dataset.action === 'load' && !controls.load ? 'Select a free hardware slot, or stop a running model first.' : '';
   });
-  document.querySelectorAll('#runtime-models button').forEach(button => { button.disabled = busy; });
+  document.querySelectorAll('#runtime-models button[data-stop]').forEach(button => { button.disabled = busy; });
 }
 function progressBar(label, value) {
   const wrapper = element('div', '', 'progress-row');
@@ -104,8 +134,8 @@ async function pollJob() {
 const cpuOnly = () => $('cpu-only').checked;
 const bytes = n => n == null ? 'unknown' : `${(n / 1073741824).toFixed(1)} GiB`;
 function notice(message = '') { $('notice').textContent = message; }
-async function api(path, body) {
-  const response = await fetch(path, {method: body === undefined ? 'GET' : 'POST',
+async function api(path, body, method) {
+  const response = await fetch(path, {method: method || (body === undefined ? 'GET' : 'POST'),
     headers: body === undefined ? {} : {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
     body: body === undefined ? undefined : JSON.stringify(body)});
   const data = await response.json();
@@ -148,7 +178,7 @@ $('model-info-close').addEventListener('click', () => closeModelInfo());
 $('model-info-overlay').addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); closeModelInfo(); } });
 $('generate-model').addEventListener('change', updateControls);
 $('image-availability').addEventListener('click', safe(refresh));
-function signedOut() { $('api-key-secret').value = ''; $('api-keys').replaceChildren(); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess(); $('access-model').open = false; $('access-feedback').textContent = ''; csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function signedOut() { $('api-key-secret').value = ''; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 async function signedIn(data) {
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
@@ -168,22 +198,20 @@ async function refreshKeys() {
   for (const key of data.keys) {
     const row = element('div', '', 'runtime-model');
     const state = key.revoked ? 'revoked' : key.expires * 1000 <= Date.now() ? 'expired' : 'active';
-    row.append(element('p', `${key.name} · ${state} · models: ${key.models.join(', ')} · targets: ${key.targets.join(', ')} · expires ${new Date(key.expires * 1000).toLocaleString()} · ${key.requests} requests / ${key.failed} failed · ${key.prompt_tokens} input / ${key.output_tokens} output tokens · ${key.unknown_usage} requests with unknown usage · ${key.seconds.toFixed(1)} s`));
-    if (!key.revoked) {
-      const button = element('button', 'Revoke');
-      button.addEventListener('click', safe(async () => { await api('/api/keys/' + key.id + '/revoke', {}); await refreshKeys(); }));
-      row.append(button);
-    }
+    row.append(element('p', `${key.name} · ${state} · models: ${key.models.join(', ')} · max output tokens/request: ${key.max_tokens || 'server default'} · expires ${new Date(key.expires * 1000).toLocaleString()} · ${key.requests} requests / ${key.failed} failed · ${key.prompt_tokens} input / ${key.output_tokens} output tokens · ${key.unknown_usage} requests with unknown usage · ${key.seconds.toFixed(1)} s`));
+    const button = element('button', 'Delete key');
+    button.addEventListener('click', safe(async () => { await api('/api/keys/' + key.id, {}, 'DELETE'); await refreshKeys(); await refresh(); }));
+    row.append(button);
     $('api-keys').append(row);
   }
   if (!data.keys.length) $('api-keys').textContent = 'No API keys yet.';
 }
 $('api-key-form').addEventListener('submit', safe(async () => {
-  const split = id => $(id).value.split(',').map(value => value.trim()).filter(Boolean);
-  const result = await api('/api/keys', {name: $('api-key-name').value.trim(), models: split('api-key-models'), targets: split('api-key-targets'), expires_days: Number($('api-key-days').value)});
+  const selected = [...$('api-key-models').selectedOptions].map(option => option.value);
+  const result = await api('/api/keys', {name: $('api-key-name').value.trim(), models: selected.length && !selected.includes('*') ? selected : ['*'], max_tokens: $('api-key-max-tokens').value ? Number($('api-key-max-tokens').value) : null, expires_days: Number($('api-key-days').value)});
   if (!csrf) return;
   $('api-key-secret').value = result.key; $('api-key-secret').focus(); $('api-key-secret').select();
-  await refreshKeys();
+  await refreshKeys(); await refresh();
 }));
 $('api-key-clear').addEventListener('click', () => { $('api-key-secret').value = ''; });
 $('api-keys-refresh').addEventListener('click', safe(refreshKeys));
@@ -299,7 +327,9 @@ $('generate-form').addEventListener('submit', safe(async () => {
 async function refresh() {
   if (refreshing || !csrf) return; refreshing = true;
   try {
-    const [data, history, inventory] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models')]);
+    const [data, history, inventory, keyUsage] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage')]);
+    if (!csrf) return;
+    renderKeyUsage(keyUsage.keys); renderKeyModels(inventory.models || []);
     const storage = inventory.storage;
     $('storage-current').textContent = `Active location: ${storage.location} (${storage.mode === 'directory' ? 'host directory' : 'Docker volume'})`;
     if (!storageInitialized) { $('storage-directory').value = storage.directory; $('storage-directory').placeholder = `Empty = Docker volume; example: ${storage.suggested_directory}`; storageInitialized = true; }
@@ -328,15 +358,6 @@ async function refresh() {
     $('load-target').disabled = busy || !freeSlots.length;
     const runtimeStatus = JobProgress.runtimeState(data.ollama);
     $('runtime').textContent = runtimeStatus.text; $('runtime').dataset.state = runtimeStatus.state;
-    $('runtime-models').replaceChildren();
-    for (const model of data.ollama.loaded || []) {
-      const row = element('div', '', 'runtime-model-row');
-      row.append(element('strong', `Model running — ${model.name || model.model}${model.hardware ? ' · ' + model.hardware : ''}`));
-      const stop = element('button', '■ Stop model'); stop.type = 'button';
-      stop.setAttribute('aria-label', `Stop ${model.name || model.model}${model.hardware ? ' on ' + model.hardware : ''}`);
-      stop.addEventListener('click', safe(async () => { await api('/api/models/unload', {model: model.name || model.model, target: model.target || ''}); await refresh(); }));
-      row.append(stop); $('runtime-models').append(row);
-    }
     const resource = data.ollama.resources;
     $('runtime-detail').textContent = data.ollama.error || data.ollama.legacy_error || (resource ? `Container CPU ${resource.CPUPerc} · memory ${resource.MemUsage} · network ${resource.NetIO}` : 'Start the managed container to download or run models.');
     const available = JobProgress.availability(data.ollama);
