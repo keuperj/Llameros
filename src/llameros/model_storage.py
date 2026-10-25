@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from .config import Settings
+from .filesystem import trusted_directory
 
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 
@@ -41,7 +42,8 @@ def validate_directory(value: str, state_dir: Path, *, create: bool = False) -> 
         raise ValueError("Use an absolute path or a path beginning with ~, without .. components")
     if any(part.is_symlink() for part in (path, *path.parents)):
         raise ValueError("Model storage must not use symbolic links")
-    path = path.resolve()
+    # Do not resolve a link substituted after the preliminary check: the
+    # descriptor traversal below must see and reject the original pathname.
     home, state = Path.home().resolve(), state_dir.resolve()
     if (
         path == home
@@ -62,8 +64,7 @@ def validate_directory(value: str, state_dir: Path, *, create: bool = False) -> 
         raise ValueError(
             "Storage must be owned by the current user and not writable by group/others"
         )
-    if create:
-        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    trusted_directory(path, create=create)
     if not path.is_dir():
         raise ValueError("Model directory does not exist")
     if not os.access(path, os.R_OK | os.W_OK | os.X_OK):

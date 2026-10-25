@@ -15,11 +15,11 @@ def test_container_rejects_same_state_operations(client):
     """Verify container rejects same state operations."""
     sign_in(client)
     client.post("/api/container/stop", json={})
-    assert "already stopped" in wait_job(client)["error"]
+    assert "runtime-error" in wait_job(client)["error"]
     client.post("/api/container/start", json={})
     assert wait_job(client)["state"] == "completed"
     client.post("/api/container/start", json={})
-    assert "already running" in wait_job(client)["error"]
+    assert "runtime-error" in wait_job(client)["error"]
 
 
 def test_only_loaded_models_can_generate_and_model_transitions_are_guarded(client):
@@ -28,13 +28,13 @@ def test_only_loaded_models_can_generate_and_model_transitions_are_guarded(clien
     client.post("/api/container/start", json={})
     wait_job(client)
     client.post("/api/generate", json={"model": "gemma3:270m", "prompt": "Hello"})
-    assert "Load the model" in wait_job(client)["error"]
+    assert "runtime-error" in wait_job(client)["error"]
     client.post("/api/models/unload", json={"model": "gemma3:270m"})
-    assert "already unloaded" in wait_job(client)["error"]
+    assert "runtime-error" in wait_job(client)["error"]
     client.post("/api/models/load", json={"model": "gemma3:270m"})
     assert wait_job(client)["state"] == "completed"
     client.post("/api/models/load", json={"model": "gemma3:270m"})
-    assert "already loaded" in wait_job(client)["error"]
+    assert "runtime-error" in wait_job(client)["error"]
     client.post("/api/generate", json={"model": "gemma3:270m", "prompt": "Hello"})
     assert wait_job(client)["state"] == "completed"
     client.post("/api/models/unload", json={"model": "gemma3:270m"})
@@ -71,7 +71,7 @@ def test_second_model_requires_unloading_first_without_implicit_eviction(tmp_pat
         assert wait_job(browser)["state"] == "completed"
         before = len([call for call in docker.calls if call[0] == "POST"])
         browser.post("/api/models/load", json={"model": "second:latest"})
-        assert "Only one model" in wait_job(browser)["error"]
+        assert "runtime-error" in wait_job(browser)["error"]
         assert docker.loaded == [{"name": "first:latest"}]
         assert len([call for call in docker.calls if call[0] == "POST"]) == before
         browser.post("/api/models/unload", json={"model": "first:latest"})

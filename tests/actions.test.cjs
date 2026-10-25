@@ -62,7 +62,7 @@ test('successful job creates no error; stale failure does not match newer job', 
 test('safe captures actual form submitter before await and attributes failures to it', async () => {
   const ui = fixture(), submitter = ui.button('generate-form');
   const source = fs.readFileSync('/home/keuper/Projekte/Llameros/src/llameros/static/app.js', 'utf8');
-  const context = vm.createContext({actionFeedback: ui.feedback});
+  const context = vm.createContext({sessionEpoch: 0, actionFeedback: ui.feedback});
   vm.runInContext(source.slice(source.indexOf('function actionControl('), source.indexOf('function element(')), context);
   context.event = {currentTarget: {tagName: 'FORM'}, submitter, preventDefault() {}};
   await vm.runInContext("safe(async () => { await Promise.resolve(); event.currentTarget = null; throw new Error('Generation failed'); })(event)", context);

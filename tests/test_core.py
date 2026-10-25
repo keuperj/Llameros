@@ -374,13 +374,14 @@ def test_docker_arguments_and_gpu_modes(tmp_path):
     """Verify docker arguments and gpu modes."""
     cfg = Settings(state_dir=tmp_path)
     args = Docker(cfg).run_args()
-    assert "127.0.0.1:11435:11434" in args
+    assert "-p" not in args
+    assert "OLLAMA_HOST=127.0.0.1:11434" in args
     assert "no-new-privileges:true" in args and "ALL" in args
     assert "--privileged" not in args and "--gpus" not in args
     assert "/var/run/docker.sock" not in " ".join(args)
     assert "--gpus" in Docker(replace(cfg, gpu="nvidia")).run_args()
     amd = Docker(replace(cfg, gpu="amd")).run_args()
-    assert "/dev/kfd" in amd and amd[-1] == "ollama/ollama:rocm"
+    assert "/dev/kfd" in amd and amd[-1] == cfg.ollama_rocm_image
 
 
 def test_rootful_guard_and_remote_daemon(tmp_path, monkeypatch):
@@ -493,4 +494,4 @@ def test_docker_errors_visible(tmp_path):
         app, base_url="https://testserver", headers={"Origin": "https://testserver"}
     ) as client:
         sign_in(client)
-        assert client.get("/api/status").json()["ollama"]["error"] == "Rootful Docker refused"
+        assert "runtime-error" in client.get("/api/status").json()["ollama"]["error"]

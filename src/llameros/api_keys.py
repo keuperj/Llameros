@@ -98,7 +98,7 @@ class ApiKeys:
                 db.execute("UPDATE api_keys SET user=?", (self.users.owner,))
             db.execute("CREATE INDEX IF NOT EXISTS api_keys_user ON api_keys(user)")
 
-    def create(self, body, user=None):
+    def create(self, body, user=None, actor=None):
         """Persist a new key and return its ID and one-time plaintext secret.
 
         The caller authorizes the owner; a write transaction rejects blocked owners atomically
@@ -108,11 +108,26 @@ class ApiKeys:
         identity = secrets.token_hex(12)
         now = time.time()
         owner = user or body.user or self.users.owner
+        if not self.users.active(owner):
+            raise HTTPException(403, "User is unavailable or blocked")
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            account = db.execute("SELECT blocked FROM users WHERE username=?", (owner,)).fetchone()
-            if account and account["blocked"]:
+            account = db.execute("SELECT * FROM users WHERE username=?", (owner,)).fetchone()
+            if not account or account["blocked"]:
                 raise HTTPException(403, "User is blocked")
+            expires = now + body.expires_days * 86400 if body.expires_days is not None else 0
+            if account["role"] != "admin":
+                if (
+                    not expires
+                    or body.expires_days > 30
+                    or expires > account["grant_expires"]
+                    or not set(body.models) <= set(json.loads(account["models"]))
+                    or not set(body.targets) <= set(json.loads(account["targets"]))
+                ):
+                    raise HTTPException(
+                        403,
+                        "Explicit model/target grant and key expiry within 30 days and grant lifetime required",
+                    )
             db.execute(
                 "INSERT INTO api_keys(id,name,digest,models,targets,created,expires,max_tokens,user) VALUES(?,?,?,?,?,?,?,?,?)",
                 (
@@ -122,11 +137,12 @@ class ApiKeys:
                     json.dumps(body.models),
                     json.dumps(body.targets),
                     now,
-                    now + body.expires_days * 86400 if body.expires_days is not None else 0,
+                    expires,
                     body.max_tokens,
                     owner,
                 ),
             )
+            self.store.security_event(actor or owner, "key.create", identity, db=db)
         return {"id": identity, "key": token}
 
     def authenticate(self, authorization):
@@ -145,10 +161,21 @@ class ApiKeys:
                 "SELECT * FROM api_keys WHERE digest=? AND revoked=0 AND (expires=0 OR expires>?)",
                 (hashlib.sha256(token.encode()).hexdigest(), time.time()),
             ).fetchone()
-        if not row or self.users.get(row["user"])["blocked"]:
+        if not row or not self.users.active(row["user"]):
             raise HTTPException(
                 401, "Invalid, expired or revoked API key", headers={"WWW-Authenticate": "Bearer"}
             )
+        account = self.users.get(row["user"])
+        models, targets = json.loads(row["models"]), json.loads(row["targets"])
+        if account["role"] != "admin":
+            if (
+                not row["expires"]
+                or row["expires"] - row["created"] > 30 * 86400
+                or account["grant_expires"] <= time.time()
+                or not set(models) <= set(account["models"])
+                or not set(targets) <= set(account["targets"])
+            ):
+                raise HTTPException(401, "Key no longer covered by user entitlement")
         return {
             **dict(row),
             "models": json.loads(row["models"]),
@@ -161,7 +188,7 @@ class ApiKeys:
             "*" in key["targets"] or target in key["targets"]
         )
 
-    def revoke(self, identity, user=None):
+    def revoke(self, identity, user=None, actor=None):
         """Disable a key, optionally constrained to its owner; raise HTTP 404 on mismatch."""
         with self.store.connect() as db:
             if not db.execute(
@@ -169,6 +196,9 @@ class ApiKeys:
                 (identity, user) if user else (identity,),
             ).rowcount:
                 raise HTTPException(404, "API key not found")
+            self.store.security_event(
+                actor or user or self.users.owner, "key.revoke", identity, db=db
+            )
 
     def record(self, identity, model, target, status, counts, duration):
         """Append status, known token counts, and elapsed seconds without storing request content."""
@@ -186,8 +216,9 @@ class ApiKeys:
                     duration,
                 ),
             )
+            self.store.trim(db, "api_usage")
 
-    def delete(self, identity, user=None):
+    def delete(self, identity, user=None, actor=None):
         # Retain a tombstone and usage for history, including in-flight requests.
         """Tombstone and revoke a key while preserving usage, optionally enforcing ownership."""
         with self.store.connect() as db:
@@ -197,10 +228,18 @@ class ApiKeys:
                 (identity, user) if user else (identity,),
             ).rowcount:
                 raise HTTPException(404, "API key not found")
+            self.store.security_event(
+                actor or user or self.users.owner, "key.delete", identity, db=db
+            )
 
     def list(self, user=None):
         """Return safe key metadata and usage aggregates, optionally restricted to one owner."""
         with self.store.connect() as db:
+            self.store.trim(db, "api_usage")
+            db.execute(
+                "DELETE FROM api_keys WHERE (deleted=1 OR revoked=1 OR (expires>0 AND expires<?)) AND created<? AND id NOT IN (SELECT key_id FROM api_usage)",
+                (time.time(), time.time() - self.store.retention_days * 86400),
+            )
             keys = db.execute(
                 """
                 SELECT k.id,k.name,k.user,k.models,k.targets,k.created,k.expires,k.revoked,k.deleted,k.max_tokens,

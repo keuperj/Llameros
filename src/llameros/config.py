@@ -5,6 +5,7 @@ Configuration is local TOML, never browser-supplied container arguments.
 
 import os
 import pwd
+import re
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -29,18 +30,20 @@ class Settings:
     sample_seconds: int = 15
     retention_days: int = 30
     ollama_port: int = 11435
-    ollama_image: str = "ollama/ollama:latest"
+    ollama_image: str = (
+        "ollama/ollama@sha256:dea72d1e22270fe095b68fdf756d2b489d615643c5a2eaebbc5f569181e322d8"
+    )
+    ollama_rocm_image: str = (
+        "ollama/ollama@sha256:c57155dfdd87acadac039c2679482db7f761960dfe0419b3072e1cfd52cb5167"
+    )
     gpu: str = "cpu"
-    allow_rootful_docker: bool = True
+    allow_rootful_docker: bool = False
     context_length: int = 4096
     max_loaded_models: int = 2
     inference_body_bytes: int = 16 * 1024 * 1024
     image_max_bytes: int = 8 * 1024 * 1024
     image_max_count: int = 8
     image_max_pixels: int = 40_000_000
-    pdf_max_bytes: int = 8 * 1024 * 1024
-    pdf_max_pages: int = 64
-    pdf_max_text_bytes: int = 1024 * 1024
 
     def __post_init__(self):
         """Normalize the state path and reject inconsistent or out-of-range settings."""
@@ -50,9 +53,6 @@ class Settings:
             "image_max_bytes": 32 * 1024 * 1024,
             "image_max_count": 64,
             "image_max_pixels": 100_000_000,
-            "pdf_max_bytes": 32 * 1024 * 1024,
-            "pdf_max_pages": 256,
-            "pdf_max_text_bytes": 4 * 1024 * 1024,
         }.items():
             if type(getattr(self, name)) is not int or not 1 <= getattr(self, name) <= ceiling:
                 raise ValueError(f"{name} must be 1–{ceiling}")
@@ -61,6 +61,9 @@ class Settings:
                 raise ValueError(f"{name} must be between 1024 and 65535")
         if self.port == self.ollama_port:
             raise ValueError("HTTPS and Ollama ports must differ")
+        for image in (self.ollama_image, self.ollama_rocm_image):
+            if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._:/-]*@sha256:[a-f0-9]{64}", image):
+                raise ValueError("Runtime images must be pinned by sha256 digest")
         if self.gpu not in {"cpu", "nvidia", "amd"}:
             raise ValueError("gpu must be cpu, nvidia, or amd")
         for name in ("session_seconds", "sample_seconds", "retention_days", "context_length"):
@@ -76,14 +79,11 @@ class Settings:
         """Return the stable UID-scoped container name used for runtime ownership."""
         return f"llameros-{os.getuid()}"
 
-    @property
-    def ollama_url(self) -> str:
-        """Return the loopback-only upstream URL; this API is not bearer-authenticated."""
-        return f"http://127.0.0.1:{self.ollama_port}"
-
     def prepare(self):
         """Create a private state directory and refuse a directory owned by another UID."""
-        self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        from .filesystem import trusted_directory
+
+        trusted_directory(self.state_dir, create=True)
         if self.state_dir.stat().st_uid != os.getuid():
             raise ValueError("State directory must be owned by the current user")
         self.state_dir.chmod(0o700)

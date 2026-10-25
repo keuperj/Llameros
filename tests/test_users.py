@@ -27,6 +27,7 @@ def multiuser(tmp_path, monkeypatch):
         hardware_provider=lambda: HARDWARE,
         authenticator=lambda user, password, service: password == "test-secret",
         sampling=False,
+        account_checker=lambda username: username in {current_user(), "alice", "bob"},
     )
     with (
         TestClient(
@@ -37,6 +38,20 @@ def multiuser(tmp_path, monkeypatch):
         ) as user,
     ):
         login(admin, current_user())
+        for name in ("alice", "bob"):
+            assert (
+                admin.post(
+                    "/api/users/" + name,
+                    json={
+                        "role": "user",
+                        "blocked": False,
+                        "models": ["gemma3:270m"],
+                        "targets": ["cpu"],
+                        "grant_days": 90,
+                    },
+                ).status_code
+                == 200
+            )
         login(user, "alice")
         yield app, admin, user
 
@@ -50,7 +65,16 @@ def login(client, username):
 
 def issue(client, **kwargs):
     """Sign in as the test admin and create a scoped bearer key with optional payload overrides."""
-    response = client.post("/api/keys", json={"name": "Personal key", **kwargs})
+    response = client.post(
+        "/api/keys",
+        json={
+            "name": "Personal key",
+            "models": ["gemma3:270m"],
+            "targets": ["cpu"],
+            "expires_days": 7,
+            **kwargs,
+        },
+    )
     assert response.status_code == 201, response.text
     return response.json()
 

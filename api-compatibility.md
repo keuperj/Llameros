@@ -24,7 +24,6 @@ environment changes.
 | `GET /api/tags`, `/api/ps`, `/v1/models` | Permission-filtered **loaded** model list |
 | `POST /api/show`, `GET /v1/models/{model}` | Permission-filtered runtime metadata |
 | `GET /api/version` | Version of a permitted loaded runtime |
-| `POST /api/documents/extract` | Llameros extension: inline PDF text and chunks |
 
 Native sampling includes `min_p`, `num_keep`, `repeat_last_n`, and frequency/
 presence penalties, in addition to the previous sampling controls. Native
@@ -72,38 +71,12 @@ per image. Text-only requests retain the 128 KiB limit. Configure
 `inference_body_bytes`, `image_max_bytes`, `image_max_count`, `image_max_pixels`
 in local TOML. Larger limits increase memory/CPU exposure.
 
-## PDF preprocessing (API only)
+## Documents are not supported
 
-Install the distribution's **Poppler utilities** (`pdftotext`). No Python parser
-dependency is added. Keep Poppler updated: it processes untrusted document bytes
-as the Llameros user, not in a security sandbox. Extraction uses private temporary
-files removed after completion, a 15-second timeout, two concurrent workers, and
-output/page/byte bounds. Scanned or image-only PDFs return 422 (OCR required).
-No OCR, page-image rendering, persistent documents, vector database, or retrieval
-service is included.
-
-`POST /api/documents/extract`:
-
-```json
-{"data":"data:application/pdf;base64,...","chunk_size":2000,"overlap":200}
-```
-
-Returns `text`, overlapping character-based `chunks`, and `page_limit`.
-`chunk_size` is 256–32000; overlap cannot exceed half the chunk size. Chunking
-is not token-aware. Embed the chunks via `/api/embed` and store vectors in your
-own RAG application. An authenticated key can extract without loading a model.
-
-Inline PDF blocks are also converted to text before inference:
-
-* Responses: `{"type":"input_file","file_data":"data:application/pdf;base64,..."}`.
-* Anthropic: `{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"..."}}`.
-
-Only PDFs are accepted. File IDs and remote URLs are rejected. Up to four inline
-PDFs share a 1 MiB extracted-text allowance by default. Extraction reads the
-**first 64 pages** by default, not an assertion that later pages were processed.
-Configure `pdf_max_bytes`, `pdf_max_pages`, `pdf_max_text_bytes`. Text is not
-automatically truncated to model context; oversized context remains an inference
-error unless explicitly permitted by the embedding request's truncation setting.
+PDF parsing and the document extraction endpoint have been removed. Inline
+`input_file`, `document`, and `file` blocks are rejected with HTTP 400. Supply
+plain text instead. No Poppler installation is needed. Remove the obsolete
+`pdf_max_bytes`, `pdf_max_pages`, and `pdf_max_text_bytes` settings from local TOML.
 
 ## Deliberate restrictions and remaining exclusions
 
@@ -124,7 +97,7 @@ OpenAI/Anthropic error envelopes; dashboard errors retain their existing format.
 
 `tests/test_api_compatibility.py` covers offline admission/forwarding, streaming
 terminal events, failed-stream cleanup, authorization, limits, embeddings and
-real Poppler text extraction where installed. Mock vision tests are **not** proof
+document rejection. Mock vision tests are **not** proof
 of vision-model execution. Use the opt-in checker against an already-running HTTPS
 gateway (no model loads, container changes or insecure TLS bypass):
 
@@ -133,11 +106,12 @@ export LLAMEROS_API_KEY='your-issued-key'
 uv run python scripts/check_api_compatibility.py \
   --ca "$HOME/.local/share/llameros/cert.pem" \
   --model your-loaded-chat-model --embedding-model your-loaded-embedding-model \
-  --vision-model your-loaded-vision-model --image /absolute/path/image.png \
-  --pdf /absolute/path/text-document.pdf --target cpu
+  --vision-model your-loaded-vision-model --image path/to/image.png \
+  --target cpu
 ```
 
+Run from the repository root and replace `path/to/...` with your local input paths.
 Supply your actual certificate path. The checker emits status only, never prompts,
-keys, PDF text or model output. Optional vision/PDF/embedding checks require their
+keys or model output. Optional vision/embedding checks require their
 arguments. A passing live smoke test is not an exhaustive semantic compatibility
 certification; GPU behavior requires running it on the intended hardware slot.

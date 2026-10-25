@@ -5,6 +5,7 @@ SQLite history. Prompts, responses, and passwords are deliberately not persisted
 
 import json
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,6 +17,13 @@ class Store:
     def __init__(self, path: Path):
         """Initialize WAL-backed history tables and restrict the database file to its owner."""
         self.path = path
+        from .auth import account_available
+
+        self.account_check = account_available
+        self.retention_days = 30
+        self.history_rows = 10000
+        self.security_lock = threading.Lock()
+        self.security_window = (0, 0)
         with self.connect() as db:
             db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -34,6 +42,11 @@ class Store:
                 CREATE INDEX IF NOT EXISTS samples_time ON samples(timestamp);
                 CREATE INDEX IF NOT EXISTS events_time ON events(timestamp);
                 CREATE INDEX IF NOT EXISTS generations_time ON generations(timestamp);
+                CREATE TABLE IF NOT EXISTS security_events (
+                    id INTEGER PRIMARY KEY, timestamp REAL NOT NULL,
+                    actor TEXT NOT NULL, action TEXT NOT NULL,
+                    subject TEXT NOT NULL, outcome TEXT NOT NULL
+                );
             """)
         path.chmod(0o600)
 
@@ -55,6 +68,65 @@ class Store:
                 "INSERT INTO events(timestamp,model,kind,detail) VALUES(?,?,?,?)",
                 (time.time(), model, kind, detail),
             )
+            self.trim(db, "events")
+
+    def trim(self, db, table):
+        """Apply age and row bounds in the writer transaction, independently of sampling."""
+        if table not in {"events", "samples", "generations", "api_usage", "security_events"}:
+            raise ValueError("Invalid retention table")
+        db.execute(
+            f"DELETE FROM {table} WHERE timestamp < ?", (time.time() - self.retention_days * 86400,)
+        )
+        db.execute(
+            f"DELETE FROM {table} WHERE id NOT IN (SELECT id FROM {table} ORDER BY id DESC LIMIT ?)",
+            (self.history_rows,),
+        )
+
+    def security_event(self, actor, action, subject="", outcome="success", *, db=None):
+        """Persist fixed-schema, bounded metadata, never arbitrary bodies or secrets.
+
+        Failed-login traffic has a global 30-row/minute write budget. Successful
+        administrative mutations are recorded in their own database transaction.
+        """
+        if action not in {
+            "login",
+            "logout",
+            "key.create",
+            "key.revoke",
+            "key.delete",
+            "user.update",
+            "user.offboard",
+        }:
+            raise ValueError("Unknown security event")
+        if action == "login" and outcome != "success":
+            with self.security_lock:
+                window, count = self.security_window
+                now = int(time.monotonic() // 60)
+                count = count if window == now else 0
+                if count >= 30:
+                    return
+                self.security_window = (now, count + 1)
+
+        def write(connection):
+            connection.execute(
+                "INSERT INTO security_events(timestamp,actor,action,subject,outcome) VALUES(?,?,?,?,?)",
+                (time.time(), actor[:256], action, subject[:256], outcome[:32]),
+            )
+            self.trim(connection, "security_events")
+
+        if db is not None:
+            write(db)
+        else:
+            with self.connect() as connection:
+                write(connection)
+
+    def security_history(self):
+        with self.connect() as db:
+            self.trim(db, "security_events")
+            return [
+                dict(row)
+                for row in db.execute("SELECT * FROM security_events ORDER BY id DESC LIMIT 1000")
+            ]
 
     def sample(self, data: dict, retention_days: int):
         """Store one resource snapshot and prune history older than retention_days."""
@@ -65,6 +137,7 @@ class Store:
             cutoff = time.time() - retention_days * 86400
             for table in ("samples", "events", "generations"):
                 db.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))
+                self.trim(db, table)
 
     def generation(self, data: dict):
         """Record model token counts and nanosecond timings from a completed generation."""
@@ -80,6 +153,7 @@ class Store:
                     data.get("eval_duration", 0),
                 ),
             )
+            self.trim(db, "generations")
 
     def history(self, limit: int = 240) -> dict:
         """Return recent samples/events and overall per-model generation totals.

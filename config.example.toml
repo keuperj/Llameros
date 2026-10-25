@@ -15,7 +15,8 @@ session_seconds = 3600
 sample_seconds = 15
 retention_days = 30
 ollama_port = 11435
-ollama_image = "ollama/ollama:latest"
+ollama_image = "ollama/ollama@sha256:dea72d1e22270fe095b68fdf756d2b489d615643c5a2eaebbc5f569181e322d8"
+ollama_rocm_image = "ollama/ollama@sha256:c57155dfdd87acadac039c2679482db7f761960dfe0419b3072e1cfd52cb5167"
 context_length = 4096
 # Resident models per device (1–16), subject to available RAM/VRAM.
 max_loaded_models = 2
@@ -25,9 +26,6 @@ inference_body_bytes = 16777216 # 16 MiB JSON (text-only requests still 128 KiB)
 image_max_bytes = 8388608       # 8 MiB decoded per image
 image_max_count = 8
 image_max_pixels = 40000000
-pdf_max_bytes = 8388608         # 8 MiB decoded per PDF
-pdf_max_pages = 64             # Extract the first N pages, not the entire document
-pdf_max_text_bytes = 1048576    # Combined extracted text, 1 MiB
 # API contract tests target ollama/ollama:0.40.11; pin ollama_image above for
 # reproducibility. Changing the image requires explicit container recreation.
 

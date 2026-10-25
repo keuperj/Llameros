@@ -238,7 +238,7 @@ def test_directory_inventory_available_without_docker(tmp_path):
         inventory = result.json()
         assert inventory["source"] == "disk"
         assert inventory["models"][0]["name"] == "gemma3:270m"
-        assert "Docker unavailable" in inventory["warnings"]
+        assert "runtime-error" in inventory["warnings"][0]
         assert inventory["storage"]["directory"] == str(models)
 
 

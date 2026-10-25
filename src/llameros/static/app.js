@@ -12,6 +12,24 @@ let loadedCatalogueQuery = '';
 let busy = false, jobTimer = null, pollingJob = false;
 let runtimeState = null, infoVersion = 0;
 let accessConfig = null, accessContext = 4096;
+let sessionEpoch = 0;
+/** Invalidate all outstanding account/board requests and erase private presentation. */
+function clearSessionView() {
+  sessionEpoch++;
+  lastResult = ''; selectedFit = null; catalogueEntries = []; loadedCatalogueQuery = '';
+  runtimeState = null; accessConfig = null; storageInitialized = false;
+  busy = false; refreshing = false; pollingJob = false;
+  catalogueVersion++; familyVersion++; fitVersion++; infoVersion++;
+  localActionEvents.length = 0; serverEvents = []; modelBoxes.clear();
+  actionFeedback.reset(); clearKeySecret();
+  for (const id of ['output', 'events', 'job', 'hardware', 'installed', 'runtime-models', 'fit', 'catalog-progress', 'model-info-content', 'model-info-title', 'storage-current', 'storage-feedback', 'api-keys', 'users', 'notice']) $(id).replaceChildren();
+  for (const node of document.querySelectorAll('#dashboard input, #dashboard textarea')) {
+    if (node.type === 'checkbox') node.checked = node.defaultChecked;
+    else node.value = node.defaultValue;
+  }
+  for (const id of ['families', 'tags', 'generate-model', 'api-key-models']) $(id).replaceChildren();
+  draw([]);
+}
 /**
  * Encode a resident instance identity so identical names on different devices remain distinct.
  * @param {Object} model - Runtime model metadata with an optional target.
@@ -267,8 +285,9 @@ function renderJob(job) {
 async function pollJob() {
   if (!csrf || pollingJob) return;
   pollingJob = true;
-  try { const job = await api('/api/job'); if (csrf) { const finished = busy && job.state !== 'running'; renderJob(job); if (finished) await refresh(); } } catch (error) { notice(error.message); }
-  finally { pollingJob = false; }
+  const epoch = sessionEpoch;
+  try { const job = await api('/api/job'); if (csrf) { const finished = busy && job.state !== 'running'; renderJob(job); if (finished) await refresh(); } } catch (error) { if (!error.staleSession) notice(error.message); }
+  finally { if (epoch === sessionEpoch) pollingJob = false; }
 }
 /** @returns {boolean} Whether catalogue estimates are restricted to CPU RAM fit. */
 const cpuOnly = () => $('cpu-only').checked;
@@ -279,7 +298,7 @@ const bytes = n => n == null ? 'unknown' : `${(n / 1073741824).toFixed(1)} GiB`;
  *
  * @param {string} [message=""] - Message or empty string to clear.
  */
-function notice(message = '') { $('notice').textContent = message; }
+function notice(message = '') { if (message) $('notice').textContent = message; else $('notice').textContent = ''; }
 /**
  * Call a session API, attach CSRF on writes, and clear local state on session expiry.
  * Personal-board key calls add board=user so admins also receive owner-scoped results.
@@ -290,16 +309,23 @@ function notice(message = '') { $('notice').textContent = message; }
  * @returns {Promise<Object>} Decoded JSON; rejects with a displayable API error.
  */
 async function api(path, body, method) {
+  const epoch = sessionEpoch;
+  try {
   if (typeof userBoard !== 'undefined' && userBoard && path.startsWith('/api/keys')) path += (path.includes('?') ? '&' : '?') + 'board=user';
   const response = await fetch(path, {method: method || (body === undefined ? 'GET' : 'POST'),
     headers: body === undefined ? {} : {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
     body: body === undefined ? undefined : JSON.stringify(body)});
   const data = await response.json();
+  if (epoch !== sessionEpoch) throw new Error('Stale session');
   if (!response.ok) {
     if (response.status === 401 && path !== '/api/login') signedOut();
     throw new Error(typeof data.detail === 'string' ? data.detail : Array.isArray(data.detail) ? data.detail.map(item => item.msg || 'Invalid value').join('; ') : 'Request failed');
   }
   return data;
+  } catch (error) {
+    if (epoch !== sessionEpoch) { error.staleSession = true; error.message = ''; }
+    throw error;
+  }
 }
 /**
  * Capture the actual triggering button before asynchronous event dispatch clears currentTarget.
@@ -319,12 +345,13 @@ function actionControl(event) {
  * @returns {Function} Async event handler that displays failures instead of leaking rejections.
  */
 function safe(fn) { return async event => {
+  const epoch = sessionEpoch;
   if (event) event.preventDefault();
   // Capture before await: browsers clear currentTarget after event dispatch.
   const control = actionControl(event);
   actionFeedback.clear(control);
   try { await fn(event, control); }
-  catch (error) { actionFeedback.fail(control, error.message || 'Operation failed'); }
+  catch (error) { if (epoch === sessionEpoch && !error.staleSession) actionFeedback.fail(control, error.message || 'Operation failed'); }
 }; }
 /**
  * Build an element using textContent, never interpreting server strings as HTML.
@@ -384,7 +411,7 @@ $('image-availability').addEventListener('click', safe(refresh));
 /**
  * Clear session UI, timers, stale async versions, telemetry, and one-time secrets on logout.
  */
-function signedOut() { if (typeof dashboardIdentity !== 'undefined') { dashboardIdentity = null; userBoard = false; $('board-switch').hidden = true; $('users').replaceChildren(); }  actionFeedback.reset(); localActionEvents.length = 0; serverEvents = [];  clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); if (keyUsageTable) keyUsageTable.update([]); if (modelUsageTable) modelUsageTable.update([]); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
+function signedOut() { clearSessionView(); if (typeof dashboardIdentity !== 'undefined') { dashboardIdentity = null; userBoard = false; $('board-switch').hidden = true; $('users').replaceChildren(); }  actionFeedback.reset(); localActionEvents.length = 0; serverEvents = [];  clearKeySecret(); $('api-key-add').open = false; $('api-keys').replaceChildren(); $('key-usage').replaceChildren(); if (keyUsageTable) keyUsageTable.update([]); if (modelUsageTable) modelUsageTable.update([]); closeModelInfo(false); runtimeState = null; accessConfig = null; renderAccess();  csrf = ''; catalogueVersion++; familyVersion++; fitVersion++; storageInitialized = false; $('config-menu').open = false; clearInterval(timer); clearInterval(jobTimer); jobTimer = null; timer = null; $('dashboard').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true; $('identity').textContent = ''; }
 /**
  * Initialize identity/board state, start polling, and refresh session-visible data.
  *
@@ -392,6 +419,7 @@ function signedOut() { if (typeof dashboardIdentity !== 'undefined') { dashboard
  * @returns {Promise<void>} Resolves when initial dashboard data has loaded.
  */
 async function signedIn(data) {
+  clearSessionView();
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
   if (data.role) configureBoard(data);
@@ -408,7 +436,7 @@ $('login-form').addEventListener('submit', safe(async () => {
   try { const data = await api('/api/login', {username: $('username').value, password: $('password').value}); await signedIn(data); }
   finally { $('password').value = ''; }
 }));
-$('logout').addEventListener('click', safe(async () => { await api('/api/logout', {}); signedOut(); }));
+$('logout').addEventListener('click', safe(async () => { const pending = api('/api/logout', {}); signedOut(); try { await pending; } catch { /* Local secrets stay cleared even when offline. */ } }));
 $('refresh').addEventListener('click', safe(refresh));
 /**
  * Fetch scoped keys and reconcile the management table without retaining any plaintext secret.
@@ -446,7 +474,7 @@ async function refreshKeys() {
 $('api-key-form').addEventListener('submit', safe(async () => {
   clearKeySecret();
   const owner = typeof dashboardIdentity !== 'undefined' && dashboardIdentity ? {user: userBoard ? dashboardIdentity.username : $('api-key-user').value.trim() || dashboardIdentity.username} : {};
-  const result = await api('/api/keys', {...owner, name: $('api-key-name').value.trim(), models: [$('api-key-models').value || '*'], max_tokens: null, expires_days: $('api-key-days').value === 'never' ? null : Number($('api-key-days').value)});
+  const result = await api('/api/keys', {...owner, name: $('api-key-name').value.trim(), models: [$('api-key-models').value || '*'], targets: ($('api-key-targets').value || '*').split(',').map(v => v.trim()).filter(Boolean), max_tokens: null, expires_days: $('api-key-days').value === 'never' ? null : Number($('api-key-days').value)});
   if (!csrf) return;
   $('api-key-secret').value = result.key; $('api-key-result').hidden = false; $('api-key-copy').disabled = false;
   $('api-key-feedback').textContent = 'Key generated. Copy it now; only its digest is stored.';
@@ -612,9 +640,13 @@ $('generate-form').addEventListener('submit', safe(async (event, control) => {
  */
 async function refresh() {
   if (refreshing || !csrf) return; refreshing = true;
+  const epoch = sessionEpoch;
   try {
     const session = await api('/api/session');
     if (!csrf) return;
+    if (dashboardIdentity && session.username !== dashboardIdentity.username) {
+      signedOut(); await signedIn(session); return;
+    }
     if (dashboardIdentity && session.role !== dashboardIdentity.role) {
       configureBoard(session); clearInterval(jobTimer); jobTimer = userBoard ? null : setInterval(pollJob, 1000);
       await refreshKeys();
@@ -700,7 +732,7 @@ async function refresh() {
     actionFeedback.restore();
     updateControls();
     draw(history.samples);
-  } finally { refreshing = false; }
+  } finally { if (epoch === sessionEpoch) refreshing = false; }
 }
 /**
  * Draw CPU/RAM percentage history on the dashboard canvas from chronological samples.

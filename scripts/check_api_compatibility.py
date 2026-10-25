@@ -28,7 +28,6 @@ def main(argv=None):
     parser.add_argument("--embedding-model", help="Already-loaded embedding model")
     parser.add_argument("--vision-model", help="Already-loaded vision model")
     parser.add_argument("--image", type=Path, help="Valid PNG/JPEG/GIF/WebP for real inference")
-    parser.add_argument("--pdf", type=Path, help="PDF with text for extraction smoke test")
     parser.add_argument("--target", default="cpu")
     parser.add_argument("--expected-version", default="0.40.11")
     args = parser.parse_args(argv)
@@ -152,12 +151,6 @@ def main(argv=None):
             )
         else:
             print(json.dumps({"check": "real vision inference", "status": "skipped"}))
-        if args.pdf:
-            check(
-                "real PDF extraction",
-                "api/documents/extract",
-                {"data": base64.b64encode(args.pdf.read_bytes()).decode()},
-            )
     return int(bool(failed))
 
 

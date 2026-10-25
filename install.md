@@ -12,10 +12,10 @@ Requires Linux, Python 3.11+, Docker CLI, an accessible **local** Docker daemon,
 and the system PAM library. GPU support additionally requires compatible drivers
 and Docker GPU configuration. Start Llameros as your normal Linux user, never sudo.
 
-From your local project checkout (replace `/path/to/Llameros` with its location):
+Run the following commands from your local project checkout:
 
 ```bash
-cd /path/to/Llameros
+# Run from the repository root.
 uv sync --locked
 uv run llameros
 ```
@@ -35,7 +35,7 @@ Llameros does not change your Docker setup.
 
 ```bash
 mkdir -p "$HOME/.config/llameros"
-cp /path/to/Llameros/config.example.toml "$HOME/.config/llameros/config.toml"
+cp config.example.toml "$HOME/.config/llameros/config.toml"
 uv run llameros --config "$HOME/.config/llameros/config.toml"
 # Command-line overrides:
 uv run llameros --host 127.0.0.1 --port 9443
@@ -137,7 +137,7 @@ CPU workloads, provided it fits available RAM. CPU cores are not reserved.
 Each running-model row includes a **■ Stop model** button on its right; it unloads
 that model without stopping other models or the Ollama services.
 
-Each GPU gets its own managed container, device restriction, and loopback port.
+Each GPU gets its own managed container, device restriction, and private relay.
 CPU uses `ollama_port`; GPU ports are allocated above it, skipping the dashboard
 port, and persisted in `state_dir/runtime-slots.json`. Port collisions with other
 programs fail visibly rather than changing endpoints. Model files are shared;
@@ -188,7 +188,8 @@ access; fetching failures are shown inside the panel.
 2. Expand **Add key** below the table. Enter a name and select **All models**
    (default) or a downloaded local model from the dropdown. Choose **1 week**,
    **1 month**, **1 year**, or **Never** (default) for expiry. Finite choices mean
-   7, 30, and 365 days; never-expiring keys stay valid until revoked/deleted.
+   7, 30, and 365 days for admins. Ordinary users require explicit grants and
+   1–30-day keys within the grant lifetime; never-expiring user keys are refused.
    Exact model tags are used; untagged API permissions mean `:latest`, not all tags.
    The dashboard creates keys for all hardware targets. Advanced management API
    clients can still restrict targets to `cpu` or registered `gpu-…` slot IDs.
@@ -233,7 +234,7 @@ for a usage chunk. OpenAI compatibility covers chat completions, completions,
 stateless Responses, and text embeddings; Anthropic Messages is also exposed.
 This is not the full OpenAI API: audio and stateful Responses are excluded.
 Unsupported fields return 400. See [API compatibility](api-compatibility.md).
-Limits: 128 KiB text-only JSON request; bounded inline image/PDF requests default
+Limits: 128 KiB text-only JSON request; bounded inline image requests default
 to 16 MiB. Output is 1–4096 tokens (default 256), configured
 context length only, and allowlisted sampling options. Client residency hints
 are ignored; Ollama-style gateway generation keeps the loaded model resident.
@@ -244,16 +245,37 @@ tokens, elapsed seconds, and requests with unknown usage. Rejected authenticatio
 validation, permission, or busy-lock requests are not counted. Interrupted streams
 can lack final token counts; missing counts are **unknown**, not measured zero.
 Refresh the key list to update usage. Accounting stores no prompts/responses;
-key metadata and per-key usage persist until the local database is removed,
-independently of sampled-history retention. Revoke keys in the dashboard;
+usage is retained for at most 10,000 rows and `retention_days`; inactive key
+tombstones without retained usage are eventually removed. Revoke keys in the dashboard;
 revocation/expiration rejects new requests but does not terminate an active one.
 
-**Security boundary:** Llameros still defaults to loopback HTTPS. Ollama ports
-remain loopback-only **and unauthenticated**: other local processes can bypass
-the gateway, permissions, accounting, and job lock. Do not forward/publish those
-ports. This does not provide isolation from untrusted users/processes on the same
-host. LAN/public deployment, reverse proxies, and multi-user hosting remain
-outside the supported security model; no live Docker/network changes are needed.
+**Security boundary:** HTTPS remains loopback by default. Ollama binds only to
+container loopback, with no published host ports. Llameros uses private Unix
+sockets (0700 parent directories, 0600 sockets) and fixed Docker exec relays.
+Runtime images must provide Bash with TCP redirections and `cat`; no extra image
+or host dependency is installed. The service UID, root, and Docker-daemon
+administrators remain trusted. Public-Internet deployment remains unsupported.
+
+### P0 migration for existing installations
+
+1. Stop all existing managed runtimes. Old published ports remain exposed until
+   those containers are stopped; upgrading code alone cannot close them.
+2. Reapply the current model-storage selection while stopped, then start runtimes
+   to recreate containers without published ports. Model files/volumes are retained.
+   Unsafe legacy containers are refused for inference/start, not silently reused.
+3. Use a dedicated rootless Docker context. Existing rootful containers/volumes do
+   not automatically migrate between daemons. Stop old containers on their original
+   daemon and arrange model storage before switching. If deliberately retaining a
+   rootful daemon, explicitly set `allow_rootful_docker = true` in local TOML.
+4. Remove obsolete `pdf_max_*` settings. PDF extraction and inline document blocks
+   are no longer supported; supply plain text. Poppler is no longer required.
+5. Use the HTTPS `/inference` gateway and bearer keys for every client. Validate
+   access denial from a separate unprivileged account/container before shared use.
+
+Dashboard bodies are limited to 128 KiB of actual received bytes, including
+chunked input, with a 30-second body-read deadline and a 64-level JSON-depth limit.
+Inference retains its configurable image-body limit. These per-request controls
+are not aggregate admission/resource budgets; the P1 resource findings remain open.
 
 ## Configuration
 
@@ -278,8 +300,8 @@ permissions. Back up important data before doing so.
 
 The preference is saved privately in `model-storage.json` inside the configured
 application state directory and survives restarts; it does not rewrite TOML.
-The selected directory is mounted read/write at `/models` with `OLLAMA_MODELS`
-pointing there. Only select model data you intend the container to access. Docker
+The selected directory is mounted read/write at a fixed container model directory,
+with `OLLAMA_MODELS` pointing there. Only select model data you intend the container to access. Docker
 and Ollama must have suitable filesystem permissions; rootless setups may require
 additional permission configuration. Llameros does not sudo or change ownership.
 
@@ -295,7 +317,7 @@ models can be listed, but lifecycle controls still accept official library names
 ### Application settings
 
 The default config is `~/.config/llameros/config.toml`, beneath the current user's
-home directory. See `/path/to/Llameros/config.example.toml` in your checkout for
+home directory. See `config.example.toml` in your checkout for
 all settings. Home-directory paths beginning with `~` in the configuration are
 expanded for the user running Llameros.
 
@@ -308,11 +330,12 @@ expanded for the user running Llameros.
 | `session_seconds` | `3600` | Absolute session lifetime |
 | `sample_seconds` | `15` | Resource collection interval |
 | `retention_days` | `30` | History retention, pruned during sampling |
-| `ollama_port` | `11435` | CPU API on IPv4 loopback; GPU slot ports are allocated above it and persisted |
-| `ollama_image` | `ollama/ollama:latest` | Image; pin a tested tag/digest for reproducibility |
+| `ollama_port` | `11435` | Legacy slot identifier retained for registry compatibility; no host port is opened |
+| `ollama_image` | SHA-256 pin in example config | Standard runtime; digest required |
+| `ollama_rocm_image` | SHA-256 pin in example config | AMD runtime; digest required |
 | `gpu` | `cpu` | Catalogue estimate preference: `cpu`, `nvidia`, or `amd`; execution is selected per model |
 | `context_length` | `4096` | Runtime context length |
-| `allow_rootful_docker` | `true` | Rootful daemon risk acceptance; example config sets `false` to require rootless Docker |
+| `allow_rootful_docker` | `false` | Rootless required unless explicitly set true to accept root-equivalent daemon access |
 
 Configuration changes to existing containers do not recreate them. Stop all
 runtimes and confirm/reapply model storage to recreate them for image changes.
@@ -323,7 +346,7 @@ Only one Llameros instance per Linux UID and Docker daemon is supported.
 
 ## Security before use
 
-Keep the dashboard and Ollama APIs on loopback. Never send Linux credentials to
+Keep HTTPS private and runtime APIs unpublished. Never send Linux credentials to
 Ollama. Read the [security model and limitations](development.md#security-model-and-limitations)
 before changing network bindings or Docker permissions. For errors and legacy
 container migration, see [Troubleshooting](trouble_shooting.md).
@@ -333,7 +356,7 @@ container migration, see [Troubleshooting](trouble_shooting.md).
 Sign in with a system login account and its PAM password. The Linux user starting
 Llameros is initially an **admin**; other login-shell accounts are **users** by default.
 Service accounts with `nologin` or `false` shells cannot sign in. Account enumeration
-uses the system password database (including NSS where configured), not `/etc/shadow`.
+uses the system password database (including NSS where configured), not the system shadow password file.
 
 Users can view running models and host CPU/RAM history, see overall model usage and usage for their own keys,
 and create/delete their own keys. They cannot download/start/stop models, change
@@ -353,3 +376,38 @@ the correct password. This feature does not install a privileged authentication
 helper, read shadow hashes, or modify PAM. Test with a second real account on the
 host. If policy refuses it, multi-user password login requires a separately reviewed
 host authentication solution; do not run Llameros as root or weaken PAM as a workaround.
+
+
+## P1 credential and provenance migration
+
+See `security-operations.md` for new login limits, offboarding integration,
+scoped user grants, key expiry rules, bounded retention, security events and
+release scanning. Existing ordinary-user wildcard/non-expiring keys must be
+replaced. Replace mutable image tags in local TOML with the example digest pins.
+Point 5 resource budgets and user quotas remain deferred.
+
+## VPN-protected deployment advisory
+
+Run Llameros on a VPN-protected network: restrict the dashboard/inference listener
+to the VPN interface or enforce equivalent host-firewall rules. Do not publish
+it directly to the Internet. Verify access is denied outside the VPN, including
+IPv6 and development port forwarding. VPN membership is not application
+authorization: retain trusted HTTPS certificates, PAM, CSRF, scoped keys, explicit
+grants, and rootless runtime isolation. Never disable certificate verification.
+P2 point 13 (additional Host/header/HSTS hardening) is intentionally deferred
+for this deployment; VPN usage does not claim to solve every browser-origin risk.
+
+The shared-network privacy policy exposes resident model names/targets, aggregate
+per-model totals and host CPU/RAM history to signed-in users. These reveal workload
+activity; obtain participant agreement and use separate deployments where that
+sharing is unacceptable. Keys remain owner-scoped; activity/security logs are
+admin-only. Never put credentials or prompts in diagnostic reports.
+
+P2 validation is performance-first: cheap message/tool envelope and numeric checks
+once at admission; bounded raster header inspection, not full image decompression.
+No weight hashing, advisory network calls, or external schema resolution occurs in
+inference. CI runs malformed-input regressions and locked-dependency OSV checks;
+image/host scanning remains an operator release gate (see security-operations.md).
+Model tool calls are untrusted output: clients must validate function names and
+arguments against local schemas, enforce permissions and require confirmation for
+side effects. Model text can contain prompt injection; Llameros never executes tools.

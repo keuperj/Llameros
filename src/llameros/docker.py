@@ -14,6 +14,7 @@ import httpx
 
 from .config import Settings
 from .model_storage import ModelStorage, validate_directory
+from .runtime_transport import private_socket
 
 
 class DockerError(RuntimeError):
@@ -23,7 +24,7 @@ class DockerError(RuntimeError):
 
 
 class Docker:
-    """Operate one owned Ollama container through fixed CLI arguments and loopback HTTP."""
+    """Operate an owned Ollama container through fixed CLI arguments and private HTTP relays."""
 
     def __init__(self, settings: Settings, *, target=None, name=None, storage=None):
         """Bind settings, optional device assignment, container name, and shared model storage."""
@@ -44,11 +45,7 @@ class Docker:
     def image(self) -> str:
         """Resolve the configured image, using the ROCm default for AMD when appropriate."""
         cfg = self.settings
-        return (
-            "ollama/ollama:rocm"
-            if cfg.gpu == "amd" and cfg.ollama_image == "ollama/ollama:latest"
-            else cfg.ollama_image
-        )
+        return cfg.ollama_rocm_image if cfg.gpu == "amd" else cfg.ollama_image
 
     def image_available(self) -> bool:
         """Check local image/tag or digest presence without pulling from a registry."""
@@ -192,7 +189,7 @@ class Docker:
         return data
 
     def run_args(self) -> list[str]:
-        """Build fixed isolation, storage, loopback-port, and device flags for a managed container."""
+        """Build fixed isolation, storage, private-listener, and device flags."""
         cfg = self.settings
         if self.storage.directory:
             directory = validate_directory(self.storage.directory, cfg.state_dir)
@@ -223,11 +220,11 @@ class Docker:
             "max-size=10m",
             "--log-opt",
             "max-file=3",
-            "-p",
-            f"127.0.0.1:{cfg.ollama_port}:11434",
+            "--network",
+            "bridge",
             *mount,
             "-e",
-            "OLLAMA_HOST=0.0.0.0:11434",
+            "OLLAMA_HOST=127.0.0.1:11434",
             "-e",
             "OLLAMA_NO_CLOUD=1",
             "-e",
@@ -265,11 +262,37 @@ class Docker:
             ]
         return [*args, self.image]
 
+    def require_isolation(self, data):
+        """Refuse legacy published ports or externally bound runtime listeners."""
+        if data.get("Config", {}).get("Image") != self.image:
+            raise DockerError(
+                "Runtime image differs from configured digest; recreate the stopped container"
+            )
+        host = data.get("HostConfig", {})
+        env = data.get("Config", {}).get("Env", [])
+        if (
+            host.get("NetworkMode") != "bridge"
+            or host.get("PortBindings")
+            or host.get("PublishAllPorts")
+            or "OLLAMA_HOST=127.0.0.1:11434" not in env
+        ):
+            raise DockerError(
+                "Unsafe legacy runtime: stop all runtimes and reapply model storage "
+                "to recreate private containers; model files are retained."
+            )
+
+    def socket_path(self):
+        """Authorize the owned isolated container before opening a private relay."""
+        self.ensure_running()
+        return private_socket(self.name)
+
     def start(self, progress=lambda value: None):
         """Pull missing images, create/start the owned container, and wait for API readiness."""
         progress({"status": "Checking local Docker daemon and container"})
         self.check_daemon()
         data = self.inspect()
+        if data:
+            self.require_isolation(data)
         if data and self.storage.directory:
             mounts = data.get("Mounts", [])
             if not any(
@@ -311,11 +334,15 @@ class Docker:
         data = self.inspect()
         if not data or not data["State"]["Running"]:
             raise DockerError("The managed Ollama container is not running")
+        self.require_isolation(data)
 
     def api(self, method: str, path: str, body: dict | None = None, timeout: int = 600) -> dict:
-        """Call the configured loopback Ollama endpoint and return JSON, rejecting runtime errors."""
+        """Call private container-loopback HTTP and return JSON, rejecting runtime errors."""
         with httpx.Client(
-            base_url=self.settings.ollama_url, timeout=timeout, trust_env=False
+            base_url="http://ollama",
+            transport=httpx.HTTPTransport(uds=self.socket_path()),
+            timeout=timeout,
+            trust_env=False,
         ) as client:
             response = client.request(method, path, json=body)
             response.raise_for_status()
@@ -328,7 +355,10 @@ class Docker:
         """Stream a model download to the progress callback and refresh inventory only after success."""
         self.ensure_running()
         with httpx.Client(
-            base_url=self.settings.ollama_url, timeout=httpx.Timeout(120, read=900), trust_env=False
+            base_url="http://ollama",
+            transport=httpx.HTTPTransport(uds=self.socket_path()),
+            timeout=httpx.Timeout(120, read=900),
+            trust_env=False,
         ) as client:
             with client.stream(
                 "POST", "/api/pull", json={"model": name, "stream": True}

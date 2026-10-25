@@ -1,21 +1,13 @@
-"""Bounded inline image validation and PDF-to-text preprocessing for Llameros inference.
+"""Bounded inline image validation and document rejection for Llameros inference.
 
 Bounded inline media admission. Never fetch URLs or retain attachments.
 """
 
 import base64
 import binascii
-import shutil
 import struct
-import subprocess
-import tempfile
-import threading
-import time
-from pathlib import Path
 
 from fastapi import HTTPException
-
-PDF_WORKERS = threading.BoundedSemaphore(2)
 
 
 def decode_inline(value, maximum, media=None):
@@ -158,107 +150,15 @@ def validate_images(body, cfg):
     return count
 
 
-def extract_pdf(value, cfg):
-    """Return bounded UTF-8 text from an inline PDF using installed Poppler pdftotext.
-
-    Use private temporary files, two worker slots, a 15-second deadline, and configured
-    page/text ceilings. Always reap the subprocess; no OCR or sandbox is provided.
-    """
-    data = decode_inline(value, cfg.pdf_max_bytes, "application/pdf")
-    if not data.startswith(b"%PDF-"):
-        raise HTTPException(400, "PDF signature required")
-    executable = shutil.which("pdftotext")
-    if not executable:
-        raise HTTPException(503, "PDF extraction requires Poppler pdftotext")
-    if not PDF_WORKERS.acquire(blocking=False):
-        raise HTTPException(429, "PDF extraction capacity reached", headers={"Retry-After": "1"})
-    try:
-        with tempfile.TemporaryDirectory(prefix="llameros-pdf-") as directory:
-            source, output = Path(directory) / "input.pdf", Path(directory) / "text.txt"
-            source.write_bytes(data)
-            process = subprocess.Popen(
-                [
-                    executable,
-                    "-f",
-                    "1",
-                    "-l",
-                    str(cfg.pdf_max_pages),
-                    "-enc",
-                    "UTF-8",
-                    str(source),
-                    str(output),
-                ],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            try:
-                deadline = time.monotonic() + 15
-                while process.poll() is None:
-                    if time.monotonic() > deadline:
-                        raise HTTPException(422, "PDF extraction timed out")
-                    if output.exists() and output.stat().st_size > cfg.pdf_max_text_bytes:
-                        raise HTTPException(413, "Extracted PDF text exceeds configured limit")
-                    time.sleep(0.02)
-                if process.returncode != 0 or not output.exists():
-                    raise HTTPException(422, "Invalid, encrypted, or unsupported PDF")
-                with output.open("rb") as stream:
-                    raw = stream.read(cfg.pdf_max_text_bytes + 1)
-                if len(raw) > cfg.pdf_max_text_bytes:
-                    raise HTTPException(413, "Extracted PDF text exceeds configured limit")
-                text = raw.decode("utf-8", errors="replace")
-                if not text.strip():
-                    raise HTTPException(422, "PDF has no extractable text; OCR is required")
-                return text
-            finally:
-                if process.poll() is None:
-                    process.kill()
-                process.wait()
-    finally:
-        PDF_WORKERS.release()
-
-
-def preprocess_documents(body, cfg):
-    """Convert inline PDF blocks to text; reject stored IDs and remote fetches."""
-    count = 0
-    total = 0
-
-    def visit(node, depth=0):
-        """Walk bounded content nesting and replace supported inline PDF blocks with text in place."""
-        nonlocal count, total
-        if depth > 64:
-            raise HTTPException(400, "Content nesting too deep")
-        if isinstance(node, list):
-            for child in node:
-                visit(child, depth + 1)
-        elif isinstance(node, dict):
-            kind = node.get("type")
-            if kind in ("input_file", "document"):
-                count += 1
-                if count > 4:
-                    raise HTTPException(413, "At most four PDFs per request")
-                if kind == "input_file":
-                    if node.get("file_id") or node.get("file_url"):
-                        raise HTTPException(400, "Only inline PDF file_data is supported")
-                    value = node.get("file_data")
-                else:
-                    source = node.get("source", {})
-                    if (
-                        not isinstance(source, dict)
-                        or source.get("type") != "base64"
-                        or source.get("media_type") != "application/pdf"
-                    ):
-                        raise HTTPException(400, "Only inline base64 PDF documents are supported")
-                    value = source.get("data")
-                text = extract_pdf(value, cfg)
-                total += len(text.encode())
-                if total > cfg.pdf_max_text_bytes:
-                    raise HTTPException(413, "Combined PDF text exceeds configured limit")
-                node.clear()
-                node.update(type="input_text" if kind == "input_file" else "text", text=text)
-            else:
-                for child in node.values():
-                    visit(child, depth + 1)
-
-    visit(body)
-    return count
+def reject_documents(node, depth=0):
+    """Reject document/file blocks rather than parsing or forwarding attachments."""
+    if depth > 64:
+        raise HTTPException(400, "Content nesting too deep")
+    if isinstance(node, dict):
+        if node.get("type") in ("input_file", "document", "file"):
+            raise HTTPException(400, "Document attachments are not supported; supply plain text")
+        for child in node.values():
+            reject_documents(child, depth + 1)
+    elif isinstance(node, list):
+        for child in node:
+            reject_documents(child, depth + 1)

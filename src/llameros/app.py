@@ -18,12 +18,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .auth import COOKIE, Sessions, verify_password
+from .auth import COOKIE, Sessions, account_available, verify_password
+from .body_limits import BodyLimits
 from .catalog import Catalog, validate_model
 from .config import Settings, current_user
+from .diagnostics import diagnostic
 from .docker import DockerError
 from .gateway import PREFIX, install_gateway
 from .hardware import assess_fit, snapshot
+from .runtime_transport import close_relays
 from .runtimes import Runtimes
 from .scheduling import InferenceScheduler
 from .storage import Store
@@ -136,10 +139,10 @@ class Jobs:
                         progress={"status": "Completed", "completed": 1, "total": 1},
                     )
             except Exception as exc:
-                log.warning("Job %s failed: %s", action, exc)
+                log.warning("Job %s failed [%s]", action, type(exc).__name__)
                 with self.lock:
-                    self.job.update(state="failed", error=str(exc)[:2000], finished=time.time())
-                self.store.event(f"{action}:failed", model, str(exc)[:2000])
+                    self.job.update(state="failed", error=diagnostic(exc), finished=time.time())
+                self.store.event(f"{action}:failed", model, diagnostic(exc))
 
         self.pool.submit(work)
         return {"accepted": True, "job_id": job_id}
@@ -154,6 +157,7 @@ def create_app(
     hardware_provider=None,
     sampling=True,
     gateway_transport=None,
+    account_checker=None,
 ) -> FastAPI:
     """Compose the HTTPS dashboard, authorization, telemetry, runtime services, and inference gateway.
 
@@ -163,6 +167,10 @@ def create_app(
     cfg = settings or Settings()
     cfg.prepare()
     store = Store(cfg.state_dir / "history.sqlite3")
+    store.retention_days = cfg.retention_days
+    store.account_check = account_checker or (
+        lambda username: account_available(username, cfg.pam_service)
+    )
     users = Users(store)
     supplied_docker = docker
     catalog = catalog or Catalog()
@@ -184,7 +192,7 @@ def create_app(
         try:
             data["ollama"] = runtime_status()
         except Exception as exc:
-            data["ollama"] = {"running": False, "error": str(exc)[:2000]}
+            data["ollama"] = {"running": False, "error": diagnostic(exc)}
         store.sample(data, cfg.retention_days)
 
     async def sampler():
@@ -206,12 +214,14 @@ def create_app(
             with suppress(asyncio.CancelledError):
                 await task
         await run_in_threadpool(lambda: jobs.pool.shutdown(wait=True))
+        await run_in_threadpool(close_relays)
 
     app = FastAPI(
         title="Llameros", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
     )
     app.state.store, app.state.jobs = store, jobs
     app.state.users = users
+    app.add_middleware(BodyLimits, inference_bytes=cfg.inference_body_bytes)
 
     @app.middleware("http")
     async def security(request: Request, call_next):
@@ -257,23 +267,23 @@ def create_app(
     @app.exception_handler(DockerError)
     async def docker_error(request, exc):
         """Map managed-runtime failures to a dashboard service-unavailable response."""
-        return JSONResponse({"detail": str(exc)}, status_code=503)
+        return JSONResponse({"detail": diagnostic(exc)}, status_code=503)
 
     @app.exception_handler(httpx.HTTPError)
     async def upstream_error(request, exc):
         """Translate catalogue/Ollama HTTP failures to a bad-gateway response."""
-        return JSONResponse({"detail": f"Ollama/catalogue request failed: {exc}"}, status_code=502)
+        return JSONResponse({"detail": diagnostic(exc)}, status_code=502)
 
     @app.exception_handler(ValueError)
     async def value_error(request, exc):
         """Expose validation failures as dashboard HTTP 400 responses."""
-        return JSONResponse({"detail": str(exc)}, status_code=400)
+        return JSONResponse({"detail": diagnostic(exc)}, status_code=400)
 
     def require_session(request: Request):
         """Resolve the cookie and current account policy; reject expired or blocked sessions."""
         session = sessions.get(request.cookies.get(COOKIE, ""))
         account = users.get(session["username"]) if session else None
-        if not session or account["blocked"]:
+        if not session or not users.active(session["username"]):
             if session:
                 sessions.remove(request.cookies.get(COOKIE, ""))
             raise HTTPException(401, "Sign in with an allowed Linux account")
@@ -291,17 +301,29 @@ def create_app(
     @app.post("/api/login")
     def login(body: Login, request: Request, response: Response):
         """Rate-limit PAM login, remember account policy, and issue a secure session cookie and CSRF token."""
-        if not sessions.allow_attempt():
-            store.event("login:failed", detail="Too many login attempts; wait one minute")
-            raise HTTPException(429, "Too many login attempts; wait one minute")
-        if users.get(body.username)["blocked"] or not authenticate(
-            body.username, body.password, cfg.pam_service
+        source = request.client.host if request.client else "unknown"
+        if not sessions.allow_attempt(source, body.username) or not sessions.pam_slots.acquire(
+            blocking=False
         ):
-            store.event("login:failed", detail="Linux authentication failed")
+            store.security_event(body.username, "login", source, "throttled")
+            raise HTTPException(
+                429, "Too many login attempts; retry later", headers={"Retry-After": "60"}
+            )
+        try:
+            valid = (
+                not users.get(body.username)["blocked"]
+                and store.account_check(body.username)
+                and authenticate(body.username, body.password, cfg.pam_service)
+            )
+        finally:
+            sessions.pam_slots.release()
+        if not valid:
+            store.security_event(body.username, "login", source, "denied")
             raise HTTPException(401, "Linux authentication failed")
         sessions.remove(request.cookies.get(COOKIE, ""))
         users.remember(body.username)
         token, session = sessions.create(body.username)
+        store.security_event(body.username, "login", source)
         response.set_cookie(
             COOKIE,
             token,
@@ -323,9 +345,10 @@ def create_app(
         return {"username": session["username"], "csrf": session["csrf"], "role": session["role"]}
 
     @app.post("/api/logout", dependencies=signed_in)
-    def logout(request: Request, response: Response):
+    def logout(request: Request, response: Response, session=Depends(require_session)):
         """Invalidate the server session and remove its secure browser cookie."""
         sessions.remove(request.cookies.get(COOKIE, ""))
+        store.security_event(session["username"], "logout")
         response.delete_cookie(COOKIE, path="/", secure=True, httponly=True, samesite="strict")
         return {"ok": True}
 
@@ -333,6 +356,10 @@ def create_app(
     def list_users():
         """Expose discovered and remembered account policy to administrators only."""
         return {"users": users.list()}
+
+    @app.get("/api/security-events", dependencies=protected)
+    def security_events():
+        return {"events": store.security_history()}
 
     @app.post("/api/users/{username}", dependencies=protected)
     def update_user(username: str, body: UserUpdate, session=Depends(require_admin)):
@@ -392,7 +419,7 @@ def create_app(
         try:
             runtime = runtime_status()
         except (DockerError, httpx.HTTPError) as exc:
-            runtime = {"running": False, "error": str(exc)}
+            runtime = {"running": False, "error": diagnostic(exc)}
         return {
             "hardware": hardware(),
             "ollama": runtime,
@@ -400,7 +427,7 @@ def create_app(
             "user": current_user(),
             "gpu_mode": cfg.gpu,
             "context_length": cfg.context_length,
-            "access": {"base_url": cfg.ollama_url, "openai_url": cfg.ollama_url + "/v1"},
+            "access": {"base_url": "/inference", "openai_url": "/inference/v1"},
         }
 
     @app.get("/api/catalog", dependencies=protected)
@@ -454,7 +481,7 @@ def create_app(
     @app.post("/api/action-errors", dependencies=protected)
     def action_error(body: ActionError):
         """Persist bounded dashboard failure metadata without prompt or credential content."""
-        store.event("dashboard-action:failed", body.action, body.message)
+        store.event("dashboard-action:failed", "dashboard", "Client action failed")
         return {"ok": True}
 
     @app.get("/api/storage", dependencies=protected)
@@ -495,7 +522,7 @@ def create_app(
                     "storage": docker.storage_info(),
                 }
         except (DockerError, httpx.HTTPError) as exc:
-            error = str(exc)
+            error = diagnostic(exc)
         else:
             error = ""
         try:
@@ -505,7 +532,7 @@ def create_app(
                 "models": [],
                 "source": "unavailable",
                 "cached_at": None,
-                "warnings": [str(exc)],
+                "warnings": [diagnostic(exc)],
             }
         if error:
             inventory["warnings"].append(error)

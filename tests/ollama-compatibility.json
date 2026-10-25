@@ -1,7 +1,17 @@
 {
   "version": "0.40.11",
   "commit": "675150d6ad2747df1e218ef59de9194bc4a7e538",
-  "image": "ollama/ollama:0.40.11",
+  "image": "ollama/ollama@sha256:dea72d1e22270fe095b68fdf756d2b489d615643c5a2eaebbc5f569181e322d8",
   "scope": "Native generation/chat/embed, legacy embeddings, OpenAI completions/chat/responses/embeddings, Anthropic messages; loaded permitted models only",
-  "excluded": ["stateful responses", "remote attachments", "token-ID embeddings", "model management", "server-executed tools", "audio", "systemone", "responses compact"]
+  "excluded": [
+    "stateful responses",
+    "remote attachments",
+    "token-ID embeddings",
+    "model management",
+    "server-executed tools",
+    "audio",
+    "systemone",
+    "responses compact"
+  ],
+  "rocm_image": "ollama/ollama@sha256:c57155dfdd87acadac039c2679482db7f761960dfe0419b3072e1cfd52cb5167"
 }

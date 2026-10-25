@@ -3,6 +3,8 @@
 PAM verification and short-lived, server-side sessions.
 """
 
+import ctypes
+import ctypes.util
 import pwd
 import secrets
 import threading
@@ -10,6 +12,54 @@ import time
 from collections import deque
 
 COOKIE = "__Host-llameros"
+
+
+def account_available(username, service="login"):
+    """Fail closed on missing/login-disabled accounts or PAM account-policy failures.
+
+    This checks account policy without retaining or replaying a password. Password-only
+    locks are not portable account-disable signals: offboarding must also block Llameros.
+    """
+    try:
+        account = pwd.getpwnam(username)
+        if not account.pw_shell or account.pw_shell.rsplit("/", 1)[-1] in {"nologin", "false"}:
+            return False
+        if "\x00" in username + service:
+            return False
+        library = ctypes.util.find_library("pam")
+        if not library:
+            return False
+        lib = ctypes.CDLL(library)
+        callback_type = ctypes.CFUNCTYPE(
+            ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p
+        )
+
+        class Conversation(ctypes.Structure):
+            _fields_ = [("conv", callback_type), ("data", ctypes.c_void_p)]
+
+        callback = callback_type(lambda *args: 19)  # PAM_CONV_ERR: never answer prompts.
+        conversation = Conversation(callback, None)
+        handle = ctypes.c_void_p()
+        lib.pam_start.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.POINTER(Conversation),
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        lib.pam_acct_mgmt.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        lib.pam_end.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        result = lib.pam_start(
+            service.encode(), username.encode(), ctypes.byref(conversation), ctypes.byref(handle)
+        )
+        if result != 0:
+            return False
+        try:
+            result = lib.pam_acct_mgmt(handle, 0)
+            return result == 0
+        finally:
+            lib.pam_end(handle, result)
+    except (KeyError, OSError, ValueError):
+        return False
 
 
 def verify_password(username: str, password: str, service: str) -> bool:
@@ -33,25 +83,34 @@ def verify_password(username: str, password: str, service: str) -> bool:
 
 
 class Sessions:
-    """Thread-safe, expiring server-side sessions with a global login-attempt budget."""
+    """Thread-safe sessions with bounded source/account throttling and PAM concurrency."""
 
     def __init__(self, lifetime: int):
         """Initialize session storage and a monotonic rate-limit window; lifetime is in seconds."""
         self.lifetime = lifetime
         self.sessions: dict[str, dict] = {}
-        self.attempts: deque[float] = deque()
+        self.attempts = {}
+        self.pam_slots = threading.BoundedSemaphore(4)
         self.lock = threading.Lock()
 
-    def allow_attempt(self) -> bool:
-        # Global limit: source IP spoofing cannot bypass it.
-        """Consume one of five global login attempts per minute, returning false when exhausted."""
+    def allow_attempt(self, source="local", username="") -> bool:
+        """Bound source and source/account attempts; never trust forwarded-IP headers."""
         with self.lock:
             now = time.monotonic()
-            while self.attempts and self.attempts[0] < now - 60:
-                self.attempts.popleft()
-            if len(self.attempts) >= 5:
-                return False
-            self.attempts.append(now)
+            for key in list(self.attempts):
+                queue = self.attempts[key]
+                while queue and queue[0] <= now - 60:
+                    queue.popleft()
+                if not queue:
+                    del self.attempts[key]
+            limits = [(("source", source), 30), (("pair", source, username), 5)]
+            for key, limit in limits:
+                if len(self.attempts.get(key, ())) >= limit:
+                    return False
+                if key not in self.attempts and len(self.attempts) >= 4096:
+                    return False
+            for key, _ in limits:
+                self.attempts.setdefault(key, deque()).append(now)
             return True
 
     def create(self, username: str) -> tuple[str, dict]:

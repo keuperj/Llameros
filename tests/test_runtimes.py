@@ -119,7 +119,7 @@ def test_cpu_and_two_gpu_models_coexist_with_stable_ports_and_routing(pool):
     state = manager.status()
     assert len(state["loaded"]) == 3
     assert all(slot["available"] for slot in state["slots"] if slot["supported"])
-    assert len({model["base_url"] for model in state["loaded"]}) == 3
+    assert {model["base_url"] for model in state["loaded"]} == {"/inference"}
     assert manager.model_client("two:latest", ids[1]).target["id"] == ids[1]
     with pytest.raises(ValueError, match="already loaded"):
         manager.load("two:latest", 1, ids[1], 4096, lambda value: None)

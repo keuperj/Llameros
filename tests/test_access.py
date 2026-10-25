@@ -22,8 +22,8 @@ def test_access_endpoints_use_configured_port_and_require_login(tmp_path):
         assert client.get("/api/status").status_code == 401
         sign_in(client)
         assert client.get("/api/status").json()["access"] == {
-            "base_url": "http://127.0.0.1:12567",
-            "openai_url": "http://127.0.0.1:12567/v1",
+            "base_url": "/inference",
+            "openai_url": "/inference/v1",
         }
         assert client.get("/static/access.js").status_code == 200
 

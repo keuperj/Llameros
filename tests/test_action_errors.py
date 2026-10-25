@@ -12,8 +12,8 @@ def test_action_errors_require_session_csrf_and_persist_bounded_text(client):
     assert client.post("/api/action-errors", json=payload).status_code == 200
     event = client.get("/api/history").json()["events"][0]
     assert event["kind"] == "dashboard-action:failed"
-    assert event["model"] == "refresh"
-    assert event["detail"] == "Runtime unavailable"
+    assert event["model"] == "dashboard"
+    assert event["detail"] == "Client action failed"
     assert (
         client.post("/api/action-errors", json={**payload, "message": "x" * 2001}).status_code
         == 422
@@ -44,7 +44,9 @@ def test_login_failure_logged_without_submitted_credentials(client):
     )
     assert result.status_code == 401
     sign_in(client)
-    events = client.get("/api/history").json()["events"]
-    failed = next(event for event in events if event["kind"] == "login:failed")
-    assert failed["detail"] == "Linux authentication failed"
-    assert "private-name" not in str(events) and "private-password" not in str(events)
+    events = client.get("/api/security-events").json()["events"]
+    failed = next(
+        event for event in events if event["action"] == "login" and event["outcome"] == "denied"
+    )
+    assert failed["actor"] == "private-name"
+    assert "private-password" not in str(events)

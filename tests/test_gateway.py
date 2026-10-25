@@ -149,7 +149,7 @@ def test_authentication_management_and_no_credential_forwarding(gateway):
     upstream = calls[-1]
     assert "authorization" not in upstream.headers
     assert "cookie" not in upstream.headers
-    assert upstream.url.host == "127.0.0.1"
+    assert upstream.url.host == "ollama"
     payload = json.loads(upstream.content)
     assert payload["options"] == {"num_ctx": 4096, "num_predict": 256, "num_gpu": 0}
     assert payload["keep_alive"] == -1
@@ -460,7 +460,7 @@ def test_device_routing_uses_registered_slot_url(tmp_path, monkeypatch):
         created, _ = issue(client, targets=[gpu])
         assert post(client, created["key"], target=gpu).status_code == 200
         assert calls == [("gemma3:270m", gpu)]
-        assert requests[0].url.port == 12567
+        assert requests[0].url.host == "ollama"
         assert "num_gpu" not in json.loads(requests[0].content)["options"]
 
 

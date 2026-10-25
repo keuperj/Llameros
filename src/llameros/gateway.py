@@ -18,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .api_keys import ApiKeys, KeyRequest, normalize
 from .docker import DockerError
-from .multimodal import extract_pdf, preprocess_documents, validate_images
+from .multimodal import reject_documents, validate_images
 
 PREFIX = "/inference"
 
@@ -107,7 +107,7 @@ def install_gateway(
     @app.delete("/api/keys/{identity}", dependencies=protected)
     def delete_key(identity: str, request: Request, session=Depends(require_session)):
         """Revoke and tombstone a key only within the caller's permitted owner scope."""
-        keys.delete(identity, key_owner(request, session))
+        keys.delete(identity, key_owner(request, session), actor=session["username"])
         return {"ok": True}
 
     @app.post("/api/keys", dependencies=protected, status_code=201)
@@ -121,12 +121,12 @@ def install_gateway(
             and owner != session["username"]
         ):
             raise HTTPException(404, "System user not found")
-        return keys.create(body, owner)
+        return keys.create(body, owner, actor=session["username"])
 
     @app.post("/api/keys/{identity}/revoke", dependencies=protected)
     def revoke_key(identity: str, request: Request, session=Depends(require_session)):
         """Disable a key within the caller's scope while retaining its usage history."""
-        keys.revoke(identity, key_owner(request, session))
+        keys.revoke(identity, key_owner(request, session), actor=session["username"])
         return {"ok": True}
 
     def bearer(request: Request):
@@ -150,29 +150,6 @@ def install_gateway(
             return body
         except (ValueError, TypeError, RecursionError):
             raise HTTPException(400, "Valid JSON object required") from None
-
-    @app.post(PREFIX + "/api/documents/extract")
-    async def document_extract(request: Request, key=Depends(bearer)):
-        """Extract bounded inline PDF text and overlapping chunks for an authenticated key."""
-        body = await read_body(request)
-        if set(body) - {"data", "chunk_size", "overlap"}:
-            raise HTTPException(400, "Unsupported extraction fields")
-        size, overlap = body.get("chunk_size", 2000), body.get("overlap", 200)
-        if (
-            type(size) is not int
-            or not 256 <= size <= 32000
-            or type(overlap) is not int
-            or not 0 <= overlap <= size // 2
-        ):
-            raise HTTPException(
-                400, "chunk_size must be 256–32000; overlap must not exceed half of chunk_size"
-            )
-        text = await run_in_threadpool(extract_pdf, body.get("data"), cfg)
-        return {
-            "text": text,
-            "chunks": [text[i : i + size] for i in range(0, len(text), size - overlap)],
-            "page_limit": cfg.pdf_max_pages,
-        }
 
     def permitted_models(key):
         """Filter loaded model/device instances by key permissions and runtime availability."""
@@ -246,8 +223,9 @@ def install_gateway(
             else docker
         )
         async with httpx.AsyncClient(
-            base_url=runtime.settings.ollama_url if runtimes else cfg.ollama_url,
-            transport=transport,
+            base_url="http://ollama",
+            transport=transport
+            or httpx.AsyncHTTPTransport(uds=await run_in_threadpool(runtime.socket_path)),
             trust_env=False,
             follow_redirects=False,
             timeout=10,
@@ -269,6 +247,9 @@ def install_gateway(
     async def show_model(request: Request, key=Depends(bearer)):
         """Validate an Ollama metadata request and route it to one permitted loaded runtime."""
         body = await read_body(request)
+        from .protocol import validate_protocol
+
+        validate_protocol(body)
         if (
             set(body) - {"model", "verbose", "target"}
             or type(body.get("verbose", False)) is not bool
@@ -560,8 +541,8 @@ def install_gateway(
         ):
             raise HTTPException(400, "Only client-executed function tools are supported")
         images = validate_images(body, cfg)
-        has_documents = await run_in_threadpool(preprocess_documents, body, cfg)
-        if not images and not has_documents and original_size > 131072:
+        reject_documents(body)
+        if not images and original_size > 131072:
             raise HTTPException(413, "Text-only request too large")
         target = body.pop("target", request.headers.get("x-llameros-target", ""))
         if not isinstance(target, str):
@@ -690,7 +671,7 @@ def install_gateway(
                 if runtimes
                 else docker
             )
-            base_url = runtime.settings.ollama_url if runtimes else cfg.ollama_url
+            base_url = "http://ollama"
             if embedding:
                 body.update(
                     model=model, keep_alive=-1, options={**options, "num_ctx": cfg.context_length}
@@ -715,7 +696,8 @@ def install_gateway(
                 body["keep_alive"] = -1
             client = httpx.AsyncClient(
                 base_url=base_url,
-                transport=transport,
+                transport=transport
+                or httpx.AsyncHTTPTransport(uds=await run_in_threadpool(runtime.socket_path)),
                 trust_env=False,
                 follow_redirects=False,
                 timeout=httpx.Timeout(600, connect=5),

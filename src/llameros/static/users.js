@@ -12,7 +12,9 @@ let userBoard = false, dashboardIdentity = null;
  * @param {boolean} [asUser] - Defaults to true for ordinary users; admins may preview their board.
  */
 function configureBoard(data, asUser = data.role !== 'admin') {
+  if (typeof clearSessionView === 'function') clearSessionView();
   dashboardIdentity = data; userBoard = asUser;
+  if (data.role === 'user') document.getElementById('api-key-days').value = '7';
   const switcher = document.getElementById('board-switch');
   switcher.hidden = data.role !== 'admin';
   switcher.textContent = asUser ? 'Switch to admin board' : 'Switch to user board';
@@ -74,9 +76,12 @@ async function refreshUsers() {
     const save = element('button', 'Save'); save.type = 'button';
     save.setAttribute('aria-label', `Save access for ${user.username}`);
     if (user.username === dashboardIdentity.username) { role.disabled = true; blocked.disabled = true; save.disabled = true; }
-    for (const control of [role, blocked, save]) { const cell = element('td', ''); cell.append(control); row.append(cell); }
+    const models = document.createElement('input'); models.value = (user.models || []).join(', '); models.setAttribute('aria-label', `Allowed models for ${user.username}`);
+    const targets = document.createElement('input'); targets.value = (user.targets || []).join(', '); targets.setAttribute('aria-label', `Allowed targets for ${user.username}`);
+    const days = document.createElement('input'); days.type = 'number'; days.min = '1'; days.max = '90'; days.value = ''; days.placeholder = 'Renew 1–90 days'; days.setAttribute('aria-label', `Renew grant for ${user.username}`);
+    for (const control of [role, blocked, save, models, targets, days]) { const cell = element('td', ''); cell.append(control); row.append(cell); }
     save.addEventListener('click', safe(async () => {
-      await api('/api/users/' + encodeURIComponent(user.username), {role: role.value, blocked: blocked.checked});
+      await api('/api/users/' + encodeURIComponent(user.username), {role: role.value, blocked: blocked.checked, models: models.value.split(',').map(v => v.trim()).filter(Boolean), targets: targets.value.split(',').map(v => v.trim()).filter(Boolean), ...(days.value ? {grant_days: Number(days.value)} : {})});
       notice(`Updated ${user.username}. Blocking revokes all keys; unblocking does not restore them.`);
       await refreshUsers(); await refreshKeys();
     })); panel.append(row);

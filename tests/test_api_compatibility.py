@@ -3,7 +3,6 @@
 import base64
 import json
 import runpy
-import shutil
 import struct
 
 import httpx
@@ -17,7 +16,7 @@ from test_gateway import issue
 from llameros.api_keys import normalize
 from llameros.app import create_app
 from llameros.config import Settings
-from llameros.multimodal import extract_pdf, image_dimensions, validate_images
+from llameros.multimodal import image_dimensions, validate_images
 
 PIN = "0.40.11"
 gateway = shared_gateway
@@ -316,110 +315,24 @@ def test_protocol_streams(tmp_path, protocol, broken):
         assert not app.state.jobs.scheduler.tickets
 
 
-def pdf_bytes(text="Hello PDF"):
-    """Build a minimal valid single-page text PDF for offline extraction checks."""
-    stream = f"BT /F1 12 Tf 72 720 Td ({text}) Tj ET".encode()
-    objects = [
-        b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
-    ]
-    data, offsets = b"%PDF-1.4\n", [0]
-    for i, obj in enumerate(objects, 1):
-        offsets.append(len(data))
-        data += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
-    start = len(data)
-    data += b"xref\n0 6\n0000000000 65535 f \n"
-    data += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets[1:])
-    return data + f"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n".encode()
-
-
-@pytest.mark.skipif(not shutil.which("pdftotext"), reason="Poppler not installed")
-def test_real_pdf_extraction_and_inline_translation(gateway):
-    """Verify real pdf extraction and inline translation."""
-    _, client, _, calls, response = gateway
-    response.clear()
-    response.update(usage={"input_tokens": 2, "output_tokens": 3})
+def test_documents_removed(gateway):
+    _, client, _, calls, _ = gateway
     auth = headers(client)
-    data = base64.b64encode(pdf_bytes()).decode()
-    result = client.post("/inference/api/documents/extract", headers=auth, json={"data": data})
-    assert result.status_code == 200, result.text
-    assert "Hello PDF" in result.json()["text"]
-    assert result.json()["chunks"]
-    for path, fields in [
-        (
-            "responses",
-            {
-                "input": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_file",
-                                "file_data": "data:application/pdf;base64," + data,
-                            }
-                        ],
-                    }
-                ]
-            },
-        ),
-        (
-            "messages",
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "document",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "application/pdf",
-                                    "data": data,
-                                },
-                            }
-                        ],
-                    }
-                ]
-            },
-        ),
+    assert client.post("/inference/api/documents/extract", headers=auth, json={}).status_code == 404
+    for route, field, kind in [
+        ("responses", "input", "input_file"),
+        ("messages", "messages", "document"),
     ]:
         result = client.post(
-            "/inference/v1/" + path, headers=auth, json={"model": "gemma3:270m", **fields}
+            "/inference/v1/" + route,
+            headers=auth,
+            json={
+                "model": "gemma3:270m",
+                field: [{"role": "user", "content": [{"type": kind, "file_data": "anything"}]}],
+            },
         )
-        assert result.status_code == 200, result.text
-        body = json.loads(calls[-1].content)
-        assert "Hello PDF" in json.dumps(body)
-        assert data not in json.dumps(body)
-    with pytest.raises(HTTPException) as error:
-        extract_pdf(base64.b64encode(pdf_bytes("")).decode(), Settings())
-    assert "OCR" in error.value.detail
-
-
-def test_pdf_unavailable_and_invalid(gateway, monkeypatch):
-    """Verify pdf unavailable and invalid."""
-    _, client, _, _, _ = gateway
-    auth = headers(client)
-    monkeypatch.setattr("llameros.multimodal.shutil.which", lambda _: None)
-    result = client.post(
-        "/inference/api/documents/extract",
-        headers=auth,
-        json={"data": base64.b64encode(pdf_bytes()).decode()},
-    )
-    assert result.status_code == 503
-    assert client.post("/inference/api/documents/extract", json={}).status_code == 401
-    result = client.post(
-        "/inference/api/documents/extract", headers=auth, json={"data": "aGVsbG8="}
-    )
-    assert result.status_code == 400
-    result = client.post(
-        "/inference/api/documents/extract",
-        headers=auth,
-        json={"data": "aGVsbG8=", "chunk_size": 256, "overlap": 255},
-    )
-    assert result.status_code == 400
+        assert result.status_code == 400
+    assert not calls
 
 
 @pytest.mark.parametrize(
@@ -429,9 +342,6 @@ def test_pdf_unavailable_and_invalid(gateway, monkeypatch):
         "image_max_bytes",
         "image_max_count",
         "image_max_pixels",
-        "pdf_max_bytes",
-        "pdf_max_pages",
-        "pdf_max_text_bytes",
     ],
 )
 def test_media_config_bounds(name):

@@ -1,0 +1,31 @@
+name: Security regression and advisories
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 1'
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@6b9c6063abd6010835644d4c2e1bef4cf5cd0fca
+      - run: uv sync --locked --extra dev --python 3.11
+      - run: uv run --no-sync ruff check src tests scripts
+      - run: uv run --no-sync ruff format --check src tests scripts
+      - run: uv run --no-sync pytest -q
+      - run: node --test tests/*.test.cjs
+      - name: Locked dependency advisories (network failure is not a pass)
+        run: |
+          status=0
+          uv run --no-sync python scripts/check_security.py --output security-report.json || status=$?
+          cat security-report.json
+          # Exit 2 means clean Python advisories but images intentionally unscanned.
+          # This job is not full release/image vulnerability clearance.
+          test "$status" -eq 2

@@ -114,7 +114,7 @@ test('startup loads existing keys without waiting for dashboard or catalogue', a
     const refresh = new Promise(resolve => { finishRefresh = resolve; });
     const catalogue = new Promise(resolve => { finishCatalogue = resolve; });
     const context = vm.createContext({$: ui.get, csrf: '', timer: null, jobTimer: null,
-      clearInterval() {}, setInterval() { return 1; }, safe: fn => fn, notice() {}, pollJob() {},
+      clearSessionView() {}, clearInterval() {}, setInterval() { return 1; }, safe: fn => fn, notice() {}, pollJob() {},
       refresh: () => failure === 'refresh' ? Promise.reject(new Error('runtime unavailable')) : refresh,
       catalogue: () => failure === 'catalogue' ? Promise.reject(new Error('catalogue unavailable')) : catalogue,
       refreshKeys: () => ui.run('refreshKeys()')});

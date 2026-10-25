@@ -9,6 +9,7 @@ import re
 import threading
 from dataclasses import replace
 
+from .diagnostics import diagnostic
 from .docker import Docker, DockerError
 from .hardware import assess_fit
 from .model_storage import write_json
@@ -108,20 +109,20 @@ class Runtimes:
                         available=len(state.get("loaded", [])) < self.settings.max_loaded_models,
                     )
                     if client:
-                        slot["base_url"] = client.settings.ollama_url
+                        slot["base_url"] = "/inference"
                     for model in state.get("loaded", []):
                         loaded.append(
                             {
                                 **model,
                                 "target": identity,
                                 "hardware": target["label"],
-                                "base_url": client.settings.ollama_url,
+                                "base_url": "/inference",
                             }
                         )
                     if identity == "cpu":
                         main = state
                 except Exception as exc:
-                    slot["error"] = str(exc)[:2000]
+                    slot["error"] = diagnostic(exc)
                     # Report legacy container state honestly so the Stop control
                     # remains usable, while never treating it as a free slot.
                     if identity == "cpu":
@@ -130,7 +131,7 @@ class Runtimes:
                             legacy.check_daemon()
                             data = legacy.inspect()
                             slot["running"] = bool(data and data["State"]["Running"])
-                            main = {"running": slot["running"], "legacy_error": str(exc)}
+                            main = {"running": slot["running"], "legacy_error": diagnostic(exc)}
                         except Exception:
                             pass
             else:
