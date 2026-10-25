@@ -7,7 +7,7 @@ const UsageTable = {
     const buttons = headers.map((header, index) => {
       const label = header.textContent;
       const button = document.createElement('button');
-      button.type = 'button'; button.textContent = label;
+      button.type = 'button'; button.textContent = label; button.title = label;
       button.addEventListener('click', () => {
         const next = columns[index].field;
         direction = next === field && direction === 'ascending' ? 'descending' : 'ascending';
@@ -53,9 +53,9 @@ const UsageTable = {
     {field: 'seconds', numeric: true, decimal: true},
   ],
   keyColumns: [
-    {field: 'name'}, {field: 'status'}, {field: 'requests', numeric: true}, {field: 'failed', numeric: true},
+    {field: 'name'}, {field: 'user'}, {field: 'status'}, {field: 'requests', numeric: true}, {field: 'failed', numeric: true},
     {field: 'prompt_tokens', numeric: true}, {field: 'output_tokens', numeric: true},
-    {field: 'unknown_usage', numeric: true}, {field: 'seconds', numeric: true, decimal: true},
+    {field: 'seconds', numeric: true, decimal: true},
   ],
 };
 if (typeof module !== 'undefined') module.exports = UsageTable;

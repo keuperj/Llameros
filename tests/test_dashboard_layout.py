@@ -30,3 +30,48 @@ def test_playground_closed_and_scroll_regions_accessible():
     assert "height:var(--usage-row-height)" in css
     html = (static / "index.html").read_text()
     assert html.index("/static/usage.js") < html.index("/static/app.js")
+
+
+def test_usage_tables_have_compact_matching_headers():
+    class Headers(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.in_header = False
+            self.labels = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "th":
+                self.in_header = True
+
+        def handle_endtag(self, tag):
+            if tag == "th":
+                self.in_header = False
+
+        def handle_data(self, data):
+            if self.in_header:
+                self.labels.append(data)
+
+    static = Path(__file__).resolve().parents[1] / "src/llameros/static"
+    html = (static / "index.html").read_text()
+    parser = Headers()
+    parser.feed(html[html.index('class="usage-tiles"') :])
+    assert parser.labels == [
+        "Model",
+        "Requests",
+        "Input",
+        "Output",
+        "Tokens/s",
+        "Seconds",
+        "Key",
+        "User",
+        "Status",
+        "Requests",
+        "Failed",
+        "Input",
+        "Output",
+        "Seconds",
+    ]
+    css = (static / "style.css").read_text()
+    assert "min-width:640px" not in css
+    assert "min-width:840px" not in css
+    assert "table-layout:fixed;width:100%;min-width:0" in css
