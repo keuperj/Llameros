@@ -12,7 +12,7 @@ UI assets. Secure sharing is through the local HTTPS gateway, not public hosting
 ## Features
 
 - **Per-device runtimes** — multiple resident models per CPU/GPU, isolated NVIDIA/AMD
-  containers, bounded per-device inference queues, shared downloads, and individual **■ Stop model** controls.
+  DOCKER containers, bounded per-device inference queues, shared downloads, and individual model controls.
 - **Hardware-aware discovery** — RAM/VRAM fit estimates, recommendations,
   search, model descriptions, and download progress.
 - **Secure model sharing** — named, model-scoped API keys with expiry or no expiry,
@@ -21,6 +21,23 @@ UI assets. Secure sharing is through the local HTTPS gateway, not public hosting
   Ollama, OpenAI-compatible, LangChain, and LlamaIndex examples.
 - **Local control** — Linux PAM sign-in over HTTPS, configurable model storage,
   resource history, lifecycle events, and token/timing totals.
+
+## Dashboard previews
+
+Screenshots of the actual dashboard rendered with synthetic demo data, not a live
+deployment. No real accounts or credentials are shown.
+
+### Admin board
+
+Host telemetry, runtime controls, loaded models, and key management.
+
+![Admin board showing host metrics, a loaded model, and API key management](docs/screenshots/admin-board.png)
+
+### User board
+
+Shared running models and resource history, with owner-scoped API keys and usage.
+
+![User board showing a running model, personal API keys, and usage history](docs/screenshots/user-board.png)
 
 ## Quick start
 
@@ -40,6 +57,59 @@ free CPU/GPU slot, and load it.
 > Rootless Docker is required by default. Runtime APIs are private to the service;
 > clients use the authenticated HTTPS gateway. See the installation guide for
 > migration of existing containers and explicit rootful risk acceptance.
+
+## Access a model from Python
+
+Load a model in the dashboard, then create a key in **Key Management → Add key**
+with permission for that model and device. Copy the one-time secret; use this
+bearer key—not your Linux password—in clients. Ordinary users need an admin grant.
+
+Install `httpx` in your client environment (`python -m pip install httpx`; it is
+already included in the Llameros environment). Set `LLAMEROS_API_KEY` securely,
+for example with a hidden Bash prompt so the key is not saved in shell history:
+
+```bash
+read -rsp 'Llameros API key: ' LLAMEROS_API_KEY; echo
+export LLAMEROS_API_KEY
+export LLAMEROS_CA_CERT="/absolute/path/to/verified-llameros-certificate.pem"
+```
+
+Point `LLAMEROS_CA_CERT` to your verified server certificate or issuing CA bundle,
+then run this Python example. Change the model tag and target to a loaded instance
+allowed by your key; use the HTTPS address shown under **Access model** if remote.
+
+```python
+import os
+import ssl
+
+import httpx
+
+tls = ssl.create_default_context(cafile=os.environ["LLAMEROS_CA_CERT"])
+with httpx.Client(
+    base_url="https://127.0.0.1:8443/inference/",
+    verify=tls,
+    timeout=180.0,
+    headers={
+        "Authorization": f"Bearer {os.environ['LLAMEROS_API_KEY']}",
+        "X-Llameros-Target": "cpu",
+    },
+) as client:
+    response = client.post(
+        "api/chat",
+        json={
+            "model": "llama3.2:3b",
+            "messages": [{"role": "user", "content": "Say hello in one sentence."}],
+            "stream": False,
+            "options": {"num_predict": 256},
+        },
+    )
+    response.raise_for_status()
+    print(response.json()["message"]["content"])
+```
+
+Never disable TLS verification, commit keys, or paste them into support reports.
+Unset `LLAMEROS_API_KEY` after use and revoke unwanted keys in the dashboard.
+See [API compatibility](api-compatibility.md) for other endpoints and streaming.
 
 ## Documentation
 
