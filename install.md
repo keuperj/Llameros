@@ -93,7 +93,7 @@ are not supported by this streaming download path.
    existing memory heuristic. Selecting a tag checks its exact registry size
    before enabling download; execution checks memory again. No check guarantees
    performance, GPU driver support, or sufficient memory at a different context.
-4. Download a model, select a free device under **Start model on free hardware**,
+4. Download a model, select a device with capacity under **Start model on available hardware**,
    and load/start it. Another model can stay loaded on each other supported slot;
    the same model can run on multiple devices. GPU containers start on demand.
    **■ Stop model** unloads only the selected model; **Stop Ollama** stops all

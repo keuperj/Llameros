@@ -378,7 +378,7 @@ async function refresh() {
     for (const slot of data.ollama.slots || []) {
       const card = element('div', '', 'metric');
       const names = (slot.loaded || []).map(model => model.name || model.model);
-      card.append(element('small', slot.label), element('strong', slot.error ? 'Unavailable' : names.length ? 'Model running' : 'Free'), element('small', slot.error || names.join(', ') || 'No model assigned by Llameros'));
+      card.append(element('small', slot.label), element('strong', slot.error ? 'Unavailable' : names.length ? `${names.length} model(s) loaded` : 'Free'), element('small', slot.error || names.join(', ') || 'No model assigned by Llameros'));
       if (slot.vendor !== 'cpu') card.append(element('small', `${bytes(slot.free)} free / ${bytes(slot.total)} VRAM · ${slot.utilization == null ? 'utilization unknown' : slot.utilization + '% utilization'}`));
       $('hardware').append(card);
     }

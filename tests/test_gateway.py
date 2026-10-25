@@ -441,3 +441,77 @@ def test_device_routing_uses_registered_slot_url(tmp_path, monkeypatch):
         assert calls == [("gemma3:270m", gpu)]
         assert requests[0].url.port == 12567
         assert "num_gpu" not in json.loads(requests[0].content)["options"]
+
+
+@pytest.mark.parametrize("path", ["/api/embed", "/v1/embeddings"])
+def test_embeddings_permissions_batched_translation_and_accounting(gateway, path):
+    app, client, docker, calls, response = gateway
+    created, _ = issue(client)
+    response.clear()
+    response.update(embeddings=[[1.0, 0.0], [0.0, 1.0]], prompt_eval_count=7)
+    headers = {"Authorization": "Bearer " + created["key"]}
+    result = client.post(
+        "/inference" + path, headers=headers, json={"model": "gemma3:270m", "input": ["one", "two"]}
+    )
+    assert result.status_code == 200, result.text
+    assert calls[-1].url.path == "/api/embed"
+    body = json.loads(calls[-1].content)
+    assert body["keep_alive"] == -1 and body["truncate"] is False
+    assert "stream" not in body and "num_predict" not in body["options"]
+    if path.startswith("/v1"):
+        assert result.json()["usage"] == {"prompt_tokens": 7, "total_tokens": 7}
+        assert result.json()["data"][1]["embedding"] == [0.0, 1.0]
+    else:
+        assert result.json()["embeddings"] == response["embeddings"]
+    usage = app.state.api_keys.list()[0]
+    assert usage["prompt_tokens"] == 7 and usage["output_tokens"] == 0
+    assert not app.state.jobs.scheduler.tickets
+    for fields, status in [({"model": "other:latest"}, 403), ({"target": "gpu-forbidden"}, 403)]:
+        result = client.post(
+            "/inference" + path,
+            headers=headers,
+            json={"model": "gemma3:270m", "input": "one", **fields},
+        )
+        assert result.status_code == status
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"input": []},
+        {"input": ["ok", 2]},
+        {"input": ["ok"] * 65},
+        {"input": "x" * 32001},
+        {"input": ""},
+        {"dimensions": True},
+        {"dimensions": 0},
+        {"truncate": "yes"},
+        {"stream": True},
+        {"options": {"num_gpu": 9}},
+        {"encoding_format": "base64"},
+    ],
+)
+def test_embedding_validation(gateway, fields):
+    _, client, _, calls, _ = gateway
+    created, _ = issue(client)
+    result = client.post(
+        "/inference/v1/embeddings",
+        headers={"Authorization": "Bearer " + created["key"]},
+        json={"model": "gemma3:270m", "input": "ok", **fields},
+    )
+    assert result.status_code == 400
+    assert not calls
+
+
+def test_malformed_embedding_response_releases_device(gateway):
+    app, client, _, _, response = gateway
+    created, _ = issue(client)
+    response.clear()
+    response.update(embeddings=[[True]])
+    result = client.post(
+        "/inference/api/embed",
+        headers={"Authorization": "Bearer " + created["key"]},
+        json={"model": "gemma3:270m", "input": "ok"},
+    )
+    assert result.status_code == 502
+    assert not app.state.jobs.scheduler.tickets

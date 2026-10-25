@@ -27,6 +27,7 @@ class Settings:
     gpu: str = "cpu"
     allow_rootful_docker: bool = True
     context_length: int = 4096
+    max_loaded_models: int = 2
 
     def __post_init__(self):
         object.__setattr__(self, "state_dir", Path(self.state_dir).expanduser().absolute())
@@ -42,6 +43,8 @@ class Settings:
                 raise ValueError(f"{name} must be positive")
         if bool(self.cert_file) != bool(self.key_file):
             raise ValueError("cert_file and key_file must be supplied together")
+        if type(self.max_loaded_models) is not int or not 1 <= self.max_loaded_models <= 16:
+            raise ValueError("max_loaded_models must be 1–16")
 
     @property
     def container_name(self) -> str:

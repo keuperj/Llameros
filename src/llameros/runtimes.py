@@ -95,7 +95,7 @@ class Runtimes:
                     slot.update(
                         running=state["running"],
                         loaded=state.get("loaded", []),
-                        available=not state.get("loaded"),
+                        available=len(state.get("loaded", [])) < self.settings.max_loaded_models,
                     )
                     if client:
                         slot["base_url"] = client.settings.ollama_url
@@ -168,22 +168,43 @@ class Runtimes:
             )
         client = self.client(target_id, register=True)
         client.start(progress=progress)
-        # Recheck after startup: external API requests may have occupied the slot.
-        if client.api("GET", "/api/ps").get("models"):
-            raise ValueError("Hardware slot already has a loaded model; unload it first")
+        # Recheck capacity after startup; free-memory estimates include resident models.
+        previous = client.api("GET", "/api/ps").get("models", [])
+        normalized = name if ":" in name else name + ":latest"
+        if any(model.get("name", model.get("model")) == normalized for model in previous):
+            raise ValueError("Model is already loaded on this hardware")
+        if len(previous) >= self.settings.max_loaded_models:
+            raise ValueError("Select hardware with a free resident-model slot")
+        info = client.api("POST", "/api/show", {"model": name})
+        embedding = "embedding" in info.get("capabilities", [])
         options = {"num_ctx": context}
         if target_id == "cpu":
             options.update(num_gpu=0)
         result = client.api(
             "POST",
-            "/api/generate",
-            {"model": name, "stream": False, "keep_alive": -1, "options": options},
+            "/api/embed" if embedding else "/api/generate",
+            {
+                "model": name,
+                **({"input": "warmup", "truncate": False} if embedding else {"stream": False}),
+                "keep_alive": -1,
+                "options": options,
+            },
         )
         loaded = client.api("GET", "/api/ps").get("models", [])
-        if target_id != "cpu" and not any(model.get("size_vram", 0) > 0 for model in loaded):
+        resident = next(
+            (model for model in loaded if model.get("name", model.get("model")) == normalized), None
+        )
+        missing = {model.get("name", model.get("model")) for model in previous} - {
+            model.get("name", model.get("model")) for model in loaded
+        }
+        if (
+            resident is None
+            or missing
+            or (target_id != "cpu" and resident.get("size_vram", 0) <= 0)
+        ):
             client.api("POST", "/api/generate", {"model": name, "keep_alive": 0})
             raise DockerError(
-                "GPU runtime fell back to CPU; model unloaded rather than mislabelled"
+                "Model residency could not be preserved or GPU fell back to CPU; new model unloaded"
             )
         return result
 

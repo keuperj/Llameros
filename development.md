@@ -43,9 +43,13 @@ not establish real driver compatibility or visual browser correctness.
 - `src/llameros/static/`: plain HTML/CSS/JavaScript; no frontend build step.
 - `tests/`: Python integration/unit tests and Node.js frontend tests.
 
-Dashboard lifecycle and inference jobs share a single-worker lock. Models can
-remain loaded on several slots, but dashboard and gateway jobs are serialized. Direct Ollama
-clients bypass that lock, fit guards, and token accounting. Preserve ownership
+Dashboard jobs retain a single worker. Gateway requests use bounded FIFO queues
+per hardware target (one executing request plus at most 16 queued, 120-second queue
+timeout). CPU and distinct GPUs can execute independently. Explicitly targeted
+load/unload jobs reserve that device; ambiguous and global lifecycle jobs reserve
+all devices. Queued requests prevent conflicting lifecycle admission. Retrieval
+happens outside the gateway and holds no execution permit. Direct Ollama clients
+bypass scheduling, fit guards, and token accounting. Preserve ownership
 and hardware-assignment checks when changing container lifecycle code.
 
 ## Security model and limitations

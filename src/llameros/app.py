@@ -23,6 +23,7 @@ from .docker import DockerError
 from .gateway import PREFIX, install_gateway
 from .hardware import assess_fit, snapshot
 from .runtimes import Runtimes
+from .scheduling import InferenceScheduler
 from .storage import Store
 
 log = logging.getLogger(__name__)
@@ -54,14 +55,17 @@ class Jobs:
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llameros-job")
         self.lock = threading.Lock()
         self.job = {"state": "idle"}
+        self.scheduler = InferenceScheduler(self)
 
     def status(self):
         with self.lock:
             return copy.deepcopy(self.job)
 
-    def submit(self, action, model, function):
+    def submit(self, action, model, function, targets=None):
         with self.lock:
-            if self.job["state"] == "running":
+            if (
+                self.job["state"] == "running" and self.job.get("action") != "api-inference"
+            ) or self.scheduler.conflicts(targets):
                 raise HTTPException(409, "Another lifecycle or inference job is running")
             self.job = {
                 "state": "running",
@@ -69,6 +73,7 @@ class Jobs:
                 "model": model,
                 "started": time.time(),
                 "progress": {"status": "Preparing operation"},
+                "targets": sorted(targets) if targets is not None else None,
             }
 
         def progress(value):
@@ -459,7 +464,12 @@ def create_app(
                 },
             )
 
-        return jobs.submit(action, name, work)
+        return jobs.submit(
+            action,
+            name,
+            work,
+            targets={body.target} if body.target and action in {"load", "unload"} else None,
+        )
 
     @app.post("/api/generate", dependencies=protected, status_code=202)
     def generate(body: GenerateRequest):
@@ -487,7 +497,7 @@ def create_app(
                     "prompt": body.prompt,
                     "stream": False,
                     "options": options,
-                    "keep_alive": "5m",
+                    "keep_alive": -1,
                 },
             )
             store.generation(result)

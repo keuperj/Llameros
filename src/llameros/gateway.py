@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math
 import time
 
 import httpx
@@ -108,78 +109,116 @@ def install_gateway(
             raise HTTPException(400, "Valid JSON object and official model name required") from None
         path = request.url.path.removeprefix(PREFIX)
         openai = path == "/v1/chat/completions"
-        allowed = {"model", "stream", "target"}
-        allowed |= (
-            {
-                "messages",
+        embedding = path in {"/api/embed", "/v1/embeddings"}
+        if embedding:
+            allowed = {"model", "input", "target", "keep_alive", "truncate", "dimensions"}
+            if path == "/v1/embeddings":
+                allowed |= {"encoding_format", "user"}
+                if body.get("encoding_format", "float") != "float":
+                    raise HTTPException(400, "Only float embedding encoding is supported")
+            if set(body) - allowed:
+                raise HTTPException(400, "Unsupported embedding request fields")
+            inputs = body.get("input")
+            texts = [inputs] if isinstance(inputs, str) else inputs
+            if (
+                not isinstance(texts, list)
+                or not 1 <= len(texts) <= 64
+                or any(
+                    not isinstance(text, str) or not text.strip() or len(text) > 32000
+                    for text in texts
+                )
+            ):
+                raise HTTPException(400, "Provide 1–64 non-empty texts of at most 32000 characters")
+            if type(body.get("truncate", False)) is not bool:
+                raise HTTPException(400, "truncate must be boolean")
+            if "dimensions" in body and (
+                type(body["dimensions"]) is not int or not 1 <= body["dimensions"] <= 65536
+            ):
+                raise HTTPException(400, "dimensions must be 1–65536")
+            body = {
+                name: value
+                for name, value in body.items()
+                if name in {"model", "input", "target", "truncate", "dimensions"}
+            }
+            body.setdefault("truncate", False)
+            stream, stream_options = False, {}
+        else:
+            allowed = {"model", "stream", "target"}
+            allowed |= (
+                {
+                    "messages",
+                    "temperature",
+                    "top_p",
+                    "max_tokens",
+                    "max_completion_tokens",
+                    "stop",
+                    "seed",
+                    "tools",
+                    "response_format",
+                    "stream_options",
+                    "n",
+                }
+                if openai
+                else {
+                    "prompt",
+                    "messages",
+                    "options",
+                    "format",
+                    "think",
+                    "tools",
+                    "system",
+                    "template",
+                    "raw",
+                    "suffix",
+                    "images",
+                    "keep_alive",
+                }
+            )
+            if set(body) - allowed:
+                raise HTTPException(400, "Unsupported request fields")
+            # Frameworks send residency hints; clients cannot unload or change residency.
+            body.pop("keep_alive", None)
+            stream = body.get("stream", not openai)
+            if not isinstance(stream, bool):
+                raise HTTPException(400, "stream must be boolean")
+            if openai or path == "/api/chat":
+                if not isinstance(body.get("messages"), list) or not body["messages"]:
+                    raise HTTPException(400, "Non-empty messages array required")
+            elif not isinstance(body.get("prompt"), str) or not body["prompt"]:
+                raise HTTPException(400, "Non-empty prompt required")
+            options = body.get("options", {})
+            if not isinstance(options, dict) or set(options) - {
+                "num_ctx",
+                "num_predict",
                 "temperature",
                 "top_p",
-                "max_tokens",
-                "max_completion_tokens",
-                "stop",
+                "top_k",
                 "seed",
-                "tools",
-                "response_format",
-                "stream_options",
-                "n",
-            }
-            if openai
-            else {
-                "prompt",
-                "messages",
-                "options",
-                "format",
-                "think",
-                "tools",
-                "system",
-                "template",
-                "raw",
-                "suffix",
-                "images",
-                "keep_alive",
-            }
-        )
-        if set(body) - allowed:
-            raise HTTPException(400, "Unsupported request fields")
-        # Frameworks send residency hints; clients cannot unload or change residency.
-        body.pop("keep_alive", None)
-        stream = body.get("stream", not openai)
-        if not isinstance(stream, bool):
-            raise HTTPException(400, "stream must be boolean")
-        if openai or path == "/api/chat":
-            if not isinstance(body.get("messages"), list) or not body["messages"]:
-                raise HTTPException(400, "Non-empty messages array required")
-        elif not isinstance(body.get("prompt"), str) or not body["prompt"]:
-            raise HTTPException(400, "Non-empty prompt required")
-        options = body.get("options", {})
-        if not isinstance(options, dict) or set(options) - {
-            "num_ctx",
-            "num_predict",
-            "temperature",
-            "top_p",
-            "top_k",
-            "seed",
-            "stop",
-            "repeat_penalty",
-        }:
-            raise HTTPException(400, "Unsupported runtime options")
-        limit = body.get(
-            "max_completion_tokens",
-            body.get("max_tokens", options.get("num_predict", min(256, key["max_tokens"] or 4096))),
-        )
-        if type(limit) is not int or not 1 <= limit <= 4096:
-            raise HTTPException(400, "Output token limit must be 1–4096")
-        if key["max_tokens"] is not None and limit > key["max_tokens"]:
-            raise HTTPException(403, "Requested output tokens exceed this key's per-request limit")
-        if "num_ctx" in options and options["num_ctx"] != cfg.context_length:
-            raise HTTPException(400, "Context length must match the loaded runtime")
-        if openai and body.get("n", 1) != 1:
-            raise HTTPException(400, "Only n=1 is supported")
-        if openai:
-            body.pop("n", None)
-        stream_options = body.get("stream_options", {})
-        if not isinstance(stream_options, dict) or set(stream_options) - {"include_usage"}:
-            raise HTTPException(400, "Unsupported stream options")
+                "stop",
+                "repeat_penalty",
+            }:
+                raise HTTPException(400, "Unsupported runtime options")
+            limit = body.get(
+                "max_completion_tokens",
+                body.get(
+                    "max_tokens", options.get("num_predict", min(256, key["max_tokens"] or 4096))
+                ),
+            )
+            if type(limit) is not int or not 1 <= limit <= 4096:
+                raise HTTPException(400, "Output token limit must be 1–4096")
+            if key["max_tokens"] is not None and limit > key["max_tokens"]:
+                raise HTTPException(
+                    403, "Requested output tokens exceed this key's per-request limit"
+                )
+            if "num_ctx" in options and options["num_ctx"] != cfg.context_length:
+                raise HTTPException(400, "Context length must match the loaded runtime")
+            if openai and body.get("n", 1) != 1:
+                raise HTTPException(400, "Only n=1 is supported")
+            if openai:
+                body.pop("n", None)
+            stream_options = body.get("stream_options", {})
+            if not isinstance(stream_options, dict) or set(stream_options) - {"include_usage"}:
+                raise HTTPException(400, "Unsupported stream options")
         target = body.pop("target", request.headers.get("x-llameros-target", ""))
         if not isinstance(target, str):
             raise HTTPException(400, "Invalid target")
@@ -187,16 +226,7 @@ def install_gateway(
             raise HTTPException(403, "Model not permitted")
         if target and not keys.allowed(key, model, target):
             raise HTTPException(403, "Hardware target not permitted")
-        with jobs.lock:
-            if jobs.job["state"] == "running":
-                raise HTTPException(409, "Another lifecycle or inference job is running")
-            jobs.job = {
-                "state": "running",
-                "action": "api-inference",
-                "model": model,
-                "started": time.time(),
-                "progress": {"status": "API inference"},
-            }
+        ticket = None
         start = time.monotonic()
         counts, outcome = {}, "failed"
         upstream = None
@@ -226,20 +256,42 @@ def install_gateway(
                             }
                         )
                 finally:
-                    with jobs.lock:
-                        jobs.job.update(
-                            state="completed" if outcome == "completed" else "failed",
-                            finished=time.time(),
-                            error=""
-                            if outcome == "completed"
-                            else "API request failed or interrupted",
-                        )
+                    if ticket is not None:
+                        jobs.scheduler.release(ticket, outcome)
+                    else:
+                        with jobs.lock:
+                            if jobs.job["state"] != "running":
+                                jobs.job.update(state="failed", error="API routing failed")
 
         def usage(event):
             if not isinstance(event, dict):
                 raise ValueError("Invalid upstream event")
             if event.get("error"):
                 raise ValueError("Upstream error")
+            if embedding:
+                vectors = event.get("embeddings")
+                if not isinstance(vectors, list) or len(vectors) != len(texts):
+                    raise ValueError("Invalid embedding batch")
+                dimension = None
+                for vector in vectors:
+                    if (
+                        not isinstance(vector, list)
+                        or not vector
+                        or len(vector) > 65536
+                        or any(
+                            type(value) not in (int, float) or not math.isfinite(value)
+                            for value in vector
+                        )
+                    ):
+                        raise ValueError("Invalid embedding vector")
+                    if dimension is not None and len(vector) != dimension:
+                        raise ValueError("Inconsistent embedding dimensions")
+                    dimension = len(vector)
+                value = event.get("prompt_eval_count")
+                if type(value) is int and value >= 0:
+                    counts["prompt"] = value
+                counts["output"] = 0
+                return
             values = event.get("usage") if openai else event if event.get("done") else None
             if values:
                 if not isinstance(values, dict):
@@ -265,19 +317,27 @@ def install_gateway(
                     409, "Choose exactly one permitted loaded model and hardware target"
                 )
             target = matches[0]["target"]
+            ticket = await jobs.scheduler.acquire(target, model, request)
+            # Keys may be revoked while waiting; do not start new upstream work afterward.
+            await run_in_threadpool(keys.authenticate, request.headers.get("authorization", ""))
             runtime = (
                 await run_in_threadpool(runtimes.model_client, model, target)
                 if runtimes
                 else docker
             )
             base_url = runtime.settings.ollama_url if runtimes else cfg.ollama_url
-            body.update(model=model, stream=stream)
+            if embedding:
+                body.update(model=model, keep_alive=-1, options={"num_ctx": cfg.context_length})
+                if target == "cpu":
+                    body["options"]["num_gpu"] = 0
+            else:
+                body.update(model=model, stream=stream)
             if openai:
                 body.pop("max_completion_tokens", None)
                 body["max_tokens"] = limit
                 if stream:
                     body["stream_options"] = {"include_usage": True}
-            else:
+            elif not embedding:
                 body["options"] = {**options, "num_ctx": cfg.context_length, "num_predict": limit}
                 if target == "cpu":
                     body["options"]["num_gpu"] = 0
@@ -289,13 +349,29 @@ def install_gateway(
                 follow_redirects=False,
                 timeout=httpx.Timeout(600, connect=5),
             )
-            upstream = await client.send(client.build_request("POST", path, json=body), stream=True)
+            upstream = await client.send(
+                client.build_request("POST", "/api/embed" if embedding else path, json=body),
+                stream=True,
+            )
             if upstream.status_code != 200:
                 raise HTTPException(502, "Model runtime rejected the request")
             if not stream:
                 data = json.loads(await upstream.aread())
                 usage(data)
                 outcome = "completed"
+                if embedding and path == "/v1/embeddings":
+                    data = {
+                        "object": "list",
+                        "model": model,
+                        "data": [
+                            {"object": "embedding", "index": index, "embedding": vector}
+                            for index, vector in enumerate(data["embeddings"])
+                        ],
+                        "usage": {
+                            "prompt_tokens": counts.get("prompt", 0),
+                            "total_tokens": counts.get("prompt", 0),
+                        },
+                    }
                 await finish()
                 return JSONResponse(data)
 
@@ -369,5 +445,11 @@ def install_gateway(
             await asyncio.shield(asyncio.create_task(finish()))
             raise
 
-    for path in ("/api/generate", "/api/chat", "/v1/chat/completions"):
+    for path in (
+        "/api/generate",
+        "/api/chat",
+        "/v1/chat/completions",
+        "/api/embed",
+        "/v1/embeddings",
+    ):
         app.add_api_route(PREFIX + path, infer, methods=["POST"])

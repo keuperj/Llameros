@@ -71,10 +71,20 @@ def pool(tmp_path, monkeypatch):
                 return {"models": self.state["loaded"]}
             if path == "/api/tags":
                 return {"models": self.status()["models"]}
+            if path == "/api/show":
+                return {
+                    "capabilities": ["embedding"]
+                    if body["model"].startswith("embed")
+                    else ["completion"]
+                }
             if body.get("keep_alive") == 0:
-                self.state["loaded"] = []
+                self.state["loaded"] = [
+                    model for model in self.state["loaded"] if model["name"] != body["model"]
+                ]
             elif not body.get("prompt"):
                 self.state["loaded"] = [
+                    model for model in self.state["loaded"] if model["name"] != body["model"]
+                ] + [
                     {
                         "name": body["model"],
                         "size_vram": 300_000_000 if self.target["vendor"] != "cpu" else 0,
@@ -104,11 +114,11 @@ def test_cpu_and_two_gpu_models_coexist_with_stable_ports_and_routing(pool):
         manager.load(name, 300_000_000, target, 2048, lambda value: None)
     state = manager.status()
     assert len(state["loaded"]) == 3
-    assert not any(slot["available"] for slot in state["slots"])
+    assert all(slot["available"] for slot in state["slots"] if slot["supported"])
     assert len({model["base_url"] for model in state["loaded"]}) == 3
     assert manager.model_client("two:latest", ids[1]).target["id"] == ids[1]
-    with pytest.raises(ValueError, match="free"):
-        manager.load("other:latest", 1, ids[1], 4096, lambda value: None)
+    with pytest.raises(ValueError, match="already loaded"):
+        manager.load("two:latest", 1, ids[1], 4096, lambda value: None)
     client = manager.model_client("two:latest", ids[1])
     client.api("POST", "/api/generate", {"model": "two:latest", "keep_alive": 0})
     assert next(slot for slot in manager.status()["slots"] if slot["id"] == ids[1])["available"]
@@ -116,7 +126,7 @@ def test_cpu_and_two_gpu_models_coexist_with_stable_ports_and_routing(pool):
     again = Runtimes(cfg, lambda: hw)
     assert again.records == manager.records
     cpu = states[cfg.container_name]
-    options = next(call[2] for call in cpu["calls"] if call[0] == "POST")["options"]
+    options = next(call[2] for call in cpu["calls"] if call[1] == "/api/generate")["options"]
     assert options["num_gpu"] == 0
     assert "num_thread" not in options
     manager.stop()
@@ -188,8 +198,9 @@ def test_cpu_load_ignores_utilization_without_reserving_all_threads(pool, cpu_pe
         if method == "POST" and path == "/api/generate"
     )
     assert options == {"num_ctx": 4096, "num_gpu": 0}
+    manager.load("two:latest", 300_000_000, "cpu", 4096, lambda value: None)
     with pytest.raises(ValueError, match="free"):
-        manager.load("two:latest", 300_000_000, "cpu", 4096, lambda value: None)
+        manager.load("three:latest", 300_000_000, "cpu", 4096, lambda value: None)
 
 
 def test_app_routes_inference_and_stop_to_selected_slot(pool):
@@ -270,3 +281,21 @@ def test_hardware_detection_keeps_uuid_and_lists_other_vendors(monkeypatch):
     detected = gpu_info()
     assert detected[0]["id"] == "GPU-abcd-1234"
     assert detected[0]["free"] == 4 * GIB
+
+
+def test_two_models_share_gpu_embedding_warmup_and_individual_stop(pool):
+    manager, states, cfg, hw = pool
+    target = next(key for key, value in manager.targets.items() if value.get("vendor") == "nvidia")
+    manager.load("one:latest", 300_000_000, target, 4096, lambda value: None)
+    manager.load("embed:latest", 300_000_000, target, 4096, lambda value: None)
+    loaded = manager.status()["loaded"]
+    assert {model["name"] for model in loaded} == {"one:latest", "embed:latest"}
+    client = manager.model_client("embed:latest", target)
+    assert any(path == "/api/embed" for _, path, _ in client.state["calls"])
+    with pytest.raises(ValueError, match="free"):
+        manager.load("three:latest", 1, target, 4096, lambda value: None)
+    client.api("POST", "/api/generate", {"model": "embed:latest", "keep_alive": 0})
+    assert [model["name"] for model in manager.status()["loaded"]] == ["one:latest"]
+    hw["gpus"][0]["free"] = 1
+    with pytest.raises(ValueError, match="VRAM"):
+        manager.load("three:latest", 300_000_000, target, 4096, lambda value: None)

@@ -213,7 +213,7 @@ class Docker:
             "-e",
             "OLLAMA_NOPRUNE=1",
             "-e",
-            "OLLAMA_MAX_LOADED_MODELS=1",
+            f"OLLAMA_MAX_LOADED_MODELS={cfg.max_loaded_models}",
             "-e",
             "OLLAMA_NUM_PARALLEL=1",
             "-e",

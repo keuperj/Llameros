@@ -17,6 +17,8 @@ retention_days = 30
 ollama_port = 11435
 ollama_image = "ollama/ollama:latest"
 context_length = 4096
+# Resident models per device (1–16), subject to available RAM/VRAM.
+max_loaded_models = 2
 
 # cpu, nvidia, or amd: catalogue-fit estimate preference. Runtime placement is
 # selected per model in the GUI; supported GPUs are isolated into separate slots.
