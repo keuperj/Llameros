@@ -243,7 +243,8 @@ function updateControls() {
   document.querySelectorAll('#installed button[data-action]').forEach(button => {
     const controls = JobProgress.modelControls(runtimeState, busy, button.dataset.model);
     button.disabled = !controls[button.dataset.action];
-    button.title = button.dataset.action === 'load' && !controls.load ? 'Select a free hardware slot, or stop a running model first.' : '';
+    button.title = button.dataset.action === 'load' && !controls.load
+      ? (state.active.includes(button.dataset.model) ? 'This model is already running. Stop it before starting it again.' : 'Select a free hardware slot, or stop a running model first.') : '';
   });
   document.querySelectorAll('#runtime-models button[data-stop]').forEach(button => { button.disabled = busy; });
 }

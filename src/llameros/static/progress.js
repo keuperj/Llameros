@@ -27,7 +27,7 @@ const JobProgress = {
   modelControls(runtime, busy, model) {
     const active = this.controls(runtime, busy).active;
     const ready = !busy && !!runtime && runtime.running === true && !runtime.error;
-    return {load: ready && (runtime.slots ? runtime.slots.some(slot => slot.available) : active.length === 0), unload: ready && active.includes(model)};
+    return {load: ready && !active.includes(model) && (runtime.slots ? runtime.slots.some(slot => slot.available) : active.length === 0), unload: ready && active.includes(model)};
   },
   /**
    * Describe unknown, stopped, empty-running, and model-resident states distinctly.

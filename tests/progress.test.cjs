@@ -42,8 +42,21 @@ test('multi-slot controls permit another model only when a hardware slot is free
   const runtime = {running: true, loaded: [{name: 'one:latest', target: 'cpu'}], slots: [{id: 'cpu', available: false}, {id: 'gpu-one', available: true}]};
   assert.equal(Progress.modelControls(runtime, false, 'two:latest').load, true);
   assert.equal(Progress.modelControls(runtime, false, 'one:latest').unload, true);
+  assert.equal(Progress.modelControls(runtime, false, 'one:latest').load, false);
   runtime.slots[1].available = false;
   assert.equal(Progress.modelControls(runtime, false, 'two:latest').load, false);
+});
+
+test('loaded model start stays disabled across CPU/GPU placements and resets after unload', () => {
+  for (const target of ['cpu', 'gpu-one']) {
+    const runtime = {running: true, loaded: [{model: 'one:latest', target}],
+      slots: [{id: 'cpu', available: true}, {id: 'gpu-one', available: true}]};
+    assert.deepEqual(Progress.modelControls(runtime, false, 'one:latest'), {load: false, unload: true});
+    assert.equal(Progress.modelControls(runtime, false, 'two:latest').load, true);
+    assert.deepEqual(Progress.modelControls(runtime, true, 'one:latest'), {load: false, unload: false});
+    runtime.loaded = [];
+    assert.deepEqual(Progress.modelControls(runtime, false, 'one:latest'), {load: true, unload: false});
+  }
 });
 
 test('runtime prominently distinguishes off, running, and named active models without guessing on errors', () => {
