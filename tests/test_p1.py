@@ -46,51 +46,27 @@ def test_missing_policy_and_host_disable_revoke_credentials(multiuser):
     assert user.get("/api/security-events").status_code == 401
 
 
-def test_user_grants_restrict_existing_and_new_keys(multiuser):
+@pytest.mark.parametrize("days", [None, 7, 30, 365])
+def test_users_create_generic_keys_without_grants(multiuser, days):
     app, admin, user = multiuser
-    assert user.post("/api/keys", json={"name": "unrestricted"}).status_code == 403
-    for fields in (
-        {"models": ["*"]},
-        {"expires_days": None},
-        {"expires_days": 31},
-    ):
-        payload = {
-            "name": "bad",
-            "models": ["gemma3:270m"],
-            "targets": ["cpu"],
-            "expires_days": 7,
-            **fields,
-        }
-        assert user.post("/api/keys", json=payload).status_code == 403
-    key = issue(user)
-    assert app.state.api_keys.authenticate("Bearer " + key["key"])
-    assert (
-        admin.post(
-            "/api/users/alice", json={"role": "user", "blocked": False, "models": []}
-        ).status_code
-        == 200
-    )
-    with pytest.raises(HTTPException):
-        app.state.api_keys.authenticate("Bearer " + key["key"])
-    events = admin.get("/api/security-events").json()["events"]
-    assert any(e["action"] == "key.create" and e["actor"] == "alice" for e in events)
-    assert key["key"] not in json.dumps(events)
-
-
-def test_user_key_grant_errors_are_actionable(multiuser):
-    app, admin, user = multiuser
-    payload = {"name": "test", "models": ["gemma3:270m"], "expires_days": 7}
-    assert (
-        "Select a model granted"
-        in user.post("/api/keys", json={**payload, "models": ["*"]}).json()["detail"]
-    )
-    assert (
-        "within 30 days"
-        in user.post("/api/keys", json={**payload, "expires_days": None}).json()["detail"]
-    )
     with app.state.store.connect() as db:
-        db.execute("UPDATE users SET grant_expires=0 WHERE username='alice'")
-    assert "missing or expired" in user.post("/api/keys", json=payload).json()["detail"]
+        db.execute(
+            "UPDATE users SET models='[]', targets='[]', grant_expires=0 WHERE username='alice'"
+        )
+    response = user.post("/api/keys", json={"name": "generic", "expires_days": days})
+    assert response.status_code == 201
+    created = response.json()
+    keys = app.state.api_keys
+    key = keys.authenticate("Bearer " + created["key"])
+    assert key["models"] == ["*"]
+    for model in ("gemma3:270m", "future-model:latest"):
+        for target in ("cpu", "gpu-0123456789abcdef"):
+            assert keys.allowed(key, model, target)
+    events = admin.get("/api/security-events").json()["events"]
+    assert created["key"] not in json.dumps(events)
+    keys.revoke(created["id"])
+    with pytest.raises(HTTPException):
+        keys.authenticate("Bearer " + created["key"])
 
 
 def test_keys_ignore_legacy_hardware_scopes_but_keep_model_grants(multiuser):
@@ -173,13 +149,12 @@ def test_account_checker_rejects_missing_and_nologin(monkeypatch):
     assert not account_available("alice")
 
 
-def test_expired_grant_denied(multiuser):
+def test_legacy_grant_expiry_does_not_disable_key(multiuser):
     app, _, user = multiuser
     key = issue(user)
     with app.state.store.connect() as db:
         db.execute("UPDATE users SET grant_expires=? WHERE username='alice'", (time.time() - 1,))
-    with pytest.raises(HTTPException):
-        app.state.api_keys.authenticate("Bearer " + key["key"])
+    assert app.state.api_keys.authenticate("Bearer " + key["key"])
 
 
 def test_offboarding_after_queue_admission_prevents_upstream(gateway, monkeypatch):

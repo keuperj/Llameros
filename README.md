@@ -80,8 +80,14 @@ Point `LLAMEROS_CA_CERT` to your verified server certificate or issuing CA bundl
 then run this Python example. Change the model tag and target to a loaded instance
 allowed by your key; use the HTTPS address shown under **Access model** if remote.
 
+All active users can create generic **All models** keys by default, without an
+administrator-issued model grant. These keys cover current and future models;
+users can also choose a model-specific key. Expiry is optional for all roles.
+Legacy account model grants and grant-expiry dates no longer restrict keys.
+Account blocking, key revocation, selected key expiry and usage quotas still apply.
+
 All API keys work on all hardware targets, including existing keys previously
-restricted to CPU or a GPU. Model permissions, user model grants, expiry,
+restricted to CPU or a GPU. Key model permissions, expiry,
 revocation and quotas still apply. Hardware selection is routing, not a key
 permission: specify `X-Llameros-Target` when a model is loaded on multiple targets.
 Legacy `targets` fields are accepted for compatibility but do not restrict access.

@@ -16,11 +16,7 @@ function configureBoard(data, asUser = data.role !== 'admin') {
   if (typeof TokenLimits !== 'undefined') TokenLimits.reset();
   dashboardIdentity = data; userBoard = asUser;
   document.getElementById('certificate-download').hidden = data.certificate_download_enabled !== true;
-  if (data.role === 'user') document.getElementById('api-key-days').value = '7';
-  for (const option of document.getElementById('api-key-days').options || []) {
-    option.disabled = data.role === 'user' && ['never', '365'].includes(option.value);
-    option.hidden = option.disabled;
-  }
+  document.getElementById('api-key-days').value = 'never';
   const switcher = document.getElementById('board-switch');
   switcher.hidden = data.role !== 'admin';
   switcher.textContent = asUser ? 'Switch to admin board' : 'Switch to user board';
@@ -80,15 +76,13 @@ async function refreshUsers() {
     const save = element('button', 'Save'); save.type = 'button';
     save.setAttribute('aria-label', `Save access for ${user.username}`);
     if (user.username === dashboardIdentity.username) { role.disabled = true; blocked.disabled = true; save.disabled = true; }
-    const models = document.createElement('input'); models.value = (user.models || []).join(', '); models.setAttribute('aria-label', `Allowed models for ${user.username}`);
-    const days = document.createElement('input'); days.type = 'number'; days.min = '1'; days.max = '90'; days.value = ''; days.placeholder = 'Renew 1–90 days'; days.setAttribute('aria-label', `Renew grant for ${user.username}`);
-    for (const control of [role, blocked, save, models, days]) { const cell = element('td', ''); cell.append(control); row.append(cell); }
+    for (const control of [role, blocked, save]) { const cell = element('td', ''); cell.append(control); row.append(cell); }
     if (typeof TokenLimits !== 'undefined') {
       const cell = element('td', TokenLimits.summary(user.limits));
       cell.append(TokenLimits.button('user', user.username, user.username)); row.append(cell);
     }
     save.addEventListener('click', safe(async () => {
-      await api('/api/users/' + encodeURIComponent(user.username), {role: role.value, blocked: blocked.checked, models: models.value.split(',').map(v => v.trim()).filter(Boolean), ...(days.value ? {grant_days: Number(days.value)} : {})});
+      await api('/api/users/' + encodeURIComponent(user.username), {role: role.value, blocked: blocked.checked});
       notice(`Updated ${user.username}. Blocking revokes all keys; unblocking does not restore them.`);
       await refreshUsers(); await refreshKeys();
     })); panel.append(row);

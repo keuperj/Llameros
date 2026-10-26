@@ -120,26 +120,6 @@ class ApiKeys:
             if not account or account["blocked"]:
                 raise HTTPException(403, "User is blocked")
             expires = now + body.expires_days * 86400 if body.expires_days is not None else 0
-            if account["role"] != "admin":
-                if account["grant_expires"] <= now:
-                    raise HTTPException(
-                        403,
-                        "Your model access grant is missing or expired. Ask an administrator to renew it in User Access.",
-                    )
-                if not set(body.models) <= set(json.loads(account["models"])):
-                    raise HTTPException(
-                        403,
-                        "Select a model granted to your account. All models is available only to administrators.",
-                    )
-                if not expires or body.expires_days > 30:
-                    raise HTTPException(
-                        403, "User keys must expire within 30 days. Select 1 week or 1 month."
-                    )
-                if expires > account["grant_expires"]:
-                    raise HTTPException(
-                        403,
-                        "The requested key expiry exceeds your model access grant. Choose a shorter expiry or ask an administrator to renew the grant.",
-                    )
             db.execute(
                 "INSERT INTO api_keys(id,name,digest,models,targets,created,expires,max_tokens,user) VALUES(?,?,?,?,?,?,?,?,?)",
                 (
@@ -181,16 +161,6 @@ class ApiKeys:
             raise HTTPException(
                 401, "Invalid, expired or revoked API key", headers={"WWW-Authenticate": "Bearer"}
             )
-        account = self.users.get(row["user"])
-        models = json.loads(row["models"])
-        if account["role"] != "admin":
-            if (
-                not row["expires"]
-                or row["expires"] - row["created"] > 30 * 86400
-                or account["grant_expires"] <= time.time()
-                or not set(models) <= set(account["models"])
-            ):
-                raise HTTPException(401, "Key no longer covered by user entitlement")
         return {
             **dict(row),
             "models": json.loads(row["models"]),

@@ -164,10 +164,9 @@ function renderAccess(allowManagement = true) {
  */
 function renderKeyModels(models) {
   const select = $('api-key-models'), previous = select.value || '*';
-  const restricted = typeof dashboardIdentity !== 'undefined' && dashboardIdentity?.role === 'user';
   const names = [...new Set(models.map(model => model.name || model.model))].sort();
   if (previous !== '*' && !names.includes(previous)) names.push(previous);
-  const values = restricted ? names : ['*', ...names];
+  const values = ['*', ...names];
   if (JSON.stringify([...select.options].map(option => option.value)) === JSON.stringify(values)) return;
   select.replaceChildren();
   for (const value of values) {
