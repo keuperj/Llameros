@@ -750,23 +750,36 @@ async function refresh() {
   } finally { if (epoch === sessionEpoch) refreshing = false; }
 }
 /**
- * Draw CPU/RAM and busiest-GPU history; unavailable metrics leave gaps.
+ * Draw CPU/RAM and individual GPU histories; unavailable metrics leave gaps.
  *
  * @param {Array<Object>} samples - Timestamped host samples; missing values are tolerated.
  */
 function draw(samples) {
   const canvas = $('chart'), ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+  const gpuId = (gpu, index) => String(gpu.id ?? `index-${index}`);
+  const devices = new Map();
+  for (const sample of samples) (sample.hardware?.gpus || []).forEach((gpu, index) => {
+    const id = gpuId(gpu, index);
+    if (!devices.has(id)) devices.set(id, `GPU ${devices.size + 1}${gpu.name ? ' · ' + gpu.name : ''}`);
+  });
+  const series = [['cpu_percent', '#bcf48c', 'CPU'], ['memory_percent', '#ffbc86', 'RAM'],
+    ...[...devices].map(([id, label], index) => [id, index === 0 ? '#83bfff' : `hsl(${(210 + index * 137.5) % 360}, 75%, 70%)`, label])];
+  const legend = $('chart-legend');
+  legend.replaceChildren();
+  for (const [, color, label] of series) {
+    const item = element('span', '● ' + label); item.style.color = color; legend.append(item);
+  }
   ctx.clearRect(0, 0, w, h); ctx.strokeStyle = '#303e35'; ctx.fillStyle = '#a1b2a6'; ctx.font = '12px system-ui';
   for (const pct of [0, 50, 100]) { const y = 15 + (100 - pct) / 100 * (h - 35); ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(w, y); ctx.stroke(); ctx.fillText(pct + '%', 0, y + 4); }
   if (!samples.length) { ctx.fillText('Resource history appears after the first sample.', 60, 90); return; }
-  for (const [key, color] of [['cpu_percent', '#bcf48c'], ['memory_percent', '#ffbc86'], ['gpu', '#83bfff']]) {
+  for (const [seriesIndex, [key, color]] of series.entries()) {
     ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2;
     let connected = false;
     samples.forEach((sample, i) => {
       const hardware = sample.hardware || {};
-      const values = (hardware.gpus || []).map(gpu => gpu.utilization).filter(value => Number.isFinite(value) && value >= 0 && value <= 100);
-      const value = key === 'gpu' ? (values.length ? Math.max(...values) : null) : hardware[key];
-      if (!Number.isFinite(value)) { connected = false; return; }
+      const value = seriesIndex < 2 ? hardware[key]
+        : (hardware.gpus || []).find((gpu, index) => gpuId(gpu, index) === key)?.utilization;
+      if (!Number.isFinite(value) || value < 0 || value > 100) { connected = false; return; }
       const x = 42 + i / Math.max(1, samples.length - 1) * (w - 45), y = 15 + (100 - value) / 100 * (h - 35);
       if (connected) ctx.lineTo(x, y); else ctx.moveTo(x, y);
       connected = true;

@@ -602,6 +602,7 @@ def install_gateway(
         ticket = None
         start = time.monotonic()
         counts, outcome = {}, "failed"
+        eval_duration = 0
         upstream = None
         client = None
         finished = False
@@ -635,6 +636,7 @@ def install_gateway(
                                 "model": model,
                                 "prompt_eval_count": counts.get("prompt", 0),
                                 "eval_count": counts.get("output", 0),
+                                "eval_duration": eval_duration,
                                 "total_duration": int((time.monotonic() - start) * 1e9),
                             }
                         )
@@ -648,10 +650,14 @@ def install_gateway(
 
         def usage(event):
             """Validate response/embedding structure and collect only nonnegative known token counts."""
+            nonlocal eval_duration
             if not isinstance(event, dict):
                 raise ValueError("Invalid upstream event")
             if event.get("error"):
                 raise ValueError("Upstream error")
+            duration = event.get("eval_duration")
+            if type(duration) is int and duration > 0:
+                eval_duration = duration
             if embedding:
                 vectors = event.get("embeddings")
                 if not isinstance(vectors, list) or len(vectors) != len(texts):

@@ -185,7 +185,9 @@ def test_usage_and_running_model_redaction(multiuser):
         "memory_percent",
         "gpus",
     }
-    assert result.json()["history"]["samples"][0]["hardware"]["gpus"] == [{"utilization": 73}]
+    gpus = result.json()["history"]["samples"][0]["hardware"]["gpus"]
+    assert gpus[0]["utilization"] == 73
+    assert len(gpus[0]["id"]) == 16
     assert "PRIVATE_GPU_ID" not in result.text
     for secret in (
         "SECRET_RUNTIME",

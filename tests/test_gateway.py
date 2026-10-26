@@ -81,6 +81,35 @@ def test_keys_default_to_all_models_without_runtime(gateway):
     assert KeyRequest(name="all local models").models == ["*"]
 
 
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("duration", [None, 1_500_000_000])
+def test_gateway_records_nonzero_throughput(gateway, stream, duration):
+    app, client, _, _, response = gateway
+    if duration is not None:
+        response["eval_duration"] = duration
+    created, _ = issue(client)
+    assert post(client, created["key"], stream=stream).status_code == 200
+    model = app.state.store.history()["models"][0]
+    assert model["tokens_per_second"] > 0
+    if duration is not None:
+        assert model["tokens_per_second"] == 2
+
+
+def test_history_throughput_mixes_recorded_and_legacy_timing(tmp_path):
+    store = Store(tmp_path / "history.sqlite")
+    for duration in (0, 1_000_000_000):
+        store.generation(
+            {
+                "model": "test",
+                "eval_count": 10,
+                "eval_duration": duration,
+                "total_duration": 2_000_000_000,
+            }
+        )
+    store.generation({"model": "test", "eval_count": 0, "total_duration": 9_000_000_000})
+    assert store.history()["models"][0]["tokens_per_second"] == pytest.approx(20 / 3)
+
+
 def test_key_token_limits_apply_to_all_protocols(gateway):
     """Verify key token limits apply to all protocols."""
     app, client, docker, calls, response = gateway

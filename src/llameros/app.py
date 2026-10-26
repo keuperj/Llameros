@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import hashlib
 import logging
 import secrets
 import threading
@@ -437,8 +438,15 @@ def create_app(
                         "timestamp": sample["timestamp"],
                         "hardware": {
                             "gpus": [
-                                {"utilization": gpu.get("utilization")}
-                                for gpu in sample.get("hardware", {}).get("gpus", [])
+                                {
+                                    "id": hashlib.sha256(
+                                        str(gpu.get("id", index)).encode()
+                                    ).hexdigest()[:16],
+                                    "utilization": gpu.get("utilization"),
+                                }
+                                for index, gpu in enumerate(
+                                    sample.get("hardware", {}).get("gpus", [])
+                                )
                             ],
                             **{
                                 field: sample.get("hardware", {}).get(field, 0)

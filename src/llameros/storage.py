@@ -178,7 +178,9 @@ class Store:
                 for row in db.execute("""
                 SELECT model, COUNT(*) AS requests, SUM(prompt_tokens) AS prompt_tokens,
                        SUM(output_tokens) AS output_tokens, SUM(duration_ns)/1e9 AS seconds,
-                       CASE WHEN SUM(eval_ns)>0 THEN SUM(output_tokens)*1e9/SUM(eval_ns) ELSE 0 END AS tokens_per_second
+                       CASE WHEN SUM(CASE WHEN output_tokens>0 THEN CASE WHEN eval_ns>0 THEN eval_ns ELSE duration_ns END ELSE 0 END)>0
+                            THEN SUM(output_tokens)*1e9/SUM(CASE WHEN output_tokens>0 THEN CASE WHEN eval_ns>0 THEN eval_ns ELSE duration_ns END ELSE 0 END)
+                            ELSE 0 END AS tokens_per_second
                 FROM generations GROUP BY model ORDER BY requests DESC
             """)
             ]
