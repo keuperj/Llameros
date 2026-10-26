@@ -70,6 +70,28 @@ test('user refresh uses restricted data and shared access cards without manageme
   assert.equal(ui.run('accessConfig.secure_url'), 'https://host/inference');
 });
 
+test('model search placeholder remains until the first response and is replaced on completion', async () => {
+  const ui = board();
+  ui.run('configureBoard({username: "alice", role: "user"})');
+  assert.equal(ui.get('runtime-models').children[0].textContent, 'Searching for models…');
+  assert.equal(ui.get('runtime-models').children[0].role, 'status');
+  ui.run('api = () => new Promise(resolve => { globalThis.finishSearch = resolve; })');
+  const pending = ui.run('refreshUserBoard()');
+  assert.equal(ui.get('runtime-models').children[0].textContent, 'Searching for models…');
+  ui.run('finishSearch({models: [], keys: [], history: {models: [], samples: []}})');
+  await pending;
+  assert.match(ui.get('runtime-models').children[0].textContent, /No models are currently running/);
+});
+
+test('failed initial model search replaces searching message without leaking error text', async () => {
+  const ui = board();
+  ui.run('configureBoard({username: "alice", role: "user"})');
+  ui.run('api = async () => { throw new Error("private error"); }');
+  await assert.rejects(ui.run('refreshUserBoard()'));
+  assert.match(ui.get('runtime-models').children[0].textContent, /Could not search for models/);
+  assert.doesNotMatch(ui.get('runtime-models').children[0].textContent, /private error/);
+});
+
 test('certificate download visibility follows server policy on either board', () => {
   const ui = board();
   for (const role of ['admin', 'user']) {

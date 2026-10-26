@@ -33,6 +33,11 @@ function configureBoard(data, asUser = data.role !== 'admin') {
   clearKeySecret();
   document.getElementById('api-key-user').value = data.username;
   document.getElementById('runtime-models').replaceChildren(); modelBoxes.clear();
+  if (asUser) {
+    const placeholder = element('p', 'Searching for models…', 'card');
+    placeholder.setAttribute('role', 'status');
+    document.getElementById('runtime-models').append(placeholder);
+  }
   renderKeyUsage([]); renderModelUsage([]);
   document.getElementById('api-keys').replaceChildren();
   document.getElementById('users').replaceChildren();
@@ -44,7 +49,18 @@ function configureBoard(data, asUser = data.role !== 'admin') {
  * @returns {Promise<void>} Ignores results after logout or a switch back to the admin board.
  */
 async function refreshUserBoard() {
-  const data = await api('/api/user/dashboard');
+  const identity = dashboardIdentity;
+  let data;
+  try {
+    data = await api('/api/user/dashboard');
+  } catch (error) {
+    if (!error.staleSession && csrf && userBoard && dashboardIdentity === identity && !runtimeState) {
+      const message = element('p', 'Could not search for models. Retrying automatically; you can also select Refresh.', 'card');
+      message.setAttribute('role', 'status');
+      document.getElementById('runtime-models').replaceChildren(message);
+    }
+    throw error;
+  }
   if (!csrf || !userBoard) return;
   runtimeState = {running: true, loaded: data.models};
   accessConfig = {secure_url: window.location.origin + '/inference'};
