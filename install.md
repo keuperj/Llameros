@@ -331,6 +331,23 @@ release checks, including image/host scanning and live isolation tests. Consult 
 network bindings or Docker permissions. Never include credentials or prompts in
 support reports.
 
+## Ollama image versions
+
+Llameros downloads the configured immutable image digest and adds a separate local
+alias, `llameros/ollama:sha256-<full-digest>`. Existing upstream tags such as
+`ollama/ollama:latest` are not overwritten. Containers still run by digest, not by
+the mutable alias. An alias pointing to a different image is rejected rather than overwritten.
+
+On startup, an older stopped container owned by this Llameros user and hardware
+target is preserved as `<container-name>-old-<unique-suffix>` before its replacement
+is created. The configured image is downloaded first; a failed download leaves the
+old container untouched. Running old containers must be stopped explicitly first.
+Unowned or differently assigned containers remain protected by ownership checks.
+Images, volumes and model files are not deleted. Archived containers retain their
+old mounts, while replacements use the currently selected storage. Do not run old
+and replacement containers simultaneously against shared model storage. Archives
+are retained for manual recovery and are not managed by the dashboard.
+
 ## Token usage limits
 
 **Configuration → User Access → Default user limits** sets the allowance for every

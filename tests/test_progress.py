@@ -23,7 +23,9 @@ def test_start_cached_image_skips_download_and_reports_stages(tmp_path):
     docker.command = lambda *args, **kwargs: calls.append(args) or ""
     docker.pull_image = lambda progress: pytest.fail("Cached image should not be downloaded")
     docker.start(stages.append)
-    assert calls[0][0] == "run"
+    assert calls[0][:2] == ("image", "ls")
+    assert calls[1] == ("image", "tag", docker.image, docker.local_image_name)
+    assert calls[2][0] == "run"
     assert any("Creating" in stage["status"] for stage in stages)
     assert stages[-1]["phase"] == "readiness"
 
@@ -39,7 +41,7 @@ def test_start_downloads_missing_image_before_creating_container(tmp_path):
     docker.pull_image = lambda progress: calls.append("pull")
     docker.command = lambda *args, **kwargs: calls.append(args[0]) or ""
     docker.start()
-    assert calls == ["pull", "run"]
+    assert calls == ["pull", "image", "image", "run"]
 
 
 @pytest.mark.parametrize("local", [True, False])

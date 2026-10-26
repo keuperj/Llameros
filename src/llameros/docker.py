@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 import httpx
@@ -61,6 +62,24 @@ class Docker:
                 ).splitlines()
             )
         return False
+
+    @property
+    def local_image_name(self) -> str:
+        """Give every pinned version its own local name, without changing upstream tags."""
+        return "llameros/ollama:sha256-" + self.image.rsplit("@sha256:", 1)[1]
+
+    def name_local_image(self):
+        """Add a version-specific alias; execution still uses the immutable digest."""
+        aliases = self.command("image", "ls", "--format", "{{.Repository}}:{{.Tag}}").splitlines()
+        if self.local_image_name in aliases:
+            expected = self.command("image", "inspect", "--format", "{{.Id}}", self.image)
+            actual = self.command("image", "inspect", "--format", "{{.Id}}", self.local_image_name)
+            if actual != expected:
+                raise DockerError(
+                    "Version-specific Llameros image name belongs to a different image; refusing to overwrite it"
+                )
+        else:
+            self.command("image", "tag", self.image, self.local_image_name)
 
     def pull_image(self, progress):
         """Read daemon JSON progress over the same local socket as Docker CLI."""
@@ -291,6 +310,26 @@ class Docker:
         progress({"status": "Checking local Docker daemon and container"})
         self.check_daemon()
         data = self.inspect()
+        obsolete = bool(data and data.get("Config", {}).get("Image") != self.image)
+        if obsolete:
+            if data["State"]["Running"]:
+                raise DockerError(
+                    "An older Ollama container is running. Stop it before starting the configured image; it will be preserved under an archive name."
+                )
+            # Pull first: a failed download must leave the old container in place.
+            if not self.image_available():
+                progress(
+                    {
+                        "status": "Downloading configured Ollama image; preserving old container",
+                        "phase": "docker-image",
+                    }
+                )
+                self.pull_image(progress)
+            self.name_local_image()
+            archived = self.name + "-old-" + uuid.uuid4().hex[:12]
+            self.command("rename", self.name, archived)
+            progress({"status": f"Preserved old Ollama container as {archived}"})
+            data = None
         if data:
             self.require_isolation(data)
         if data and self.storage.directory:
@@ -307,6 +346,8 @@ class Docker:
             if not self.image_available():
                 progress({"status": "Downloading Ollama Docker image", "phase": "docker-image"})
                 self.pull_image(progress)
+            if not obsolete:
+                self.name_local_image()
             progress({"status": "Creating and starting Ollama container", "phase": "container"})
             self.command(*self.run_args(), timeout=60)
         elif not data["State"]["Running"]:
