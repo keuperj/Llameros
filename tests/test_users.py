@@ -156,7 +156,13 @@ def test_usage_and_running_model_redaction(multiuser):
     for model, output in (("own-model", 3), ("private-model", 300), ("playground-model", 12)):
         app.state.store.generation({"model": model, "eval_count": output})
     app.state.store.event("PRIVATE_HOST_EVENT", detail="SECRET_HOST_PATH")
-    app.state.store.sample({"hardware": HARDWARE, "ollama": {"secret": "SECRET_RUNTIME"}}, 30)
+    app.state.store.sample(
+        {
+            "hardware": {**HARDWARE, "gpus": [{"id": "PRIVATE_GPU_ID", "utilization": 73}]},
+            "ollama": {"secret": "SECRET_RUNTIME"},
+        },
+        30,
+    )
     result = user.get("/api/user/dashboard")
     assert result.status_code == 200
     user_models = result.json()["history"]["models"]
@@ -177,7 +183,10 @@ def test_usage_and_running_model_redaction(multiuser):
     assert set(result.json()["history"]["samples"][0]["hardware"]) == {
         "cpu_percent",
         "memory_percent",
+        "gpus",
     }
+    assert result.json()["history"]["samples"][0]["hardware"]["gpus"] == [{"utilization": 73}]
+    assert "PRIVATE_GPU_ID" not in result.text
     for secret in (
         "SECRET_RUNTIME",
         "SECRET_HOST_PATH",

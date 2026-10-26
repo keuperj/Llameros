@@ -181,14 +181,16 @@ def test_permissions_routing_and_job_lock(gateway):
     created, _ = issue(client)
     key = created["key"]
     assert post(client, key, model="other:latest").status_code == 403
-    assert post(client, key, target="gpu-0123456789abcdef").status_code == 403
+    assert post(client, key, target="gpu-0123456789abcdef").status_code == 409
     assert post(client, key, model="https://evil.example/model").status_code == 400
     headers = {"Authorization": "Bearer " + key}
     assert (
         client.get("/inference/v1/models", headers=headers).json()["data"][0]["id"] == "gemma3:270m"
     )
     docker.loaded.append({"name": "gemma3:270m", "target": "gpu-0123456789abcdef"})
-    assert post(client, key).status_code == 200  # Restricted key only sees its CPU slot.
+    assert post(client, key).status_code == 409  # Both placements visible: select a target.
+    assert post(client, key, target="cpu").status_code == 200
+    assert post(client, key, target="gpu-0123456789abcdef").status_code == 200
     wildcard, _ = issue(client, models=["*"], targets=["*"])
     assert post(client, wildcard["key"]).status_code == 409
     assert post(client, wildcard["key"], target="cpu").status_code == 200
@@ -489,7 +491,7 @@ def test_embeddings_permissions_batched_translation_and_accounting(gateway, path
     usage = app.state.api_keys.list()[0]
     assert usage["prompt_tokens"] == 7 and usage["output_tokens"] == 0
     assert not app.state.jobs.scheduler.tickets
-    for fields, status in [({"model": "other:latest"}, 403), ({"target": "gpu-forbidden"}, 403)]:
+    for fields, status in [({"model": "other:latest"}, 403), ({"target": "gpu-unavailable"}, 409)]:
         result = client.post(
             "/inference" + path,
             headers=headers,

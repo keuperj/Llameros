@@ -51,7 +51,6 @@ def test_user_grants_restrict_existing_and_new_keys(multiuser):
     assert user.post("/api/keys", json={"name": "unrestricted"}).status_code == 403
     for fields in (
         {"models": ["*"]},
-        {"targets": ["*"]},
         {"expires_days": None},
         {"expires_days": 31},
     ):
@@ -76,6 +75,26 @@ def test_user_grants_restrict_existing_and_new_keys(multiuser):
     events = admin.get("/api/security-events").json()["events"]
     assert any(e["action"] == "key.create" and e["actor"] == "alice" for e in events)
     assert key["key"] not in json.dumps(events)
+
+
+def test_keys_ignore_legacy_hardware_scopes_but_keep_model_grants(multiuser):
+    app, admin, user = multiuser
+    response = user.post(
+        "/api/keys", json={"name": "all hardware", "models": ["gemma3:270m"], "expires_days": 7}
+    )
+    assert response.status_code == 201
+    created = response.json()
+    # Simulate a pre-upgrade CPU-only key and an empty account target grant.
+    with app.state.store.connect() as db:
+        db.execute("UPDATE api_keys SET targets=? WHERE id=?", ('["cpu"]', created["id"]))
+        db.execute("UPDATE users SET targets='[]' WHERE username='alice'")
+    keys = app.state.api_keys
+    key = keys.authenticate("Bearer " + created["key"])
+    assert key["targets"] == ["*"]
+    for target in ("cpu", "gpu-0123456789abcdef", "gpu-fedcba9876543210"):
+        assert keys.allowed(key, "gemma3:270m", target)
+        assert not keys.allowed(key, "ungranted:latest", target)
+    assert next(row for row in keys.list() if row["id"] == created["id"])["targets"] == ["*"]
     assert user.get("/api/security-events").status_code == 403
 
 

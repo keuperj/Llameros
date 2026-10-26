@@ -25,6 +25,7 @@ class KeyRequest(BaseModel):
     user: str | None = Field(default=None, min_length=1, max_length=256)
     models: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
     max_tokens: int | None = Field(default=None, ge=1, le=4096, strict=True)
+    # Accepted for older clients; hardware scopes are no longer enforced.
     targets: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
     expires_days: int | None = Field(default=None, ge=1, le=365, strict=True)
     limits: LimitConfig = Field(default_factory=LimitConfig)
@@ -125,11 +126,10 @@ class ApiKeys:
                     or body.expires_days > 30
                     or expires > account["grant_expires"]
                     or not set(body.models) <= set(json.loads(account["models"]))
-                    or not set(body.targets) <= set(json.loads(account["targets"]))
                 ):
                     raise HTTPException(
                         403,
-                        "Explicit model/target grant and key expiry within 30 days and grant lifetime required",
+                        "Explicit model grant and key expiry within 30 days and grant lifetime required",
                     )
             db.execute(
                 "INSERT INTO api_keys(id,name,digest,models,targets,created,expires,max_tokens,user) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -138,7 +138,7 @@ class ApiKeys:
                     body.name,
                     hashlib.sha256(token.encode()).hexdigest(),
                     json.dumps(body.models),
-                    json.dumps(body.targets),
+                    json.dumps(["*"]),  # Legacy targets payloads no longer restrict hardware.
                     now,
                     expires,
                     body.max_tokens,
@@ -173,27 +173,24 @@ class ApiKeys:
                 401, "Invalid, expired or revoked API key", headers={"WWW-Authenticate": "Bearer"}
             )
         account = self.users.get(row["user"])
-        models, targets = json.loads(row["models"]), json.loads(row["targets"])
+        models = json.loads(row["models"])
         if account["role"] != "admin":
             if (
                 not row["expires"]
                 or row["expires"] - row["created"] > 30 * 86400
                 or account["grant_expires"] <= time.time()
                 or not set(models) <= set(account["models"])
-                or not set(targets) <= set(account["targets"])
             ):
                 raise HTTPException(401, "Key no longer covered by user entitlement")
         return {
             **dict(row),
             "models": json.loads(row["models"]),
-            "targets": json.loads(row["targets"]),
+            "targets": ["*"],
         }
 
     def allowed(self, key, model, target):
-        """Return whether both the model and hardware target satisfy this key's permissions."""
-        return ("*" in key["models"] or normalize(model) in key["models"]) and (
-            "*" in key["targets"] or target in key["targets"]
-        )
+        """Authorize the model on any hardware; target is only a routing selection."""
+        return "*" in key["models"] or normalize(model) in key["models"]
 
     def revoke(self, identity, user=None, actor=None):
         """Disable a key, optionally constrained to its owner; raise HTTP 404 on mismatch."""
@@ -268,7 +265,7 @@ class ApiKeys:
                 "limits": self.limits.snapshot("key", row["id"]),
                 "user_limits": self.limits.snapshot("user", row["user"]),
                 "models": json.loads(row["models"]),
-                "targets": json.loads(row["targets"]),
+                "targets": ["*"],
             }
             for row in keys
         ]

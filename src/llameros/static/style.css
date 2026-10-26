@@ -49,3 +49,6 @@ footer a:focus-visible{outline:2px solid var(--green);outline-offset:5px;border-
 /* Allowance editor and readable quota columns on both boards. */
 .users-table{min-width:1400px}.users-table th:first-child,.users-table th:nth-child(2),.users-table th:nth-child(3),.users-table th:nth-child(4){width:auto}.users-table th:last-child{width:300px}.users-table td:last-child{white-space:normal;overflow-wrap:anywhere}.users-table td:last-child button{display:block}
 #limits-dialog{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:24px;width:min(640px,90vw);max-height:90vh;overflow:auto}#limits-dialog::backdrop{background:#0009}#limits-dialog form{display:grid;gap:12px}#limits-dialog p{white-space:normal;overflow-wrap:anywhere}.key-table td.key-action{white-space:normal;overflow:visible}.key-table td.key-action button{padding:4px 6px}
+
+#session-banner { padding: 12px 16px; border: 1px solid #ffbc86; border-radius: 8px; background: #33291f; color: #ffbc86; }
+.legend .gpu-legend { color: #83bfff; }

@@ -436,8 +436,14 @@ def create_app(
                     {
                         "timestamp": sample["timestamp"],
                         "hardware": {
-                            field: sample.get("hardware", {}).get(field, 0)
-                            for field in ("cpu_percent", "memory_percent")
+                            "gpus": [
+                                {"utilization": gpu.get("utilization")}
+                                for gpu in sample.get("hardware", {}).get("gpus", [])
+                            ],
+                            **{
+                                field: sample.get("hardware", {}).get(field, 0)
+                                for field in ("cpu_percent", "memory_percent")
+                            },
                         },
                     }
                     for sample in history["samples"]

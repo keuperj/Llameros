@@ -49,9 +49,9 @@ test('multi-slot controls permit another model only when a hardware slot is free
 test('runtime prominently distinguishes off, running, and named active models without guessing on errors', () => {
   assert.equal(Progress.runtimeState({running: false}).text, 'Ollama off');
   assert.equal(Progress.runtimeState({running: true, loaded: []}).text, 'Ollama running');
-  assert.deepEqual(Progress.runtimeState({running: true, loaded: [{name: 'gemma3:270m'}]}), {state: 'model', text: 'Model running — gemma3:270m'});
-  assert.match(Progress.runtimeState({running: true, loaded: [{model: 'fallback:latest'}]}).text, /fallback:latest/);
-  assert.match(Progress.runtimeState({running: true, loaded: [{name: 'one'}, {name: 'two'}]}).text, /one, two/);
+  assert.deepEqual(Progress.runtimeState({running: true, loaded: [{name: 'gemma3:270m'}]}), {state: 'model', text: 'Model running'});
+  assert.equal(Progress.runtimeState({running: true, loaded: [{model: 'fallback:latest'}]}).text, 'Model running');
+  assert.equal(Progress.runtimeState({running: true, loaded: [{name: 'one'}, {name: 'two'}]}).text, 'Model running');
   assert.equal(Progress.runtimeState({running: false, loaded: [{name: 'stale'}]}).state, 'off');
   for (const runtime of [null, {}, {running: false, error: 'Docker down'}]) assert.equal(Progress.runtimeState(runtime).state, 'unknown');
 });

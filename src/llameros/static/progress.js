@@ -39,7 +39,7 @@ const JobProgress = {
     if (!runtime || runtime.error || typeof runtime.running !== 'boolean') return {state: 'unknown', text: 'Ollama status unavailable'};
     if (!runtime.running) return {state: 'off', text: 'Ollama off'};
     const active = this.controls(runtime, false).active;
-    return active.length ? {state: 'model', text: 'Model running — ' + active.join(', ')}
+    return active.length ? {state: 'model', text: 'Model running'}
       : {state: 'running', text: 'Ollama running'};
   },
   /**

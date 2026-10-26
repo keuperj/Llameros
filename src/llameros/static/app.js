@@ -324,7 +324,11 @@ async function api(path, body, method) {
   const data = await response.json();
   if (epoch !== sessionEpoch) throw new Error('Stale session');
   if (!response.ok) {
-    if (response.status === 401 && path !== '/api/login') signedOut();
+    if (response.status === 401 && path !== '/api/login') {
+      const wasSignedIn = Boolean(csrf);
+      signedOut();
+      if (wasSignedIn) $('session-banner').hidden = false;
+    }
     throw new Error(typeof data.detail === 'string' ? data.detail : Array.isArray(data.detail) ? data.detail.map(item => item.msg || 'Invalid value').join('; ') : 'Request failed');
   }
   return data;
@@ -425,6 +429,7 @@ function signedOut() { clearSessionView(); if (typeof dashboardIdentity !== 'und
  * @returns {Promise<void>} Resolves when initial dashboard data has loaded.
  */
 async function signedIn(data) {
+  $('session-banner').hidden = true;
   clearSessionView();
   csrf = data.csrf; $('identity').textContent = data.username; $('dashboard').hidden = false;
   $('login-panel').hidden = true; $('logout').hidden = false; notice();
@@ -481,7 +486,7 @@ async function refreshKeys() {
 $('api-key-form').addEventListener('submit', safe(async () => {
   clearKeySecret();
   const owner = typeof dashboardIdentity !== 'undefined' && dashboardIdentity ? {user: userBoard ? dashboardIdentity.username : $('api-key-user').value.trim() || dashboardIdentity.username} : {};
-  const result = await api('/api/keys', {...owner, ...(typeof TokenLimits !== 'undefined' ? {limits: TokenLimits.draft} : {}), name: $('api-key-name').value.trim(), models: [$('api-key-models').value || '*'], targets: ($('api-key-targets').value || '*').split(',').map(v => v.trim()).filter(Boolean), max_tokens: null, expires_days: $('api-key-days').value === 'never' ? null : Number($('api-key-days').value)});
+  const result = await api('/api/keys', {...owner, ...(typeof TokenLimits !== 'undefined' ? {limits: TokenLimits.draft} : {}), name: $('api-key-name').value.trim(), models: [$('api-key-models').value || '*'], max_tokens: null, expires_days: $('api-key-days').value === 'never' ? null : Number($('api-key-days').value)});
   if (!csrf) return;
   $('api-key-secret').value = result.key; $('api-key-result').hidden = false; $('api-key-copy').disabled = false;
   if (typeof TokenLimits !== 'undefined') TokenLimits.reset();
@@ -744,7 +749,7 @@ async function refresh() {
   } finally { if (epoch === sessionEpoch) refreshing = false; }
 }
 /**
- * Draw CPU/RAM percentage history on the dashboard canvas from chronological samples.
+ * Draw CPU/RAM and busiest-GPU history; unavailable metrics leave gaps.
  *
  * @param {Array<Object>} samples - Timestamped host samples; missing values are tolerated.
  */
@@ -753,9 +758,18 @@ function draw(samples) {
   ctx.clearRect(0, 0, w, h); ctx.strokeStyle = '#303e35'; ctx.fillStyle = '#a1b2a6'; ctx.font = '12px system-ui';
   for (const pct of [0, 50, 100]) { const y = 15 + (100 - pct) / 100 * (h - 35); ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(w, y); ctx.stroke(); ctx.fillText(pct + '%', 0, y + 4); }
   if (!samples.length) { ctx.fillText('Resource history appears after the first sample.', 60, 90); return; }
-  for (const [key, color] of [['cpu_percent', '#bcf48c'], ['memory_percent', '#ffbc86']]) {
+  for (const [key, color] of [['cpu_percent', '#bcf48c'], ['memory_percent', '#ffbc86'], ['gpu', '#83bfff']]) {
     ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2;
-    samples.forEach((sample, i) => { const x = 42 + i / Math.max(1, samples.length - 1) * (w - 45), y = 15 + (100 - sample.hardware[key]) / 100 * (h - 35); if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y); }); ctx.stroke();
+    let connected = false;
+    samples.forEach((sample, i) => {
+      const hardware = sample.hardware || {};
+      const values = (hardware.gpus || []).map(gpu => gpu.utilization).filter(value => Number.isFinite(value) && value >= 0 && value <= 100);
+      const value = key === 'gpu' ? (values.length ? Math.max(...values) : null) : hardware[key];
+      if (!Number.isFinite(value)) { connected = false; return; }
+      const x = 42 + i / Math.max(1, samples.length - 1) * (w - 45), y = 15 + (100 - value) / 100 * (h - 35);
+      if (connected) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      connected = true;
+    }); ctx.stroke();
   }
 }
 safe(async () => { try { const data = await api('/api/session'); await signedIn(data); } catch (error) { if (csrf) notice(error.message); else signedOut(); } })();
