@@ -73,10 +73,11 @@ test('usage sorting is stable for ties and safely renders text and missing numbe
 test('key usage reserves a blank sortable User column and omits unknown usage', () => {
   assert.deepEqual(Usage.keyColumns.map(col => col.field), [
     'name', 'user', 'status', 'requests', 'failed', 'prompt_tokens', 'output_tokens', 'seconds',
+    'limits_text', 'user_limits_text',
   ]);
   const ui = panel(Usage.keyColumns);
   ui.controller.update([{name: 'Client', output_tokens: 100, unknown_usage: 12}]);
-  assert.equal(ui.body.children[0].children.length, 8);
+  assert.equal(ui.body.children[0].children.length, 10);
   assert.deepEqual(ui.values(1), ['']);
   ui.headers[1].children[0].handlers.click();
   assert.equal(ui.headers[1].attrs['aria-sort'], 'ascending');

@@ -12,6 +12,7 @@ import time
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .limits import LimitConfig, Limits
 from .users import Users
 
 
@@ -26,6 +27,7 @@ class KeyRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1, le=4096, strict=True)
     targets: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
     expires_days: int | None = Field(default=None, ge=1, le=365, strict=True)
+    limits: LimitConfig = Field(default_factory=LimitConfig)
 
     @field_validator("models")
     @classmethod
@@ -74,6 +76,7 @@ class ApiKeys:
         """Create key/usage tables and migrate legacy keys to the process account."""
         self.store = store
         self.users = Users(store)
+        self.limits = Limits(store)
         with store.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS api_keys (
@@ -143,6 +146,10 @@ class ApiKeys:
                 ),
             )
             self.store.security_event(actor or owner, "key.create", identity, db=db)
+            db.execute(
+                "INSERT INTO token_limits VALUES('key',?,?,?,?)",
+                (identity, body.limits.input_k, body.limits.output_k, body.limits.period),
+            )
         return {"id": identity, "key": token}
 
     def authenticate(self, authorization):
@@ -258,6 +265,8 @@ class ApiKeys:
         return [
             {
                 **dict(row),
+                "limits": self.limits.snapshot("key", row["id"]),
+                "user_limits": self.limits.snapshot("user", row["user"]),
                 "models": json.loads(row["models"]),
                 "targets": json.loads(row["targets"]),
             }

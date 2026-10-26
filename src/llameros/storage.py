@@ -96,6 +96,7 @@ class Store:
             "key.delete",
             "user.update",
             "user.offboard",
+            "limits.update",
         }:
             raise ValueError("Unknown security event")
         if action == "login" and outcome != "success":

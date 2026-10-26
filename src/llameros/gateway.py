@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .api_keys import ApiKeys, KeyRequest, normalize
 from .docker import DockerError
+from .limits import LimitConfig
 from .multimodal import reject_documents, validate_images
 
 PREFIX = "/inference"
@@ -59,6 +60,52 @@ def install_gateway(
     """
     keys = ApiKeys(store)
     app.state.api_keys = keys
+
+    def limit_subject(scope, subject, request, session):
+        """Authorize every read/write; never trust UI board or supplied key ownership."""
+        if scope == "key":
+            if not any(
+                key["id"] == subject and not key["deleted"]
+                for key in keys.list(key_owner(request, session))
+            ):
+                raise HTTPException(404, "API key not found")
+        elif scope in {"user", "model", "user-default"}:
+            if session["role"] != "admin":
+                raise HTTPException(403, "Administrator required")
+            if scope == "user-default" and subject != "*":
+                raise HTTPException(400, "Default user limits require subject *")
+            if scope == "user" and subject not in {user["username"] for user in keys.users.list()}:
+                raise HTTPException(404, "System user not found")
+            if scope == "model":
+                try:
+                    subject = normalize(subject)
+                except ValueError:
+                    raise HTTPException(400, "Invalid model") from None
+        else:
+            raise HTTPException(404, "Unknown limit scope")
+        return subject
+
+    @app.get("/api/limits/{scope}", dependencies=protected)
+    def get_limits(scope: str, subject: str, request: Request, session=Depends(require_session)):
+        subject = limit_subject(scope, subject, request, session)
+        return keys.limits.snapshot(scope, subject)
+
+    @app.post("/api/limits/{scope}", dependencies=protected)
+    def set_limits(
+        scope: str,
+        subject: str,
+        body: LimitConfig,
+        request: Request,
+        session=Depends(require_session),
+    ):
+        subject = limit_subject(scope, subject, request, session)
+        return keys.limits.set(scope, subject, body, session["username"])
+
+    @app.delete("/api/limits/user", dependencies=protected)
+    def inherit_user_limits(subject: str, request: Request, session=Depends(require_session)):
+        """Restore an administrator-selected user's inheritance without resetting usage."""
+        subject = limit_subject("user", subject, request, session)
+        return keys.limits.inherit_user(subject, session["username"])
 
     async def api_error(request, exc):
         """Render HTTP errors in dashboard, Ollama, OpenAI, or Anthropic-compatible envelopes."""
@@ -557,6 +604,9 @@ def install_gateway(
         upstream = None
         client = None
         finished = False
+        quota_started = None
+        dispatched = False
+        quota_scopes = [("key", key["id"]), ("user", key["user"]), ("model", model)]
 
         async def finish():
             """Idempotently close upstream resources, record content-free usage, and release the device permit."""
@@ -571,6 +621,8 @@ def install_gateway(
                     await client.aclose()
             finally:
                 try:
+                    if dispatched:
+                        keys.limits.charge(quota_scopes, counts, quota_started)
                     keys.record(key["id"], model, target, outcome, counts, time.monotonic() - start)
                     if outcome == "completed" and counts:
                         store.generation(
@@ -709,6 +761,8 @@ def install_gateway(
                 capabilities = info.json().get("capabilities", [])
                 if "vision" not in capabilities:
                     raise HTTPException(400, "Loaded model does not advertise vision capability")
+            quota_started = keys.limits.check(quota_scopes)
+            dispatched = True
             upstream = await client.send(
                 client.build_request("POST", "/api/embed" if embedding else path, json=body),
                 stream=True,

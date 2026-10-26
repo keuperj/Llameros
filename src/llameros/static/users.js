@@ -13,6 +13,7 @@ let userBoard = false, dashboardIdentity = null;
  */
 function configureBoard(data, asUser = data.role !== 'admin') {
   if (typeof clearSessionView === 'function') clearSessionView();
+  if (typeof TokenLimits !== 'undefined') TokenLimits.reset();
   dashboardIdentity = data; userBoard = asUser;
   document.getElementById('certificate-download').hidden = data.certificate_download_enabled !== true;
   if (data.role === 'user') document.getElementById('api-key-days').value = '7';
@@ -79,6 +80,10 @@ async function refreshUsers() {
     const targets = document.createElement('input'); targets.value = (user.targets || []).join(', '); targets.setAttribute('aria-label', `Allowed targets for ${user.username}`);
     const days = document.createElement('input'); days.type = 'number'; days.min = '1'; days.max = '90'; days.value = ''; days.placeholder = 'Renew 1–90 days'; days.setAttribute('aria-label', `Renew grant for ${user.username}`);
     for (const control of [role, blocked, save, models, targets, days]) { const cell = element('td', ''); cell.append(control); row.append(cell); }
+    if (typeof TokenLimits !== 'undefined') {
+      const cell = element('td', TokenLimits.summary(user.limits));
+      cell.append(TokenLimits.button('user', user.username, user.username)); row.append(cell);
+    }
     save.addEventListener('click', safe(async () => {
       await api('/api/users/' + encodeURIComponent(user.username), {role: role.value, blocked: blocked.checked, models: models.value.split(',').map(v => v.trim()).filter(Boolean), targets: targets.value.split(',').map(v => v.trim()).filter(Boolean), ...(days.value ? {grant_days: Number(days.value)} : {})});
       notice(`Updated ${user.username}. Blocking revokes all keys; unblocking does not restore them.`);

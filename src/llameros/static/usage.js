@@ -65,11 +65,13 @@ const UsageTable = {
     {field: 'model'}, {field: 'requests', numeric: true}, {field: 'prompt_tokens', numeric: true},
     {field: 'output_tokens', numeric: true}, {field: 'tokens_per_second', numeric: true, decimal: true},
     {field: 'seconds', numeric: true, decimal: true},
+    {field: 'limits_text'},
   ],
   keyColumns: [
     {field: 'name'}, {field: 'user'}, {field: 'status'}, {field: 'requests', numeric: true}, {field: 'failed', numeric: true},
     {field: 'prompt_tokens', numeric: true}, {field: 'output_tokens', numeric: true},
     {field: 'seconds', numeric: true, decimal: true},
+    {field: 'limits_text'}, {field: 'user_limits_text'},
   ],
 };
 if (typeof module !== 'undefined') module.exports = UsageTable;

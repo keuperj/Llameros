@@ -317,3 +317,46 @@ release checks, including image/host scanning and live isolation tests. Consult 
 [security model](development.md#security-model-and-limitations) before changing
 network bindings or Docker permissions. Never include credentials or prompts in
 support reports.
+
+## Token usage limits
+
+**Configuration → User Access → Default user limits** sets the allowance for every
+user without an explicit user-limit override, including accounts the admin has not
+seen yet. Each user gets a separate allowance; this is not a shared pool. The initial
+default is **No limit** for both input and output. Changing defaults immediately affects
+all inheriting users (including admins) without clearing their consumption. Explicit
+per-user settings, including explicit unlimited settings, take precedence. User statistics
+label inherited policies **Default user limits**; **Use defaults** in a user's Config
+dialog removes their override without resetting counters. Defaults persist across restarts.
+These are quota defaults only: users still require the existing model/target grants to
+create usable keys; changing defaults does not grant access.
+
+Administrators can configure a user's allowance across all keys/models in **Configuration →
+User Access → Config**, and a shared model allowance using **Config** beside a downloaded
+model. Both boards provide **Config** in **Add key** and beside existing keys. Users can
+change only their own key limits; they cannot override admin user/model allowances.
+
+Input and output allowances are independent, entered in whole thousands of tokens
+(1 = 1,000). Each defaults to **No limit**. A policy shares one reset period:
+**1 day** (00:00 UTC), **1 week** (Monday 00:00 UTC), **1 month** (first day 00:00 UTC),
+or **Never**. Key/model statistics show consumption, allowance, remaining tokens and reset;
+key statistics also show the owner's shared allowance.
+
+All applicable allowances are checked just before inference dispatch, including admin
+playground requests (user/model limits). Actual upstream token counts are charged after
+execution. Requests already in flight may exceed the allowance, including concurrent
+requests; subsequent requests receive HTTP 429. Calendar quotas include a `Retry-After`
+header. Requests crossing a reset belong to their admission window.
+
+Counters persist independently of history cleanup and key deletion. Editing or disabling
+limits does not erase consumption. Accounting starts when this feature is installed;
+older retained history is not imported. Lifetime counters have no automatic reset.
+If an interrupted/failed upstream request lacks token counts, that dimension is marked
+unknown and finite allowances fail closed for its window; unlimited dimensions remain
+unlimited. The UI identifies this state. A calendar reset clears it; for a lifetime policy,
+an administrator can change the applicable policy (for example to a calendar window or
+unlimited). Restarting the server does not clear recorded usage, but an abrupt process or
+host crash before request finalization can lose that in-flight request's accounting.
+
+Direct connections to Ollama bypass Llameros authorization and accounting. Restrict direct
+runtime access when enforcing quotas; use the authenticated `/inference` gateway for clients.

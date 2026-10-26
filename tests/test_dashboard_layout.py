@@ -72,6 +72,7 @@ def test_usage_tables_have_compact_matching_headers():
         "Output",
         "Tokens/s",
         "Seconds",
+        "Model limits",
         "Key",
         "User",
         "Status",
@@ -80,6 +81,8 @@ def test_usage_tables_have_compact_matching_headers():
         "Input",
         "Output",
         "Seconds",
+        "Key limits",
+        "User limits",
     ]
     css = (static / "style.css").read_text()
     assert "min-width:640px" not in css

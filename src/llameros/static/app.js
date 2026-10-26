@@ -15,6 +15,7 @@ let accessConfig = null, accessContext = 4096;
 let sessionEpoch = 0;
 /** Invalidate all outstanding account/board requests and erase private presentation. */
 function clearSessionView() {
+  if (typeof TokenLimits !== 'undefined') TokenLimits.reset();
   sessionEpoch++;
   lastResult = ''; selectedFit = null; catalogueEntries = []; loadedCatalogueQuery = '';
   runtimeState = null; accessConfig = null; storageInitialized = false;
@@ -217,7 +218,7 @@ let modelUsageTable = null, keyUsageTable = null;
  */
 function renderKeyUsage(keys) {
   if (!keyUsageTable) keyUsageTable = UsageTable.create($('key-usage'), UsageTable.keyColumns);
-  keyUsageTable.update(keys.map(key => ({...key, status: keyState(key)})));
+  keyUsageTable.update(keys.map(key => ({...key, status: keyState(key), limits_text: typeof TokenLimits === 'undefined' ? '' : TokenLimits.summary(key.limits), user_limits_text: typeof TokenLimits === 'undefined' ? '' : TokenLimits.summary(key.user_limits)})));
 }
 /**
  * Update overall model totals, shared by both boards rather than filtered by key owner.
@@ -226,7 +227,7 @@ function renderKeyUsage(keys) {
  */
 function renderModelUsage(models) {
   if (!modelUsageTable) modelUsageTable = UsageTable.create($('usage'), UsageTable.modelColumns);
-  modelUsageTable.update(models);
+  modelUsageTable.update(models.map(model => ({...model, limits_text: typeof TokenLimits === 'undefined' ? '' : TokenLimits.summary(model.limits)})));
 }
 /**
  * Recompute lifecycle/playground button availability from known runtime state and active work.
@@ -467,6 +468,7 @@ async function refreshKeys() {
     button.title = `Delete key ${key.name}`; button.setAttribute('aria-label', button.title);
     const icon = element('span', '🗑'); icon.setAttribute('aria-hidden', 'true'); button.append(icon);
     button.addEventListener('click', safe(async () => { await api('/api/keys/' + key.id, {}, 'DELETE'); clearKeySecret(); await refreshKeys(); await refresh(); }));
+    if (typeof TokenLimits !== 'undefined') actions.append(TokenLimits.button('key', key.id, key.name));
     actions.append(button); row.append(name, models, status, expires, actions); $('api-keys').append(row);
   }
   if (!data.keys.length) {
@@ -479,9 +481,10 @@ async function refreshKeys() {
 $('api-key-form').addEventListener('submit', safe(async () => {
   clearKeySecret();
   const owner = typeof dashboardIdentity !== 'undefined' && dashboardIdentity ? {user: userBoard ? dashboardIdentity.username : $('api-key-user').value.trim() || dashboardIdentity.username} : {};
-  const result = await api('/api/keys', {...owner, name: $('api-key-name').value.trim(), models: [$('api-key-models').value || '*'], targets: ($('api-key-targets').value || '*').split(',').map(v => v.trim()).filter(Boolean), max_tokens: null, expires_days: $('api-key-days').value === 'never' ? null : Number($('api-key-days').value)});
+  const result = await api('/api/keys', {...owner, ...(typeof TokenLimits !== 'undefined' ? {limits: TokenLimits.draft} : {}), name: $('api-key-name').value.trim(), models: [$('api-key-models').value || '*'], targets: ($('api-key-targets').value || '*').split(',').map(v => v.trim()).filter(Boolean), max_tokens: null, expires_days: $('api-key-days').value === 'never' ? null : Number($('api-key-days').value)});
   if (!csrf) return;
   $('api-key-secret').value = result.key; $('api-key-result').hidden = false; $('api-key-copy').disabled = false;
+  if (typeof TokenLimits !== 'undefined') TokenLimits.reset();
   $('api-key-feedback').textContent = 'Key generated. Copy it now; only its digest is stored.';
   $('api-key-add').open = false; $('api-key-copy').focus();
   await refreshKeys(); await refresh();
@@ -714,6 +717,7 @@ async function refresh() {
       const row = element('div', '', 'model'), active = loaded.filter(m => m.name === model.name);
       row.append(element('strong', model.name), element('small', `${bytes(model.size)}${active.length ? ' · loaded: ' + active.map(item => item.hardware || 'default runtime').join(', ') : ' · downloaded'}${model.modified_at ? ' · ' + new Date(model.modified_at).toLocaleDateString() : ''}`));
       const actions = element('div', '', 'actions');
+      if (typeof TokenLimits !== 'undefined') actions.append(TokenLimits.button('model', model.name, model.name));
       for (const action of ['load', 'unload']) {
         const targets = action === 'unload' && active.length ? active : [{target: ''}];
         for (const target of targets) {

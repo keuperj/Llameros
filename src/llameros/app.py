@@ -381,7 +381,12 @@ def create_app(
     @app.get("/api/users", dependencies=protected)
     def list_users():
         """Expose discovered and remembered account policy to administrators only."""
-        return {"users": users.list()}
+        return {
+            "users": [
+                {**user, "limits": app.state.api_keys.limits.snapshot("user", user["username"])}
+                for user in users.list()
+            ]
+        }
 
     @app.get("/api/security-events", dependencies=protected)
     def security_events():
@@ -426,7 +431,7 @@ def create_app(
             "keys": own_keys,
             "context_length": cfg.context_length,
             "history": {
-                "models": history["models"],
+                "models": app.state.api_keys.limits.models(history["models"]),
                 "samples": [
                     {
                         "timestamp": sample["timestamp"],
@@ -503,7 +508,9 @@ def create_app(
     @app.get("/api/history", dependencies=protected)
     def history():
         """Return full admin telemetry history and overall model-generation aggregates."""
-        return store.history()
+        data = store.history()
+        data["models"] = app.state.api_keys.limits.models(data["models"])
+        return data
 
     @app.post("/api/action-errors", dependencies=protected)
     def action_error(body: ActionError):
@@ -678,9 +685,11 @@ def create_app(
         )
 
     @app.post("/api/generate", dependencies=protected, status_code=202)
-    def generate(body: GenerateRequest):
+    def generate(body: GenerateRequest, session=Depends(require_admin)):
         """Queue bounded admin playground inference against an already-loaded model and record totals."""
         name = validate_model(body.model)
+        quota_scopes = [("user", session["username"]), ("model", name)]
+        app.state.api_keys.limits.check(quota_scopes)
 
         def work(progress):
             """Execute the enclosing lifecycle operation in the worker and publish progress/results."""
@@ -697,17 +706,29 @@ def create_app(
             options = {"num_ctx": cfg.context_length, "num_predict": body.max_tokens}
             if runtimes and client.target["id"] == "cpu":
                 options.update(num_gpu=0)
-            result = client.api(
-                "POST",
-                "/api/generate",
-                {
-                    "model": name,
-                    "prompt": body.prompt,
-                    "stream": False,
-                    "options": options,
-                    "keep_alive": -1,
-                },
-            )
+            started = app.state.api_keys.limits.check(quota_scopes)
+            result = {}
+            try:
+                result = client.api(
+                    "POST",
+                    "/api/generate",
+                    {
+                        "model": name,
+                        "prompt": body.prompt,
+                        "stream": False,
+                        "options": options,
+                        "keep_alive": -1,
+                    },
+                )
+            finally:
+                app.state.api_keys.limits.charge(
+                    quota_scopes,
+                    {
+                        "prompt": result.get("prompt_eval_count"),
+                        "output": result.get("eval_count"),
+                    },
+                    started,
+                )
             store.generation(result)
             return {
                 key: result.get(key)
