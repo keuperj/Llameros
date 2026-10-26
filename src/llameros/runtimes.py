@@ -179,7 +179,12 @@ class Runtimes:
         fit = assess_fit(size, hw, "cpu")
         if not fit["fits"]:
             raise ValueError("Insufficient available system RAM for this model")
-        if target_id != "cpu" and fit["estimated_memory"] > (target.get("free") or 0):
+        gpu_available = (
+            max(0, hw["memory_available"] - 512 * 1024**2)
+            if target.get("unified_memory")
+            else target.get("free") or 0
+        )
+        if target_id != "cpu" and fit["estimated_memory"] > gpu_available:
             raise ValueError(
                 "Model does not fit selected GPU VRAM; select CPU or a larger free GPU"
             )

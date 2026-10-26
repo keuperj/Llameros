@@ -680,7 +680,7 @@ async function refresh() {
       const card = element('div', '', 'metric');
       const names = (slot.loaded || []).map(model => model.name || model.model);
       card.append(element('small', slot.label), element('strong', slot.error ? 'Unavailable' : names.length ? `${names.length} model(s) loaded` : 'Free'), element('small', slot.error || names.join(', ') || 'No model assigned by Llameros'));
-      if (slot.vendor !== 'cpu') card.append(element('small', `${bytes(slot.free)} free / ${bytes(slot.total)} VRAM · ${slot.utilization == null ? 'utilization unknown' : slot.utilization + '% utilization'}`));
+      if (slot.vendor !== 'cpu') card.append(element('small', `${bytes(slot.free)} available / ${bytes(slot.total)} ${slot.unified_memory ? 'unified memory (shared with CPU)' : 'VRAM'} · ${slot.utilization == null ? 'utilization unknown' : slot.utilization + '% utilization'}`));
       $('hardware').append(card);
     }
     const targetPrevious = $('load-target').value;

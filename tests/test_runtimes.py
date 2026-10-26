@@ -118,6 +118,7 @@ def test_cpu_and_two_gpu_models_coexist_with_stable_ports_and_routing(pool):
         manager.load(name, 300_000_000, target, 2048, lambda value: None)
     state = manager.status()
     assert len(state["loaded"]) == 3
+
     assert all(slot["available"] for slot in state["slots"] if slot["supported"])
     assert {model["base_url"] for model in state["loaded"]} == {"/inference"}
     assert manager.model_client("two:latest", ids[1]).target["id"] == ids[1]
@@ -135,6 +136,27 @@ def test_cpu_and_two_gpu_models_coexist_with_stable_ports_and_routing(pool):
     assert "num_thread" not in options
     manager.stop()
     assert not manager.status()["running"]
+
+
+def test_unified_gpu_uses_current_host_memory(pool):
+    manager, states, cfg, hw = pool
+    hw["gpus"] = [
+        {
+            "id": "GPU-spark",
+            "name": "NVIDIA GB10",
+            "vendor": "nvidia",
+            "unified_memory": True,
+            "free": None,
+            "total": 128 * GIB,
+        }
+    ]
+    manager.refresh()
+    target = next(slot for slot in manager.targets.values() if slot["vendor"] == "nvidia")
+    assert target["supported"]
+    manager.load("spark:latest", 300_000_000, target["id"], 2048, lambda value: None)
+    hw["memory_available"] = 100_000_000
+    with pytest.raises(ValueError, match="system RAM"):
+        manager.load("other:latest", 300_000_000, target["id"], 2048, lambda value: None)
 
 
 def test_gpu_fit_unknown_target_and_cpu_fallback_rejected(pool):

@@ -4,7 +4,9 @@ Best-effort, non-privileged Linux hardware inspection.
 """
 
 import csv
+import math
 import platform
+import re
 import subprocess
 from pathlib import Path
 
@@ -13,7 +15,7 @@ import psutil
 GIB = 1024**3
 
 
-def gpu_info() -> list[dict]:
+def gpu_info(memory=None) -> list[dict]:
     """Discover GPU identity, memory bytes, and utilization using NVIDIA tools and Linux sysfs.
 
     Unavailable probes are tolerated; missing metrics remain unknown rather than implying safe
@@ -21,29 +23,59 @@ def gpu_info() -> list[dict]:
     """
     devices = []
     try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=name,memory.total,memory.free,utilization.gpu,uuid",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=4,
-            check=True,
-        )
-        devices = [
-            {
-                "name": row[0].strip(),
-                "vendor": "nvidia",
-                "total": int(row[1]) * 1024**2,
-                "free": int(row[2]) * 1024**2,
-                "utilization": float(row[3]),
-                "id": row[4].strip(),
-            }
-            for row in csv.reader(result.stdout.splitlines())
-            if len(row) == 5
+        query = [
+            "nvidia-smi",
+            "--query-gpu=name,memory.total,memory.free,utilization.gpu,uuid",
+            "--format=csv,noheader,nounits",
         ]
+        try:
+            result = subprocess.run(query, capture_output=True, text=True, timeout=4, check=True)
+            rows = list(csv.reader(result.stdout.splitlines()))
+        except subprocess.SubprocessError:
+            # Some driver versions reject a query containing unsupported metrics.
+            # Identity alone still permits safe UUID targeting and GB10 UMA detection.
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=name,uuid",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=4,
+                check=True,
+            )
+            rows = [
+                [row[0], "N/A", "N/A", "N/A", row[1]]
+                for row in csv.reader(result.stdout.splitlines())
+                if len(row) == 2
+            ]
+        for row in rows:
+            if len(row) != 5:
+                continue
+
+            def metric(value, scale=1):
+                """Unsupported metrics must not discard device identity or other GPUs."""
+                try:
+                    number = float(value)
+                    return number * scale if math.isfinite(number) and number >= 0 else None
+                except ValueError:
+                    return None
+
+            unified = bool(re.search(r"\bGB10\b", row[0], re.IGNORECASE))
+            if unified and memory is None:
+                memory = psutil.virtual_memory()
+            devices.append(
+                {
+                    "name": row[0].strip(),
+                    "vendor": "nvidia",
+                    "total": memory.total if unified else metric(row[1], 1024**2),
+                    "free": memory.available if unified else metric(row[2], 1024**2),
+                    "unified_memory": unified,
+                    "utilization": metric(row[3]),
+                    "id": row[4].strip(),
+                }
+            )
     except (OSError, subprocess.SubprocessError, ValueError):
         pass
     nvidia_detected = bool(devices)
@@ -99,7 +131,7 @@ def snapshot() -> dict:
         "memory_total": memory.total,
         "memory_available": memory.available,
         "memory_percent": memory.percent,
-        "gpus": gpu_info(),
+        "gpus": gpu_info(memory),
     }
 
 
@@ -116,7 +148,11 @@ def assess_fit(size: int, hardware: dict, gpu_mode: str = "cpu") -> dict:
     available = max(0, hardware["memory_available"] - 512 * 1024**2)
     gpu_free = (
         max(
-            (gpu.get("free") or 0 for gpu in hardware["gpus"] if gpu["vendor"] == gpu_mode),
+            (
+                available if gpu.get("unified_memory") else gpu.get("free") or 0
+                for gpu in hardware["gpus"]
+                if gpu["vendor"] == gpu_mode
+            ),
             default=0,
         )
         if gpu_mode != "cpu"
