@@ -176,7 +176,7 @@ class Runtimes:
             raise ValueError("Select a free, supported hardware slot")
         hw = self.hardware()
         target = self.targets[target_id]
-        fit = assess_fit(size, hw, "cpu")
+        fit = assess_fit(size, hw, "cpu", self.settings.ollama_num_parallel, context)
         if not fit["fits"]:
             raise ValueError("Insufficient available system RAM for this model")
         gpu_available = (

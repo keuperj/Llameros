@@ -249,7 +249,7 @@ class Docker:
             "-e",
             f"OLLAMA_MAX_LOADED_MODELS={cfg.max_loaded_models}",
             "-e",
-            "OLLAMA_NUM_PARALLEL=1",
+            f"OLLAMA_NUM_PARALLEL={cfg.ollama_num_parallel}",
             "-e",
             f"OLLAMA_CONTEXT_LENGTH={cfg.context_length}",
         ]
@@ -296,6 +296,10 @@ class Docker:
             raise DockerError(
                 "Unsafe legacy runtime: stop all runtimes and reapply model storage "
                 "to recreate private containers; model files are retained."
+            )
+        if f"OLLAMA_NUM_PARALLEL={self.settings.ollama_num_parallel}" not in env:
+            raise DockerError(
+                "Runtime parallelism differs from configuration. Stop all runtimes and reapply model storage to recreate containers; model files are retained."
             )
 
     def socket_path(self):

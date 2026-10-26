@@ -85,7 +85,7 @@ def test_small_cpu_models_fit_without_gpu_or_multi_gib_fixed_overhead():
     """Verify small cpu models fit without gpu or multi gib fixed overhead."""
     from llameros.hardware import GIB, assess_fit
 
-    hardware = {**HARDWARE, "memory_available": int(1.3 * GIB), "gpus": []}
+    hardware = {**HARDWARE, "memory_available": int(1.5 * GIB), "gpus": []}
     assert assess_fit(89_000_000, hardware, "cpu")["fits"]
     assert assess_fit(295_425_000, hardware, "cpu")["fits"]
     assert assess_fit(295_425_000, hardware, "cpu")["placement"] == "cpu"
@@ -101,7 +101,7 @@ def test_cpu_only_api_reports_ram_fit_without_gpu_and_uses_same_exact_estimate(t
 
     hardware = {
         **HARDWARE,
-        "memory_available": int(1.3 * GIB),
+        "memory_available": int(1.5 * GIB),
         "gpus": [{"vendor": "nvidia", "free": 32 * GIB}],
     }
     catalog = Catalog()

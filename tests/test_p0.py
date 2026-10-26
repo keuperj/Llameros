@@ -75,7 +75,10 @@ def test_runtime_isolation_and_rootless_default(tmp_path):
     docker = Docker(cfg)
     safe = {
         "HostConfig": {"NetworkMode": "bridge"},
-        "Config": {"Image": docker.image, "Env": ["OLLAMA_HOST=127.0.0.1:11434"]},
+        "Config": {
+            "Image": docker.image,
+            "Env": ["OLLAMA_HOST=127.0.0.1:11434", "OLLAMA_NUM_PARALLEL=2"],
+        },
     }
     docker.require_isolation(safe)
     for host in (

@@ -22,6 +22,9 @@ ollama_rocm_image = "ollama/ollama@sha256:c57155dfdd87acadac039c2679482db7f76196
 context_length = 4096
 # Resident models per device (1–16), subject to available RAM/VRAM.
 max_loaded_models = 2
+# Parallel requests per device (1–16); passed to Ollama as OLLAMA_NUM_PARALLEL.
+# Higher values increase the model-fit memory allowance. Recreate runtime containers after changes.
+ollama_num_parallel = 2
 
 # API-only attachments; playground remains text-only. Hard upper bounds apply.
 inference_body_bytes = 16777216 # 16 MiB JSON (text-only requests still 128 KiB)

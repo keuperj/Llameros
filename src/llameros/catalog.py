@@ -142,7 +142,14 @@ class Catalog:
             )
         return sum(sizes)
 
-    def variants(self, family: str, hardware: dict, gpu_mode: str) -> list[dict]:
+    def variants(
+        self,
+        family: str,
+        hardware: dict,
+        gpu_mode: str,
+        parallel: int = 2,
+        context_length: int = 4096,
+    ) -> list[dict]:
         """Return family tags with conservative CPU/runtime fit estimates and explicit unknown sizes."""
         validate_model(family)
         if ":" in family:
@@ -154,12 +161,18 @@ class Catalog:
             if not name.startswith(family + ":"):
                 continue
             size = parser.sizes.get(name)
-            cpu_fit = None if size is None else assess_fit(size, hardware, "cpu")["fits"]
+            cpu_fit = (
+                None
+                if size is None
+                else assess_fit(size, hardware, "cpu", parallel, context_length)["fits"]
+            )
             variants.append(
                 {
                     "name": name,
                     "download_bytes": size,
-                    "fits": None if size is None else assess_fit(size, hardware, gpu_mode)["fits"],
+                    "fits": None
+                    if size is None
+                    else assess_fit(size, hardware, gpu_mode, parallel, context_length)["fits"],
                     "cpu_fits": cpu_fit,
                     "size_source": "rounded catalogue size" if size is not None else "unknown",
                 }

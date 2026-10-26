@@ -23,11 +23,12 @@ class Ticket:
 class InferenceScheduler:
     """FIFO admission per device using the lifecycle job lock to prevent conflicting operations."""
 
-    def __init__(self, jobs, capacity=16, timeout=120):
+    def __init__(self, jobs, capacity=16, timeout=120, parallel=2):
         """Bind job coordination with a waiting capacity per target and timeout in seconds."""
         self.jobs = jobs
         self.capacity = capacity
         self.timeout = timeout
+        self.parallel = parallel
         self.tickets = []
 
     def conflicts(self, targets=None):
@@ -47,7 +48,7 @@ class InferenceScheduler:
                 targets = job.get("targets")
                 if targets is None or target in targets:
                     raise HTTPException(409, "A lifecycle operation is using this hardware")
-            if sum(t.target == target for t in self.tickets) >= self.capacity + 1:
+            if sum(t.target == target for t in self.tickets) >= self.capacity + self.parallel:
                 raise HTTPException(
                     429, "Hardware inference queue is full", headers={"Retry-After": "1"}
                 )
@@ -57,8 +58,9 @@ class InferenceScheduler:
                 if request is not None and await request.is_disconnected():
                     raise HTTPException(499, "Client disconnected while queued")
                 with self.jobs.lock:
-                    first = next(t for t in self.tickets if t.target == target)
-                    if first is ticket:
+                    active = sum(t.target == target and t.active for t in self.tickets)
+                    first = next(t for t in self.tickets if t.target == target and not t.active)
+                    if first is ticket and active < self.parallel:
                         ticket.active = True
                         job = self.jobs.job
                         if job["state"] != "running" or job.get("action") == "api-inference":

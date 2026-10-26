@@ -41,6 +41,7 @@ class Settings:
     allow_rootful_docker: bool = False
     context_length: int = 4096
     max_loaded_models: int = 2
+    ollama_num_parallel: int = 2
     inference_body_bytes: int = 16 * 1024 * 1024
     image_max_bytes: int = 8 * 1024 * 1024
     image_max_count: int = 8
@@ -76,6 +77,8 @@ class Settings:
             raise ValueError("cert_file and key_file must be supplied together")
         if type(self.max_loaded_models) is not int or not 1 <= self.max_loaded_models <= 16:
             raise ValueError("max_loaded_models must be 1–16")
+        if type(self.ollama_num_parallel) is not int or not 1 <= self.ollama_num_parallel <= 16:
+            raise ValueError("ollama_num_parallel must be 1–16")
 
     @property
     def container_name(self) -> str:

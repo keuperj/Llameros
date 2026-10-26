@@ -75,13 +75,13 @@ class ActionError(BaseModel):
 class Jobs:
     """Single-worker lifecycle execution coordinated with per-device inference reservations."""
 
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, parallel=2):
         """Initialize the lifecycle executor, shared coordination lock, and inference scheduler."""
         self.store = store
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llameros-job")
         self.lock = threading.Lock()
         self.job = {"state": "idle"}
-        self.scheduler = InferenceScheduler(self)
+        self.scheduler = InferenceScheduler(self, parallel=parallel)
 
     def status(self):
         """Return a dashboard status snapshot without exposing mutable internal job state."""
@@ -186,7 +186,7 @@ def create_app(
         return runtimes.status() if runtimes else docker.status()
 
     sessions = Sessions(cfg.session_seconds)
-    jobs = Jobs(store)
+    jobs = Jobs(store, cfg.ollama_num_parallel)
 
     def sample_once():
         """Persist one host/runtime observation while containing expected probe failures."""
@@ -494,7 +494,13 @@ def create_app(
     @app.get("/api/catalog/{family}/compatibility", dependencies=protected)
     def compatibility(family: str, cpu_only: bool = False):
         """Return family variants and an aggregate advisory fit for the selected CPU/GPU policy."""
-        variants = catalog.variants(family, hardware(), "cpu" if cpu_only else cfg.gpu)
+        variants = catalog.variants(
+            family,
+            hardware(),
+            "cpu" if cpu_only else cfg.gpu,
+            cfg.ollama_num_parallel,
+            cfg.context_length,
+        )
         if cpu_only:
             for variant in variants:
                 variant["fits"] = variant["cpu_fits"]
@@ -516,7 +522,13 @@ def create_app(
         return {
             "model": model,
             "download_bytes": size,
-            **assess_fit(size, hardware(), "cpu" if cpu_only else cfg.gpu),
+            **assess_fit(
+                size,
+                hardware(),
+                "cpu" if cpu_only else cfg.gpu,
+                cfg.ollama_num_parallel,
+                cfg.context_length,
+            ),
         }
 
     @app.get("/api/history", dependencies=protected)
@@ -624,7 +636,9 @@ def create_app(
 
     def check_fit(size):
         """Refuse lifecycle admission when the conservative current-memory estimate does not fit."""
-        if not assess_fit(size, hardware(), cfg.gpu)["fits"]:
+        if not assess_fit(size, hardware(), cfg.gpu, cfg.ollama_num_parallel, cfg.context_length)[
+            "fits"
+        ]:
             raise ValueError(
                 "Insufficient currently available memory for the conservative fit estimate"
             )

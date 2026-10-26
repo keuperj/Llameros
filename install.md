@@ -320,7 +320,7 @@ lifetime. Never share Linux passwords with inference clients.
 
 Models must already be loaded. If a model is loaded on multiple permitted devices,
 select one with `X-Llameros-Target` or the JSON `target` field (which takes precedence).
-Each device executes one request at a time, with up to 16 queued requests and a
+Each device executes up to `ollama_num_parallel` requests at a time (default 2), with up to 16 queued requests and a
 120-second queue timeout; different devices can execute independently.
 
 Text-only requests are limited to 128 KiB; inline-image requests default to 16 MiB.
@@ -332,6 +332,82 @@ Delete a key to reject new requests; revocation does not stop an already executi
 request. Usage history retains content-free totals, not prompts or responses;
 interrupted streams may have unknown token counts. Model-generated tool calls are
 untrusted: client applications must validate and authorize any side effects.
+
+### Simultaneous users and request queues
+
+Requests through the Llameros inference gateway share a **first-in, first-out
+(FIFO) queue per hardware target**, regardless of user or API key. Each GPU admits up to
+`ollama_num_parallel` active API requests (default **2**); the CPU target has its own queue. Different
+targets can execute requests in parallel.
+
+For example, Alice and Bob can generate concurrently on GPU 1. With the default
+limit of 2, a third request waits until either finishes. GPU 2 has its own two
+permits. Different models loaded on the **same** GPU share the device limit and queue. Streaming requests retain
+their reservation until completion or cleanup after interruption.
+
+| Current default, per target | Behavior |
+| --- | --- |
+| Active inference requests | `ollama_num_parallel` (default 2) |
+| Waiting requests | Up to 16 |
+| Maximum queue wait | 120 seconds (not an execution-time limit) |
+| Queue full | HTTP 429 with `Retry-After: 1` |
+| Queue wait exceeded | HTTP 504 |
+
+Client timeouts should allow for both queueing and generation. On queue-full
+responses, respect `Retry-After` and avoid immediately flooding the queue with
+retries. A streaming client may receive no generated tokens while waiting.
+
+**Routing and fairness:** Llameros does not automatically choose the least-busy
+GPU. If a model is loaded on multiple targets, select one explicitly, for example
+with `X-Llameros-Target`; an ambiguous selection returns HTTP 409. FIFO is not
+per-user fair scheduling: one user submitting many requests can occupy the queue
+ahead of others. Waiting requests start when an active permit becomes free; Llameros forwards each
+request separately and leaves model execution to Ollama.
+
+Credentials are checked again after queue admission, before upstream execution,
+so a key revoked while waiting cannot start new work. Direct requests to Ollama
+bypass these Llameros queues, authorization checks, and usage accounting.
+
+### Configure parallel inference and memory headroom
+
+In your Llameros startup TOML, set:
+
+```toml
+ollama_num_parallel = 2 # Integer 1–16; default 2. Use 1 for serial execution.
+```
+
+Llameros passes this value as `OLLAMA_NUM_PARALLEL` to every managed Ollama
+container and enforces the same active-request ceiling **per hardware target**,
+shared across all users and loaded models on that target. Ollama's setting is
+per model; the Llameros device-wide ceiling is deliberately more conservative.
+`max_loaded_models` controls model residency, not concurrent requests. Existing
+quota checks still apply; concurrent in-flight requests can exceed a remaining
+allowance before their actual token usage is recorded.
+
+Higher parallelism can improve aggregate throughput but increases memory demand
+and can reduce each request's individual speed. The catalogue, exact model-fit
+check, and load admission use the same safety estimate:
+
+```text
+base allowance = clamp(25% of model weight bytes, 256 MiB, 2 GiB)
+estimated memory = 1.25 × weight bytes
+                 + base allowance × ollama_num_parallel × max(1, context_length / 4096)
+```
+
+A further 512 MiB is reserved from available system RAM. GPU VRAM is evaluated
+separately, never added to RAM; unified-memory GPUs use available system RAM.
+Weights are not multiplied by parallelism. This is a heuristic allowance, not an
+exact architecture-specific KV-cache calculation or an out-of-memory guarantee.
+A model that fitted with one request may no longer fit with two or more.
+
+**Applying a change / upgrading from serial runtimes:** wait for active requests
+to finish, stop all Ollama runtimes, edit the configuration, and restart Llameros.
+While runtimes are stopped, reapply the existing **Model storage** selection to
+recreate the containers, then start/load models again. Keep the same storage
+location; downloaded weights are retained. Restarting the Llameros service alone
+cannot change an existing container's environment. Containers with mismatched
+parallelism are refused with instructions to recreate them. Set the TOML option,
+not just an environment variable on the Llameros systemd service.
 
 ## Configuration
 
@@ -350,6 +426,7 @@ Paths beginning with `~` expand to the service user's home directory.
 | `sample_seconds`, `retention_days` | `15`, `30`; telemetry interval and history retention |
 | `ollama_image`, `ollama_rocm_image` | Digest-pinned runtime images; use the example configuration |
 | `gpu` | `cpu`; catalogue estimate preference, not execution placement |
+| `ollama_num_parallel` | `2`; integer 1–16, Ollama parallelism and Llameros active requests per device |
 | `context_length`, `max_loaded_models` | `4096`, `2`; context and resident models per device |
 | `allow_rootful_docker` | `false`; setting `true` explicitly accepts root-equivalent daemon access |
 

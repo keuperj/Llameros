@@ -135,7 +135,9 @@ def snapshot() -> dict:
     }
 
 
-def assess_fit(size: int, hardware: dict, gpu_mode: str = "cpu") -> dict:
+def assess_fit(
+    size: int, hardware: dict, gpu_mode: str = "cpu", parallel: int = 2, context_length: int = 4096
+) -> dict:
     # Fixed 2 GiB runtime + 1 GiB reserve excluded even tiny CPU models. Scale
     # runtime headroom with weights while retaining a floor and OS reserve.
     """Estimate model memory headroom and placement from weight bytes and a hardware snapshot.
@@ -144,7 +146,9 @@ def assess_fit(size: int, hardware: dict, gpu_mode: str = "cpu") -> dict:
     residency or architecture support.
     """
     runtime = max(256 * 1024**2, min(2 * GIB, int(size * 0.25)))
-    required = int(size * 1.25 + runtime)
+    # Heuristic context/cache allowance per concurrent request, not duplicate weights.
+    allowance = int(runtime * parallel * max(1, context_length / 4096))
+    required = int(size * 1.25 + allowance)
     available = max(0, hardware["memory_available"] - 512 * 1024**2)
     gpu_free = (
         max(
@@ -162,6 +166,8 @@ def assess_fit(size: int, hardware: dict, gpu_mode: str = "cpu") -> dict:
     return {
         "fits": fits,
         "estimated_memory": required,
+        "parallel_requests": parallel,
+        "runtime_allowance": allowance,
         "placement": "gpu"
         if fits and required <= gpu_free
         else "cpu"
@@ -169,5 +175,5 @@ def assess_fit(size: int, hardware: dict, gpu_mode: str = "cpu") -> dict:
         else "cpu/partial-gpu"
         if fits
         else "insufficient-memory",
-        "note": "Estimate only: weights × 1.25 + runtime allowance (25% of weights, minimum 256 MiB, maximum 2 GiB); 512 MiB reserve from currently available RAM. Context, architecture, and other workloads change actual requirements. GPU memory is not added to RAM. A memory fit does not guarantee CPU architecture support or acceptable speed.",
+        "note": f"Estimate only: weights × 1.25 + runtime allowance (25% of weights, minimum 256 MiB, maximum 2 GiB) × {parallel} parallel requests × max(1, context_length / 4096); 512 MiB reserve from currently available RAM. This is a safety heuristic, not an exact KV-cache calculation. Architecture and other workloads change actual requirements. GPU memory is not added to RAM. A memory fit does not guarantee CPU architecture support or acceptable speed.",
     }
