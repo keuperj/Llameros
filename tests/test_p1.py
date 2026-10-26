@@ -77,6 +77,22 @@ def test_user_grants_restrict_existing_and_new_keys(multiuser):
     assert key["key"] not in json.dumps(events)
 
 
+def test_user_key_grant_errors_are_actionable(multiuser):
+    app, admin, user = multiuser
+    payload = {"name": "test", "models": ["gemma3:270m"], "expires_days": 7}
+    assert (
+        "Select a model granted"
+        in user.post("/api/keys", json={**payload, "models": ["*"]}).json()["detail"]
+    )
+    assert (
+        "within 30 days"
+        in user.post("/api/keys", json={**payload, "expires_days": None}).json()["detail"]
+    )
+    with app.state.store.connect() as db:
+        db.execute("UPDATE users SET grant_expires=0 WHERE username='alice'")
+    assert "missing or expired" in user.post("/api/keys", json=payload).json()["detail"]
+
+
 def test_keys_ignore_legacy_hardware_scopes_but_keep_model_grants(multiuser):
     app, admin, user = multiuser
     response = user.post(

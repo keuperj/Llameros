@@ -17,6 +17,10 @@ function configureBoard(data, asUser = data.role !== 'admin') {
   dashboardIdentity = data; userBoard = asUser;
   document.getElementById('certificate-download').hidden = data.certificate_download_enabled !== true;
   if (data.role === 'user') document.getElementById('api-key-days').value = '7';
+  for (const option of document.getElementById('api-key-days').options || []) {
+    option.disabled = data.role === 'user' && ['never', '365'].includes(option.value);
+    option.hidden = option.disabled;
+  }
   const switcher = document.getElementById('board-switch');
   switcher.hidden = data.role !== 'admin';
   switcher.textContent = asUser ? 'Switch to admin board' : 'Switch to user board';

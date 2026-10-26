@@ -164,16 +164,17 @@ function renderAccess(allowManagement = true) {
  */
 function renderKeyModels(models) {
   const select = $('api-key-models'), previous = select.value || '*';
+  const restricted = typeof dashboardIdentity !== 'undefined' && dashboardIdentity?.role === 'user';
   const names = [...new Set(models.map(model => model.name || model.model))].sort();
   if (previous !== '*' && !names.includes(previous)) names.push(previous);
-  const values = ['*', ...names];
+  const values = restricted ? names : ['*', ...names];
   if (JSON.stringify([...select.options].map(option => option.value)) === JSON.stringify(values)) return;
   select.replaceChildren();
   for (const value of values) {
     const option = element('option', value === '*' ? 'All models' : value); option.value = value;
     select.append(option);
   }
-  select.value = previous;
+  select.value = values.includes(previous) ? previous : (values[0] || '');
 }
 /**
  * Derive display status with deletion and revocation taking precedence over expiry.
