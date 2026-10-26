@@ -50,18 +50,16 @@ class Docker:
 
     def image_available(self) -> bool:
         """Check local image/tag or digest presence without pulling from a registry."""
-        images = self.command("image", "ls", "--quiet", "--filter", f"reference={self.image}")
-        if images:
-            return True
-        # Digest references aren't matched consistently by the reference filter.
+        # Digest-only pulls may be untagged. Include all images and avoid the
+        # tag-oriented reference filter for immutable references.
         if "@" in self.image:
             return (
                 self.image
                 in self.command(
-                    "image", "ls", "--digests", "--format", "{{.Repository}}@{{.Digest}}"
+                    "image", "ls", "--all", "--digests", "--format", "{{.Repository}}@{{.Digest}}"
                 ).splitlines()
             )
-        return False
+        return bool(self.command("image", "ls", "--quiet", "--filter", f"reference={self.image}"))
 
     @property
     def local_image_name(self) -> str:

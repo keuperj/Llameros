@@ -79,6 +79,39 @@ def mock_pull_client(monkeypatch, events, status=200):
     return requests
 
 
+@pytest.mark.parametrize("present", [True, False])
+def test_digest_availability_includes_untagged_images(tmp_path, monkeypatch, present):
+    docker = Docker(Settings(state_dir=tmp_path))
+
+    def command(*args, **kwargs):
+        assert args == (
+            "image",
+            "ls",
+            "--all",
+            "--digests",
+            "--format",
+            "{{.Repository}}@{{.Digest}}",
+        )
+        return docker.image if present else "ollama/ollama@sha256:" + "0" * 64
+
+    monkeypatch.setattr(docker, "command", command)
+    assert docker.image_available() is present
+
+
+def test_pull_accepts_untagged_digest_before_alias_creation(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOCKER_HOST", "unix:///example/docker.sock")
+    docker = Docker(Settings(state_dir=tmp_path))
+    monkeypatch.setattr(docker, "check_daemon", lambda: None)
+
+    def command(*args, **kwargs):
+        assert "--all" in args and "--digests" in args
+        return docker.image
+
+    monkeypatch.setattr(docker, "command", command)
+    mock_pull_client(monkeypatch, [{"status": "Pull complete"}])
+    docker.pull_image(lambda value: None)
+
+
 def test_docker_pull_stream_reports_real_layer_download_and_extraction(tmp_path, monkeypatch):
     """Verify docker pull stream reports real layer download and extraction."""
     monkeypatch.setenv("DOCKER_HOST", "unix:///example/docker.sock")
