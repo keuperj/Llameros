@@ -49,6 +49,7 @@ const UsageTable = {
           const td = document.createElement('td'), value = row[col.field];
           td.textContent = col.decimal ? (Number(value) || 0).toFixed(1) : value ?? '';
           td.title = String(td.textContent); tr.append(td);
+          td.setAttribute('data-label', headers[columns.indexOf(col)].textContent.replace(/ [▲▼]$/, ''));
         }
         body.append(tr);
       }

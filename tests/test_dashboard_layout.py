@@ -30,8 +30,9 @@ def test_playground_closed_and_scroll_regions_accessible():
     assert "max-height:calc(10 * var(--event-height))" in css
     assert "height:var(--event-height)" in css
     assert "overflow-y:auto" in css
-    assert "10 * var(--usage-row-height)" in css
-    assert "height:var(--usage-row-height)" in css
+    assert ".usage-tiles{display:grid;grid-template-columns:minmax(0,1fr)" in css
+    assert "height:auto;padding:10px 8px;line-height:1.45;vertical-align:top" in css
+    assert "height:var(--usage-row-height)" not in css
     html = (static / "index.html").read_text()
     assert html.index("/static/usage.js") < html.index("/static/app.js")
     assert html.index("/static/actions.js") < html.index("/static/app.js")
@@ -88,3 +89,7 @@ def test_usage_tables_have_compact_matching_headers():
     assert "min-width:640px" not in css
     assert "min-width:840px" not in css
     assert "table-layout:fixed;width:100%;min-width:0" in css
+    assert "min-width:850px" not in css
+    assert "min-width:1100px" not in css
+    assert "content:attr(data-label)" in css
+    assert "overflow-wrap:anywhere" in css

@@ -1,6 +1,7 @@
 """Durable, content-free token allowances independent of usage-history retention."""
 
 import calendar
+import json
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -53,14 +54,22 @@ class Limits:
                 );
             """)
 
+    @staticmethod
+    def model_scope(user, model):
+        """Unambiguously identify one owner's usage across all keys for one model."""
+        return "user-model", json.dumps([user, model], separators=(",", ":"))
+
     def snapshot(self, scope, subject, db=None, now=None):
         """Expose policy, actual usage, remaining allowance and reset time."""
         now = time.time() if now is None else now
         if db is None:
             with self.store.connect() as connection:
                 return self.snapshot(scope, subject, connection, now)
+        policy_scope, policy_subject = scope, subject
+        if scope == "user-model":
+            policy_scope, policy_subject = "model", json.loads(subject)[1]
         row = db.execute(
-            "SELECT * FROM token_limits WHERE scope=? AND subject=?", (scope, subject)
+            "SELECT * FROM token_limits WHERE scope=? AND subject=?", (policy_scope, policy_subject)
         ).fetchone()
         inherited = scope == "user" and row is None
         if inherited:
@@ -78,6 +87,11 @@ class Limits:
             (scope, subject, config["period"], bucket),
         ).fetchone()
         result = {**config, "resets_at": reset}
+        if scope == "model":
+            # Model configuration is a per-user policy, never a global allowance.
+            return {**result, "per_user": True, "policy_only": True}
+        if scope == "user-model":
+            result.update(per_user=True, user=json.loads(subject)[0])
         if scope == "user":
             result["inherited"] = inherited
         for kind in ("input", "output"):
@@ -164,10 +178,13 @@ class Limits:
                     (period, window(period, time.time())[0]),
                 )
 
-    def models(self, rows):
-        """Include configured models without history and attach their shared allowances."""
+    def models(self, rows, user):
+        """Attach the viewer's model allowance, separately from overall model statistics."""
         result = {row["model"]: dict(row) for row in rows}
         with self.store.connect() as db:
             for row in db.execute("SELECT subject FROM token_limits WHERE scope='model'"):
                 result.setdefault(row[0], {"model": row[0]})
-        return [{**row, "limits": self.snapshot("model", name)} for name, row in result.items()]
+        return [
+            {**row, "limits": self.snapshot(*self.model_scope(user, name))}
+            for name, row in result.items()
+        ]

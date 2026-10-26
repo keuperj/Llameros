@@ -332,7 +332,7 @@ These are quota defaults only: users still require the existing model/target gra
 create usable keys; changing defaults does not grant access.
 
 Administrators can configure a user's allowance across all keys/models in **Configuration →
-User Access → Config**, and a shared model allowance using **Config** beside a downloaded
+User Access → Config**, and a model allowance per user using **Config** beside a downloaded
 model. Both boards provide **Config** in **Add key** and beside existing keys. Users can
 change only their own key limits; they cannot override admin user/model allowances.
 
@@ -360,3 +360,10 @@ host crash before request finalization can lose that in-flight request's account
 
 Direct connections to Ollama bypass Llameros authorization and accounting. Restrict direct
 runtime access when enforcing quotas; use the authenticated `/inference` gateway for clients.
+
+Model allowances apply separately to each user across all of their keys, not to a shared
+pool across users. Model usage totals remain overall statistics; the model-limit column
+shows the signed-in user's allowance and consumption. Existing model policies are preserved
+when upgrading from global model quotas, but per-user/model counters start fresh because
+legacy global counters cannot be reliably attributed to individual users. Existing key
+and user-wide counters are unchanged.

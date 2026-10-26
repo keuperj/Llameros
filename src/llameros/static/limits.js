@@ -11,11 +11,12 @@ const TokenLimits = {
     const parts = ['input', 'output'].map(kind => {
       const cap = value[kind + '_k'];
       if (cap == null) return `${kind}: no limit`;
+      if (value.policy_only) return `${kind}: ${cap}k per user`;
       const used = (value[kind + '_used'] || 0) / 1000;
       const remaining = value[kind + '_remaining'];
       return `${kind}: ${used}k / ${cap}k${value[kind + '_unknown'] ? ' (usage unknown; blocked)' : remaining == null ? '' : `; ${remaining / 1000}k left`}`;
     });
-    return (value.inherited ? 'Default user limits · ' : '') + parts.join(' · ') + ` · ${value.period}` + (value.resets_at ? ` · resets ${new Date(value.resets_at * 1000).toISOString()}` : '');
+    return (value.per_user && !value.policy_only ? `Your model allowance (${value.user}) · ` : value.inherited ? 'Default user limits · ' : '') + parts.join(' · ') + ` · ${value.period}` + (value.resets_at ? ` · resets ${new Date(value.resets_at * 1000).toISOString()}` : '');
   },
   button(scope, subject, title) {
     const button = document.createElement('button');
@@ -47,6 +48,7 @@ const TokenLimits = {
     const form = document.createElement('form');
     const help = document.createElement('p');
     help.textContent = '1 unit = 1,000 tokens. UTC calendar resets. All user, model and key limits apply. In-flight requests may exceed allowances. Saving does not reset usage.';
+    if (value.per_user) help.textContent += ' Model limits apply separately to each user, across all of their keys; users do not share a pool.';
     const controls = {};
     for (const kind of ['input', 'output']) {
       const label = document.createElement('label'); label.textContent = `${kind === 'input' ? 'Input' : 'Output'} (thousand tokens)`;

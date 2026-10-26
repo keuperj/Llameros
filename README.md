@@ -17,7 +17,7 @@ UI assets. Secure sharing is through the local HTTPS gateway, not public hosting
   search, model descriptions, and download progress.
 - **Secure model sharing** — named, model-scoped API keys with expiry or no expiry,
   masked one-time copy, deletion, a scrollable key table, and per-key usage history.
-- **Token allowances** — admin-set user-wide and shared model-wide limits, plus owner-set
+- **Token allowances** — admin-set user-wide and per-user model limits, plus owner-set
   key limits, with independent input/output allowances and daily, weekly, monthly, or no reset.
 - **Authenticated inference** — scoped, revocable API keys, streaming, usage accounting, and copyable
   Ollama, OpenAI-compatible, LangChain, and LlamaIndex examples.

@@ -159,7 +159,13 @@ def test_usage_and_running_model_redaction(multiuser):
     app.state.store.sample({"hardware": HARDWARE, "ollama": {"secret": "SECRET_RUNTIME"}}, 30)
     result = user.get("/api/user/dashboard")
     assert result.status_code == 200
-    assert result.json()["history"]["models"] == admin.get("/api/history").json()["models"]
+    user_models = result.json()["history"]["models"]
+    admin_models = admin.get("/api/history").json()["models"]
+    assert [{k: v for k, v in row.items() if k != "limits"} for row in user_models] == [
+        {k: v for k, v in row.items() if k != "limits"} for row in admin_models
+    ]
+    assert all(row["limits"]["user"] == "alice" for row in user_models)
+    assert all(row["limits"]["user"] == current_user() for row in admin_models)
     assert {row["model"]: row["output_tokens"] for row in result.json()["history"]["models"]} == {
         "own-model": 3,
         "private-model": 300,

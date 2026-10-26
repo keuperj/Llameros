@@ -431,7 +431,7 @@ def create_app(
             "keys": own_keys,
             "context_length": cfg.context_length,
             "history": {
-                "models": app.state.api_keys.limits.models(history["models"]),
+                "models": app.state.api_keys.limits.models(history["models"], session["username"]),
                 "samples": [
                     {
                         "timestamp": sample["timestamp"],
@@ -506,10 +506,10 @@ def create_app(
         }
 
     @app.get("/api/history", dependencies=protected)
-    def history():
+    def history(session=Depends(require_admin)):
         """Return full admin telemetry history and overall model-generation aggregates."""
         data = store.history()
-        data["models"] = app.state.api_keys.limits.models(data["models"])
+        data["models"] = app.state.api_keys.limits.models(data["models"], session["username"])
         return data
 
     @app.post("/api/action-errors", dependencies=protected)
@@ -688,7 +688,10 @@ def create_app(
     def generate(body: GenerateRequest, session=Depends(require_admin)):
         """Queue bounded admin playground inference against an already-loaded model and record totals."""
         name = validate_model(body.model)
-        quota_scopes = [("user", session["username"]), ("model", name)]
+        quota_scopes = [
+            ("user", session["username"]),
+            app.state.api_keys.limits.model_scope(session["username"], name),
+        ]
         app.state.api_keys.limits.check(quota_scopes)
 
         def work(progress):

@@ -606,7 +606,11 @@ def install_gateway(
         finished = False
         quota_started = None
         dispatched = False
-        quota_scopes = [("key", key["id"]), ("user", key["user"]), ("model", model)]
+        quota_scopes = [
+            ("key", key["id"]),
+            ("user", key["user"]),
+            keys.limits.model_scope(key["user"], model),
+        ]
 
         async def finish():
             """Idempotently close upstream resources, record content-free usage, and release the device permit."""
@@ -715,6 +719,7 @@ def install_gateway(
                     409, "Choose exactly one permitted loaded model and hardware target"
                 )
             target = matches[0]["target"]
+            keys.limits.check(quota_scopes)
             ticket = await jobs.scheduler.acquire(target, model, request)
             # Keys may be revoked while waiting; do not start new upstream work afterward.
             await run_in_threadpool(bearer, request)

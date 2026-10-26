@@ -88,7 +88,7 @@ def test_gateway_enforces_default_user_limits(gateway):
 def test_persistent_atomic_accounting_and_policy_changes(tmp_path):
     store = Store(tmp_path / "state.sqlite3")
     limits = Limits(store)
-    scopes = [("user", "alice"), ("model", "model:latest")]
+    scopes = [("user", "alice"), limits.model_scope("alice", "model:latest")]
     started = limits.check(scopes)
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(
@@ -101,7 +101,9 @@ def test_persistent_atomic_accounting_and_policy_changes(tmp_path):
     with pytest.raises(HTTPException) as error:
         limits.check(scopes)
     assert error.value.status_code == 429
-    assert Limits(store).snapshot("model", "model:latest")["output_used"] == 4000
+    assert (
+        Limits(store).snapshot(*limits.model_scope("alice", "model:latest"))["output_used"] == 4000
+    )
     limits.set("user", "alice", LimitConfig(input_k=3, period="month"), "admin")
     limits.check(scopes)
     assert limits.snapshot("user", "alice")["input_used"] == 2000
@@ -136,8 +138,39 @@ def test_gateway_enforces_all_scopes(gateway, scope):
     assert post(client, created["key"]).status_code == 429
     assert len(calls) == 1
     state = client.get(f"/api/limits/{scope}", params={"subject": subject}).json()
+    if scope == "model":
+        assert state["per_user"] and state["policy_only"]
+        state = app.state.api_keys.limits.snapshot(
+            *app.state.api_keys.limits.model_scope(app.state.api_keys.users.owner, subject)
+        )
     assert state["output_used"] == 1001
     assert state["output_remaining"] == 0
+
+
+def test_model_allowance_is_per_user_across_keys(multiuser):
+    app, admin, user = multiuser
+    limits = app.state.api_keys.limits
+    first = user_issue(user)
+    second = user_issue(user)
+    bob = user_issue(admin, user="bob")
+    limits.set("model", "gemma3:270m", LimitConfig(output_k=1), "admin")
+    # Legacy global totals cannot consume anybody's personal allowance.
+    limits.charge([("model", "gemma3:270m")], {"prompt": 10, "output": 10000}, limits.check([]))
+    alice_scope = limits.model_scope("alice", "gemma3:270m")
+    limits.charge([alice_scope], {"prompt": 10, "output": 1000}, limits.check([alice_scope]))
+    for key in (first, second):
+        assert post(user, key["key"]).status_code == 429
+    limits.check([limits.model_scope("bob", "gemma3:270m")])
+    # This fixture's runtime transport is not mocked; check admission via identity instead.
+    identity = app.state.api_keys.authenticate("Bearer " + bob["key"])
+    limits.check([limits.model_scope(identity["user"], "gemma3:270m")])
+    limits.check([limits.model_scope("alice", "other:latest")])
+    assert limits.snapshot(*alice_scope)["output_used"] == 1000
+    assert limits.snapshot(*limits.model_scope("bob", "gemma3:270m"))["output_used"] == 0
+    rows = user.get("/api/user/dashboard").json()["history"]["models"]
+    state = next(row["limits"] for row in rows if row["model"] == "gemma3:270m")
+    assert state["user"] == "alice" and state["output_remaining"] == 0
+    assert "bob" not in str(state)
 
 
 def test_key_creation_limits_and_validation(gateway):
