@@ -37,13 +37,26 @@ Command-line overrides include `--host` and `--port`. Without `uv`, install with
 `uv.lock` records the tested dependency set. The dashboard can open without Docker,
 but model operations require a working daemon.
 
-## Switch an existing installation to rootless Docker
+## Check your firewall configuration
+```bash
+ufw status 
+```
+and make sure that the port you are using for Llameros is not blocked.
 
+## Switch an existing installation to rootless Docker
 This creates a **separate per-user daemon**, not an in-place conversion. Keep the
 old containers/volumes until the replacement works. The steps below assume Linux
 with systemd and Docker Engine; package names differ for distribution/Snap/Desktop
 installations. Follow Docker's official rootless installation instructions for your
 distribution rather than mixing package sources.
+
+### Check if you have rootless Docker running allready
+
+```bash
+docker info -f "{{println .SecurityOptions}}" | grep rootless
+```
+If this command outputs rootless, your Docker daemon is running in rootless mode. If it returns blank or an error, it is running as root.
+
 
 ### 1. Stop workloads and preserve data
 
