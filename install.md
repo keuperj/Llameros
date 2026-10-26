@@ -37,6 +37,71 @@ Command-line overrides include `--host` and `--port`. Without `uv`, install with
 `uv.lock` records the tested dependency set. The dashboard can open without Docker,
 but model operations require a working daemon.
 
+## Run automatically with systemd (`systemctl`)
+
+Use a **user service**, not a root service. Log in as the same Linux account used
+for installation and rootless Docker. First complete `uv sync --locked`, configure
+Llameros as above, and stop any manually started Llameros process to free its port.
+This example assumes the checkout is at `$HOME/Llameros`; replace both
+`%h/Llameros` paths below with your actual absolute checkout path if different.
+
+Create the unit:
+
+```bash
+mkdir -p "$HOME/.config/systemd/user"
+cat > "$HOME/.config/systemd/user/llameros.service" <<'EOF'
+[Unit]
+Description=Llameros HTTPS dashboard
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Llameros
+ExecStart=%h/Llameros/.venv/bin/llameros
+Environment="PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin"
+Environment=DOCKER_HOST=unix://%t/docker.sock
+UnsetEnvironment=DOCKER_CONTEXT
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=default.target
+EOF
+```
+
+The service uses the installed virtual environment directly and the normal
+per-user Llameros configuration. For a different configuration file, append
+`--config /absolute/path/to/config.toml` to `ExecStart`. `%h` is your home
+directory and `%t` is your user runtime directory. The Docker socket assumes the
+standard rootless installation; adjust it if yours differs. Services do not read
+your shell startup files, so include any custom Docker CLI location in `PATH`.
+
+Enable Docker and Llameros, then inspect startup and logs:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now docker.service
+systemctl --user enable --now llameros.service
+systemctl --user status llameros.service --no-pager
+journalctl --user -u llameros.service -n 50 --no-pager
+```
+
+To start at boot and keep running after logout, have an administrator enable
+lingering for this account (this does **not** run Llameros as root):
+
+```bash
+sudo loginctl enable-linger "$(id -un)"
+```
+
+After configuration changes or application updates, use
+`systemctl --user restart llameros.service`. After editing the unit itself, run
+`systemctl --user daemon-reload` first. To stop Llameros and disable automatic
+startup, use `systemctl --user disable --now llameros.service`; this does not
+disable Docker. If you get “Failed to connect to bus”, log in directly as the
+account through SSH or a desktop session rather than switching users with sudo.
+
 ## Check your firewall configuration
 ```bash
 ufw status 
