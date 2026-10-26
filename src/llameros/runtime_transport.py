@@ -11,6 +11,10 @@ import threading
 _lock = threading.Lock()
 _relays = {}
 
+# The Unix-socket relay determines the connection destination, but Ollama still
+# validates HTTP Host when bound to loopback. Do not use a synthetic hostname.
+RUNTIME_BASE_URL = "http://localhost:11434"
+
 # Fixed program only: no user input is interpolated into shell code. The remote
 # reader is reaped when stdin closes, including cancellation of a streaming call.
 RELAY = (

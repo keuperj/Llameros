@@ -15,7 +15,7 @@ import httpx
 
 from .config import Settings
 from .model_storage import ModelStorage, validate_directory
-from .runtime_transport import private_socket
+from .runtime_transport import RUNTIME_BASE_URL, private_socket
 
 
 class DockerError(RuntimeError):
@@ -378,7 +378,7 @@ class Docker:
     def api(self, method: str, path: str, body: dict | None = None, timeout: int = 600) -> dict:
         """Call private container-loopback HTTP and return JSON, rejecting runtime errors."""
         with httpx.Client(
-            base_url="http://ollama",
+            base_url=RUNTIME_BASE_URL,
             transport=httpx.HTTPTransport(uds=self.socket_path()),
             timeout=timeout,
             trust_env=False,
@@ -394,7 +394,7 @@ class Docker:
         """Stream a model download to the progress callback and refresh inventory only after success."""
         self.ensure_running()
         with httpx.Client(
-            base_url="http://ollama",
+            base_url=RUNTIME_BASE_URL,
             transport=httpx.HTTPTransport(uds=self.socket_path()),
             timeout=httpx.Timeout(120, read=900),
             trust_env=False,

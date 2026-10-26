@@ -32,6 +32,7 @@ def gateway(tmp_path):
     }
 
     def handle(request):
+        assert request.headers["host"] == "localhost:11434"
         calls.append(request)
         if isinstance(response, dict):
             return httpx.Response(200, json=response)
@@ -149,7 +150,7 @@ def test_authentication_management_and_no_credential_forwarding(gateway):
     upstream = calls[-1]
     assert "authorization" not in upstream.headers
     assert "cookie" not in upstream.headers
-    assert upstream.url.host == "ollama"
+    assert upstream.headers["host"] == "localhost:11434"
     payload = json.loads(upstream.content)
     assert payload["options"] == {"num_ctx": 4096, "num_predict": 256, "num_gpu": 0}
     assert payload["keep_alive"] == -1
@@ -460,7 +461,7 @@ def test_device_routing_uses_registered_slot_url(tmp_path, monkeypatch):
         created, _ = issue(client, targets=[gpu])
         assert post(client, created["key"], target=gpu).status_code == 200
         assert calls == [("gemma3:270m", gpu)]
-        assert requests[0].url.host == "ollama"
+        assert requests[0].headers["host"] == "localhost:11434"
         assert "num_gpu" not in json.loads(requests[0].content)["options"]
 
 

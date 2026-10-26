@@ -20,6 +20,7 @@ from .api_keys import ApiKeys, KeyRequest, normalize
 from .docker import DockerError
 from .limits import LimitConfig
 from .multimodal import reject_documents, validate_images
+from .runtime_transport import RUNTIME_BASE_URL
 
 PREFIX = "/inference"
 
@@ -270,7 +271,7 @@ def install_gateway(
             else docker
         )
         async with httpx.AsyncClient(
-            base_url="http://ollama",
+            base_url=RUNTIME_BASE_URL,
             transport=transport
             or httpx.AsyncHTTPTransport(uds=await run_in_threadpool(runtime.socket_path)),
             trust_env=False,
@@ -728,7 +729,7 @@ def install_gateway(
                 if runtimes
                 else docker
             )
-            base_url = "http://ollama"
+            base_url = RUNTIME_BASE_URL
             if embedding:
                 body.update(
                     model=model, keep_alive=-1, options={**options, "num_ctx": cfg.context_length}
