@@ -102,6 +102,75 @@ startup, use `systemctl --user disable --now llameros.service`; this does not
 disable Docker. If you get “Failed to connect to bus”, log in directly as the
 account through SSH or a desktop session rather than switching users with sudo.
 
+### Using an existing rootful Docker daemon
+
+The unit above assumes rootless Docker. If your installation deliberately uses
+the system-wide (rootful) daemon, keep Llameros as a **user service**, but make
+these changes:
+
+1. Set `allow_rootful_docker = true` in the Llameros configuration actually loaded
+   by the service (normally `$HOME/.config/llameros/config.toml`). This explicitly
+   accepts root-equivalent access through Docker; it does not run Llameros as root.
+2. In `$HOME/.config/systemd/user/llameros.service`, remove
+   `Wants=docker.service` and `After=docker.service`: those refer to a **user**
+   Docker unit, not the system daemon. Replace the Docker environment line with
+   `Environment=DOCKER_HOST=unix:///var/run/docker.sock`. Keep
+   `UnsetEnvironment=DOCKER_CONTEXT` to avoid a conflicting context override.
+3. Start the system daemon and verify socket access as the ordinary Llameros
+   account, then restart Llameros:
+
+```bash
+sudo systemctl enable --now docker.service
+env -u DOCKER_CONTEXT DOCKER_HOST=unix:///var/run/docker.sock docker info
+systemctl --user daemon-reload
+systemctl --user restart llameros.service
+journalctl --user -u llameros.service -n 50 --no-pager
+```
+
+The `docker info` command must succeed **without sudo**. If access is denied,
+have an administrator review socket access for the service account. Do not make
+the socket world-writable. Docker-group access is root-equivalent; if group
+membership changes, the existing user manager may retain its old groups until
+its session is restarted (a reboot is an unambiguous way to apply the change).
+Do not start a second rootless daemon or migrate models merely to use systemd.
+
+### Docker works in a terminal but not in the service
+
+The example above explicitly selects the standard rootless socket. Before using
+it, verify that this is the same daemon used by your working terminal. Run these
+commands as the Llameros account on the affected host:
+
+```bash
+command -v docker
+printenv DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG
+docker context show
+docker context inspect --format '{{.Endpoints.docker.Host}}'
+docker info --format '{{json .SecurityOptions}}'
+env -u DOCKER_CONTEXT DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock" docker info
+systemctl --user status docker.service llameros.service --no-pager
+systemctl --user cat llameros.service
+journalctl --user -u llameros.service -n 80 --no-pager
+```
+
+If ordinary `docker info` works but the explicit socket check fails, the service
+is targeting a different or stopped daemon. For a standard rootless installation,
+start its existing user service with `systemctl --user start docker.service`.
+If that unit does not exist, follow the rootless installation section below;
+do not assume the system-wide Docker service is the same daemon.
+
+For a custom rootless socket, change `Environment=DOCKER_HOST=...` in the
+Llameros unit to the verified local `unix://` endpoint. Account for any terminal
+`DOCKER_CONTEXT` override when determining that endpoint. Also check that the
+service `PATH` contains the directory reported by `command -v docker`, and set
+`DOCKER_CONFIG` explicitly if you use a non-default Docker configuration directory.
+Then run `systemctl --user daemon-reload` and
+`systemctl --user restart llameros.service`.
+
+Do not switch to `/var/run/docker.sock`, loosen socket permissions, or run Llameros
+as root merely to bypass an error. The system daemon may be rootful (refused by
+default) and may contain different models and containers. Preserve the existing
+daemon's workloads and storage when diagnosing the connection.
+
 ## Check your firewall configuration
 ```bash
 ufw status 
