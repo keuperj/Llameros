@@ -52,3 +52,9 @@ footer a:focus-visible{outline:2px solid var(--green);outline-offset:5px;border-
 
 #session-banner { padding: 12px 16px; border: 1px solid #ffbc86; border-radius: 8px; background: #33291f; color: #ffbc86; }
 .legend .gpu-legend { color: #83bfff; }
+
+.running-model-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
+.running-model > .section-head{flex-wrap:wrap}
+#benchmark-results table{width:100%}
+#benchmark-results td{vertical-align:top}
+#benchmark-results details{min-width:160px}

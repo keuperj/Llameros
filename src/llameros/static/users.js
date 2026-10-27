@@ -22,7 +22,7 @@ function configureBoard(data, asUser = data.role !== 'admin') {
   switcher.textContent = asUser ? 'Switch to admin board' : 'Switch to user board';
   document.getElementById('identity').textContent = `${data.username} · ${data.role} · ${asUser ? 'user' : 'admin'} board`;
   for (const node of document.querySelectorAll('#dashboard > *')) {
-    node.hidden = asUser && !['runtime-models', 'key-management', 'usage-history', 'user-intro'].includes(node.id);
+    node.hidden = asUser && !['runtime-models', 'key-management', 'usage-history', 'benchmark-history', 'user-intro'].includes(node.id);
   }
   document.getElementById('user-intro').hidden = !asUser;
   for (const id of ['events', 'events-heading']) document.getElementById(id).hidden = asUser;

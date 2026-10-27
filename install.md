@@ -459,7 +459,7 @@ Requests are sequential: this measures single-request speed with the configured
 runtime parallelism, not maximum multi-client throughput. The first case may
 include warm-up effects. Small configured contexts can truncate longer inputs.
 
-Open **Usage history → Benchmark rankings · latest results** on either board to
+Open **Benchmarks → Model performance rankings** on either board to
 see the latest persisted result for each model/device, including after a restart
 or model unload. Chat and embedding rankings are separate. Chat reports output
 tokens/s using runtime generation timing when available (otherwise request time);
