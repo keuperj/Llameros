@@ -44,6 +44,10 @@ class InferenceScheduler:
         ticket = Ticket(target, model, time.monotonic())
         with self.jobs.lock:
             job = self.jobs.job
+            if job["state"] == "running" and job.get("action") == "benchmark":
+                raise HTTPException(
+                    503, "Temporarily unavailable due to benchmark", headers={"Retry-After": "5"}
+                )
             if job["state"] == "running" and job.get("action") != "api-inference":
                 targets = job.get("targets")
                 if targets is None or target in targets:

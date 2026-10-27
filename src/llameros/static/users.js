@@ -39,6 +39,7 @@ function configureBoard(data, asUser = data.role !== 'admin') {
     document.getElementById('runtime-models').append(placeholder);
   }
   renderKeyUsage([]); renderModelUsage([]);
+  if (typeof BenchmarkResults !== 'undefined') BenchmarkResults.render([]);
   document.getElementById('api-keys').replaceChildren();
   document.getElementById('users').replaceChildren();
 }
@@ -70,6 +71,7 @@ async function refreshUserBoard() {
   renderAccess(false);
   if (!data.models.length) panel.replaceChildren(element('p', 'No models are currently running. An administrator can start a model.'));
   renderKeyModels(data.models); renderKeyUsage(data.keys); renderModelUsage(data.history.models); draw(data.history.samples);
+  if (typeof BenchmarkResults !== 'undefined') BenchmarkResults.render(data.history.benchmarks);
 }
 
 /**

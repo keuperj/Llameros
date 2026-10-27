@@ -179,6 +179,11 @@ def install_gateway(
 
     def bearer(request: Request):
         """Authenticate a bearer header, also allowing x-api-key on Anthropic Messages requests."""
+        state = jobs.status()
+        if state["state"] == "running" and state.get("action") == "benchmark":
+            raise HTTPException(
+                503, "Temporarily unavailable due to benchmark", headers={"Retry-After": "5"}
+            )
         authorization = request.headers.get("authorization", "")
         if not authorization and request.url.path.endswith("/v1/messages"):
             authorization = "Bearer " + request.headers.get("x-api-key", "")

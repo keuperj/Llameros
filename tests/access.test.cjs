@@ -40,6 +40,7 @@ test('user model cards reuse framework examples and copy controls but never offe
   const card = ui.root.children[0];
   assert.equal(descendants(card, 'h3')[0].textContent, '<model>:latest');
   assert.equal(descendants(card, 'button').some(button => button.dataset.stop), false);
+  assert.equal(descendants(card, 'button').some(button => button.dataset.benchmark), false);
   const select = descendants(card, 'select')[0];
   for (const framework of Object.keys(Access.frameworks)) {
     select.value = framework; select.handlers.change();
@@ -56,6 +57,7 @@ test('user model cards reuse framework examples and copy controls but never offe
 test('one box per model/device, secure examples and preserved state on refresh', () => {
   const ui = panel(); start(ui);
   assert.equal(ui.root.children.length, 2);
+  for (const card of ui.root.children) assert.equal(descendants(card, 'button').filter(button => button.dataset.benchmark).length, 1);
   const first = ui.root.children[0], details = descendants(first, 'details')[0]; details.open = true;
   const framework = descendants(first, 'select')[0]; framework.value = 'langchain'; framework.handlers.change();
   assert.match(descendants(first, 'textarea')[0].value, /ChatOllama/);

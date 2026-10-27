@@ -27,6 +27,10 @@ class Store:
         with self.connect() as db:
             db.executescript("""
                 PRAGMA journal_mode=WAL;
+                CREATE TABLE IF NOT EXISTS benchmarks (
+                    model TEXT NOT NULL, target TEXT NOT NULL, data TEXT NOT NULL,
+                    PRIMARY KEY(model, target)
+                );
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY, timestamp REAL NOT NULL,
                     model TEXT, kind TEXT NOT NULL, detail TEXT NOT NULL
@@ -156,6 +160,22 @@ class Store:
             )
             self.trim(db, "generations")
 
+    def save_benchmark(self, result):
+        """Keep the latest benchmark per model/device independently of telemetry retention."""
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO benchmarks(model,target,data) VALUES(?,?,?)",
+                (result["model"], result["target"], json.dumps(result, allow_nan=False)),
+            )
+
+    def benchmarks(self):
+        """Return content-free latest results, including incomplete attempts."""
+        with self.connect() as db:
+            return [
+                json.loads(row[0])
+                for row in db.execute("SELECT data FROM benchmarks ORDER BY model,target")
+            ]
+
     def history(self, limit: int = 240) -> dict:
         """Return recent samples/events and overall per-model generation totals.
 
@@ -191,4 +211,5 @@ class Store:
             ],
             "events": events,
             "models": models,
+            "benchmarks": self.benchmarks(),
         }

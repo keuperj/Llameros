@@ -439,6 +439,42 @@ cannot change an existing container's environment. Containers with mismatched
 parallelism are refused with instructions to recreate them. Set the TOML option,
 not just an environment variable on the Llameros systemd service.
 
+### Benchmark a running model
+
+Administrators can select **Benchmark** beside **Stop model** in any running-model
+card. Confirm the temporary API interruption before starting. The benchmark
+requires all inference queues to be idle; otherwise it is rejected rather than
+interrupting users' existing requests. While running, the entire authenticated
+inference gateway returns HTTP **503**, “Temporarily unavailable due to benchmark”,
+with `Retry-After: 5`. Model-management operations are also reserved until it ends.
+Direct connections to Ollama are outside this reservation and can skew results.
+
+Each run has a **285-second absolute measurement deadline**, leaving time within
+five minutes for cleanup and saving results. It uses the selected loaded model
+and hardware target. Chat models receive six short/medium/long prompt and output
+limit combinations (64–384 output tokens); actual output can be shorter. Embedding
+models receive six text-length and batch-size combinations, not chat prompts.
+Capability metadata selects the workload; unsupported models report a failed run.
+Requests are sequential: this measures single-request speed with the configured
+runtime parallelism, not maximum multi-client throughput. The first case may
+include warm-up effects. Small configured contexts can truncate longer inputs.
+
+Open **Usage history → Benchmark rankings · latest results** on either board to
+see the latest persisted result for each model/device, including after a restart
+or model unload. Chat and embedding rankings are separate. Chat reports output
+tokens/s using runtime generation timing when available (otherwise request time);
+embedding reports input tokens/s using request time. The aggregate is total tokens
+divided by total measured seconds, not an average of case rates. Expand an entry
+for per-case metrics, date, context and parallel setting. Compare matching
+settings and timing methods; these synthetic rankings are not quality scores.
+
+Timeouts and failures retain completed case metrics but are not ranked. A new run
+replaces that model/device's previous result, including if the new run fails.
+Benchmark metrics are stored separately from normal usage totals and quotas;
+synthetic prompts, generated text and embedding vectors are not stored. Benchmark
+results are retained independently of ordinary telemetry retention. The gateway
+reopens when the benchmark finishes, fails, or reaches its deadline.
+
 ## Configuration
 
 ### Application settings

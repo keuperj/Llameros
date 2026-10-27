@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from .auth import COOKIE, Sessions, account_available, verify_password
+from .benchmark import measure
 from .body_limits import BodyLimits
 from .catalog import Catalog, validate_model
 from .config import Settings, current_user
@@ -432,6 +433,7 @@ def create_app(
             "keys": own_keys,
             "context_length": cfg.context_length,
             "history": {
+                "benchmarks": history["benchmarks"],
                 "models": app.state.api_keys.limits.models(history["models"], session["username"]),
                 "samples": [
                     {
@@ -711,6 +713,24 @@ def create_app(
             work,
             targets={body.target} if body.target and action in {"load", "unload"} else None,
         )
+
+    @app.post("/api/benchmark", dependencies=protected, status_code=202)
+    def benchmark(body: ModelRequest):
+        """Reserve all devices for a bounded admin benchmark of one resident instance."""
+        name = validate_model(body.model)
+        client = runtimes.model_client(name, body.target) if runtimes else docker
+        if not runtimes and not is_loaded(name):
+            raise HTTPException(409, "Load the model before benchmarking")
+        target = client.target["id"] if runtimes else body.target or "cpu"
+
+        def work(progress):
+            result = asyncio.run(
+                measure(client, name, target, cfg.context_length, cfg.ollama_num_parallel, progress)
+            )
+            store.save_benchmark(result)
+            return result
+
+        return jobs.submit("benchmark", name, work)
 
     @app.post("/api/generate", dependencies=protected, status_code=202)
     def generate(body: GenerateRequest, session=Depends(require_admin)):

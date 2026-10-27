@@ -119,6 +119,14 @@ function renderAccess(allowManagement = true) {
         actionFeedback.bind(stop, JSON.stringify(['running-stop', name, model.target || 'cpu']));
         stop.addEventListener('click', safe(async (event, control) => { await submitAction(control, '/api/models/unload', {model: name, target: model.target || ''}); await refresh(); }));
         head.append(stop);
+        const benchmark = element('button', 'Benchmark'); benchmark.type = 'button'; benchmark.dataset.benchmark = 'true';
+        benchmark.setAttribute('aria-label', `Benchmark ${name} on ${model.hardware || model.target || 'CPU'}`);
+        actionFeedback.bind(benchmark, JSON.stringify(['benchmark', name, model.target || 'cpu']));
+        benchmark.addEventListener('click', safe(async (event, control) => {
+          if (!window.confirm('Benchmark this model? The inference API will be temporarily unavailable for all users for up to 5 minutes.')) return;
+          await submitAction(control, '/api/benchmark', {model: name, target: model.target || ''}); await refresh();
+        }));
+        head.append(benchmark);
       }
       box.append(head);
       box.append(element('p', `Status: loaded · ${model.hardware || model.target || 'CPU'} · ${model.target || 'cpu'}`, 'model-status'));
@@ -246,6 +254,7 @@ function updateControls() {
       ? (state.active.includes(button.dataset.model) ? 'This model is already running. Stop it before starting it again.' : 'Select a free hardware slot, or stop a running model first.') : '';
   });
   document.querySelectorAll('#runtime-models button[data-stop]').forEach(button => { button.disabled = busy; });
+  document.querySelectorAll('#runtime-models button[data-benchmark]').forEach(button => { button.disabled = busy; });
 }
 /**
  * Create a labeled progress indicator, supporting indeterminate values.
@@ -279,6 +288,10 @@ function renderJob(job) {
       const percent = JobProgress.percent(layer), id = layer.id || layer.digest || '';
       $('job').append(progressBar(`${id.slice(0, 20)} · ${layer.status || 'Downloading'}${percent === null ? '' : ' · ' + percent.toFixed(0) + '% · ' + bytes(layer.completed) + ' / ' + bytes(layer.total)}`, percent));
     }
+  }
+  if (job.action === 'benchmark' && job.result) {
+    const result = job.result;
+    $('job').append(element('p', `Benchmark ${result.status}: ${result.tokens_per_second == null ? 'No throughput available' : result.tokens_per_second.toFixed(1) + ' tokens/s'}. ${result.error || 'Saved in Usage history → Benchmark rankings.'}`));
   }
   updateControls();
   $('pull').disabled = busy || !selectedFit || !selectedFit.fits;
@@ -736,6 +749,7 @@ async function refresh() {
       row.append(actions); $('installed').append(row);
     });
     renderModelUsage(history.models);
+    BenchmarkResults.render(history.benchmarks);
     serverEvents = history.events;
     for (let index = localActionEvents.length - 1; index >= 0; index--) {
       const local = localActionEvents[index];
