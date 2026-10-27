@@ -88,12 +88,42 @@ systemctl --user status llameros.service --no-pager
 journalctl --user -u llameros.service -n 50 --no-pager
 ```
 
-To start at boot and keep running after logout, have an administrator enable
-lingering for this account (this does **not** run Llameros as root):
+### Keep Llameros running after logout (enable lingering)
+
+**Do not skip this step for an unattended server.** Enabling the user service
+alone does not ensure that its user-service manager stays running after the last
+login session ends. Enable lingering so the manager starts at boot and remains
+available after logout. This applies whether Docker is rootless or rootful:
+Llameros itself is still a user service.
+
+While logged in as the **account running Llameros**, run:
 
 ```bash
 sudo loginctl enable-linger "$(id -un)"
+loginctl show-user "$(id -un)" --property=Linger
 ```
+
+The verification command should print `Linger=yes`. If an administrator runs
+this from a root shell, use the actual Llameros account name instead of
+`$(id -un)`; otherwise lingering would be enabled for root. Lingering does
+**not** run Llameros as root.
+
+As the Llameros account, without sudo, ensure the service is enabled and running:
+
+```bash
+systemctl --user enable --now llameros.service
+systemctl --user status llameros.service --no-pager
+```
+
+Log out and check the dashboard from another machine. If it still stops despite
+`Linger=yes`, reconnect and inspect the unit and logs:
+
+```bash
+systemctl --user cat llameros.service
+journalctl --user -u llameros.service -n 80 --no-pager
+```
+
+### Restarting or disabling the service
 
 After configuration changes or application updates, use
 `systemctl --user restart llameros.service`. After editing the unit itself, run
