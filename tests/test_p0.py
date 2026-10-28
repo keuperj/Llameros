@@ -119,3 +119,14 @@ def test_private_relay_http_and_cleanup(monkeypatch):
     finally:
         close_relays()
     assert not os.path.exists(path)
+    # A new application lifecycle must reconnect to the same existing container
+    # through a new private relay, without starting or recreating the container.
+    replacement = private_socket("test-container")
+    try:
+        assert replacement != path
+        with httpx.Client(transport=httpx.HTTPTransport(uds=replacement)) as client:
+            assert client.get("http://localhost:11434/api/tags").json() == {}
+        assert all(args[:4] == ["docker", "exec", "-i", "test-container"] for args in calls)
+    finally:
+        close_relays()
+    assert not os.path.exists(replacement)

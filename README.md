@@ -59,13 +59,14 @@ free CPU/GPU slot, and load it.
 
 ## Access a model from Python
 
-Load a model in the dashboard, then create a key in **Key Management → Add key**
-with permission for that model and device. Copy the one-time secret; use this
-bearer key—not your Linux password—in clients. Ordinary users need an admin grant.
+With a model loaded, create a key in **Key Management → Add key** and copy the
+one-time secret. All active users can create **All models** or model-specific keys
+without an admin grant. Keys work on all CPU/GPU targets; expiry is optional.
+Download the server certificate next to the key-generation controls and verify it
+before use.
 
-Install `httpx` in your client environment (`python -m pip install httpx`; it is
-already included in the Llameros environment). Set `LLAMEROS_API_KEY` securely,
-for example with a hidden Bash prompt so the key is not saved in shell history:
+Install `httpx` (`python -m pip install httpx`; already included in Llameros), then
+set your key and verified server certificate or CA bundle in Bash:
 
 ```bash
 read -rsp 'Llameros API key: ' LLAMEROS_API_KEY; echo
@@ -73,21 +74,9 @@ export LLAMEROS_API_KEY
 export LLAMEROS_CA_CERT="/absolute/path/to/verified-llameros-certificate.pem"
 ```
 
-Point `LLAMEROS_CA_CERT` to your verified server certificate or issuing CA bundle,
-then run this Python example. Change the model tag and target to a loaded instance
-allowed by your key; use the HTTPS address shown under **Access model** if remote.
-
-All active users can create generic **All models** keys by default, without an
-administrator-issued model grant. These keys cover current and future models;
-users can also choose a model-specific key. Expiry is optional for all roles.
-Legacy account model grants and grant-expiry dates no longer restrict keys.
-Account blocking, key revocation, selected key expiry and usage quotas still apply.
-
-All API keys work on all hardware targets, including existing keys previously
-restricted to CPU or a GPU. Key model permissions, expiry,
-revocation and quotas still apply. Hardware selection is routing, not a key
-permission: specify `X-Llameros-Target` when a model is loaded on multiple targets.
-Legacy `targets` fields are accepted for compatibility but do not restrict access.
+Use the HTTPS address shown under **Access model** and adjust the model tag and
+target below to a loaded instance allowed by your key. `X-Llameros-Target` selects
+the CPU/GPU instance and is required when the model is loaded on multiple targets.
 
 ```python
 import os
@@ -118,8 +107,8 @@ with httpx.Client(
     print(response.json()["message"]["content"])
 ```
 
-Never disable TLS verification, commit keys, or paste them into support reports.
-Unset `LLAMEROS_API_KEY` after use and revoke unwanted keys in the dashboard.
+Use the API key, not your Linux password. Keep TLS verification enabled and keys
+private; unset `LLAMEROS_API_KEY` after use and revoke unwanted keys in the dashboard.
 See [API compatibility](api-compatibility.md) for other endpoints and streaming.
 
 ## Documentation
@@ -127,12 +116,11 @@ See [API compatibility](api-compatibility.md) for other endpoints and streaming.
 | Guide | Contents |
 |---|---|
 | [Installation & usage](install.md) | Setup, configuration, storage, model workflow, GPU runtimes, and client access |
+| [API compatibility](api-compatibility.md) | Full API ducumentation
 | [Troubleshooting](trouble_shooting.md) | Unavailable CPU/GPU slots, container migration, login, downloads, and API issues |
 | [Development guide](development.md) | Contributor setup, architecture, documentation conventions, tests, acceptance checks, and security model |
 | [Security audit](Security_Audit.md) | Current security findings, validation evidence, limitations, and outstanding deployment checks |
 
-CPU utilization does not block loading; available memory and slot assignment do.
-For **CPU unavailable**, follow the [migration and diagnostic guide](trouble_shooting.md#cpu-shows-unavailable-despite-low-utilization).
 
 ---
 
@@ -141,6 +129,7 @@ MIT licensed. Llameros: the people who manage llama caravans through the Andes.
 <p>
   <a href="https://github.com/keuperj/Llameros" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a>
   · <a href="https://www.llm-praxis.de/" target="_blank" rel="noopener noreferrer">maintained by LLM-Praxis</a>
+  · <a href="https://www.keuper-labs.org/" target="_blank" rel="noopener noreferrer">developed by Keuper-Labs</a>
 </p>
 <p align="right">
 Supported by
