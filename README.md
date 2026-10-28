@@ -4,25 +4,22 @@
 
 # Llameros
 
-**Manage and securely share your local Ollama models.** Your local model caravan
-for Linux: discover models, run them on CPU or GPU, create scoped bearer keys for
-your clients, and monitor usage—without a cloud account, frontend build, or external
-UI assets. Secure sharing is through the local HTTPS gateway, not public hosting.
+**Light weight Ollama manger: setup and securely share your local Ollama models.** 
 
-## Features
+**Usage scenario**: you want to share LLMs running on a **single** local sever/workstation with **multiple** users. *LLameros* is easy to setup and provides a simple web-interface which helps you to serve and mange acess to language models.  
 
-- **Per-device runtimes** — multiple resident models per CPU/GPU, isolated NVIDIA/AMD
-  DOCKER containers, bounded per-device inference queues, shared downloads, and individual model controls.
-- **Hardware-aware discovery** — RAM/VRAM fit estimates, recommendations,
-  search, model descriptions, and download progress.
-- **Secure model sharing** — named, model-scoped API keys with expiry or no expiry,
-  masked one-time copy, deletion, a scrollable key table, and per-key usage history.
-- **Token allowances** — admin-set user-wide and per-user model limits, plus owner-set
-  key limits, with independent input/output allowances and daily, weekly, monthly, or no reset.
-- **Authenticated inference** — scoped, revocable API keys, streaming, usage accounting, and copyable
-  Ollama, OpenAI-compatible, LangChain, and LlamaIndex examples.
-- **Local control** — Linux PAM sign-in over HTTPS, configurable model storage,
-  resource history, lifecycle events, and token/timing totals.
+## Key Features:
+* easy setup - **no sudo** privileges needed!
+* run models securely in rootless Docker
+* CPU, multi-GPU and multi-model support
+* Hardware / usage monitoring 
+* model search, automatic model recommendation, download and management 
+* model benchmarking
+* multi-user support - authentication via host PEM (e.g. local users, LDAP, ...)
+* HTTPS gateway
+* web-ui API key-management (fine grain user and model token-limits)
+* modern API support (streaming, responses  ...)
+
 
 ## Dashboard previews
 
