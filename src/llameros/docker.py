@@ -405,7 +405,7 @@ class Docker:
         ) as client:
             response = client.request(method, path, json=body)
             response.raise_for_status()
-            data = response.json()
+            data = response.json() if response.content else {}
         if data.get("error"):
             raise DockerError(str(data["error"]))
         return data

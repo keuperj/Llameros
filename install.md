@@ -190,6 +190,12 @@ docker info --format '{{json .SecurityOptions}}'
   GPU slots have separate containers but share downloaded weights.
 - **Stop model** unloads one model; **Stop Ollama** stops all managed runtimes.
   Neither deletes downloaded weights.
+- **Downloaded models** shows the combined reported model size (shared blobs may
+  be counted more than once; this is not unique disk usage). Use **🗑 Delete** to
+  remove an unloaded model from shared storage after confirmation. Deletion is
+  blocked while the model is loaded on any hardware target or runtime status is
+  unavailable. If Ollama is stopped, deletion starts the CPU container to perform
+  storage cleanup; it does not start GPU containers or load the model.
 
 ## Secure inference API
 

@@ -7,6 +7,24 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const Progress = require('../src/llameros/static/progress.js');
 
+test('downloaded model total sums only valid nonnegative sizes', () => {
+  assert.equal(Progress.totalSize([]), 0);
+  assert.equal(Progress.totalSize([{size: 100}, {size: 250}, {}, {size: -1}, {size: NaN}]), 350);
+});
+
+test('delete is enabled only for unloaded models with known residency and no active work', () => {
+  const runtime = {running: true, loaded: [{name: 'one:latest', target: 'gpu-one'}], slots: [{running: true}]};
+  assert.equal(Progress.canDelete(runtime, false, 'one'), false);
+  assert.equal(Progress.canDelete(runtime, false, 'two:latest'), true);
+  assert.equal(Progress.canDelete({...runtime, slots: [{supported: false, error: 'Unsupported integrated GPU'}]}, false, 'two:latest'), true);
+  assert.equal(Progress.canDelete(runtime, true, 'two:latest'), false);
+  assert.equal(Progress.canDelete({...runtime, slots: [{error: 'Unknown GPU status'}]}, false, 'two:latest'), false);
+  assert.equal(Progress.canDelete({running: false, loaded: []}, false, 'two:latest'), true);
+  for (const unknown of [null, {}, {running: true, error: 'Docker unavailable'}]) {
+    assert.equal(Progress.canDelete(unknown, false, 'two:latest'), false);
+  }
+});
+
 test('Start Ollama can repair a partial startup while CPU stays running', () => {
   const runtime = {running: true, slots: [
     {supported: true, running: true},

@@ -758,7 +758,7 @@ def create_app(
     def model_action(action: str, body: ModelRequest):
         """Queue validated pull/load/unload work with the appropriate device reservation."""
         name = validate_model(body.model)
-        if action not in {"pull", "load", "unload"}:
+        if action not in {"pull", "load", "unload", "delete"}:
             raise HTTPException(404, "Unknown model action")
         target_id = body.target
         if runtimes and action == "load" and not target_id:
@@ -774,6 +774,22 @@ def create_app(
 
         def work(progress):
             """Execute the enclosing lifecycle operation in the worker and publish progress/results."""
+            if action == "delete":
+                if runtimes:
+                    return runtimes.delete(name, progress)
+                normalized = name if ":" in name else name + ":latest"
+                state = docker.status()
+                if state.get("error"):
+                    raise DockerError("Cannot verify model residency before deletion")
+                if any(
+                    model.get("name", model.get("model")) == normalized
+                    for model in state.get("loaded", [])
+                ):
+                    raise ValueError("Stop the model before deleting it")
+                if not state["running"]:
+                    docker.start(progress=progress)
+                progress({"status": "Deleting model from storage"})
+                return docker.api("DELETE", "/api/delete", {"model": name})
             if action == "pull":
                 progress({"status": "Checking model registry and available memory"})
                 check_fit(catalog.size(name))

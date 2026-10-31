@@ -259,6 +259,11 @@ function updateControls() {
   $('storage-save').disabled = busy || !runtimeState || runtimeState.running || !!runtimeState.error;
   document.querySelectorAll('#installed button[data-action]').forEach(button => {
     const controls = JobProgress.modelControls(runtimeState, busy, button.dataset.model);
+    if (button.dataset.action === 'delete') {
+      button.disabled = !JobProgress.canDelete(runtimeState, busy, button.dataset.model);
+      button.title = button.disabled ? 'Stop this model on all hardware targets before deleting. Runtime status must be available.' : 'Delete model from storage';
+      return;
+    }
     button.disabled = !controls[button.dataset.action];
     button.title = button.dataset.action === 'load' && !controls.load
       ? (state.active.includes(button.dataset.model) ? 'This model is already running. Stop it before starting it again.' : 'Select a free hardware slot, or stop a running model first.') : '';
@@ -744,6 +749,7 @@ async function refresh() {
     if (job.action === 'generate' && job.state === 'failed') $('output').textContent = job.error;
     const models = inventory.models || [], loaded = data.ollama.loaded || [];
     $('model-count').textContent = models.length;
+    $('model-total-size').textContent = `Total model size: ${bytes(JobProgress.totalSize(models))}`;
     $('inventory-detail').textContent = `${inventory.source === 'live' ? 'Live Ollama inventory' : inventory.source === 'disk' ? 'Read from model directory; blob sizes checked (not checksums)' : inventory.source === 'cache' ? 'Last known inventory from ' + new Date(inventory.cached_at * 1000).toLocaleString() + ' — start Ollama to refresh' : 'Inventory unavailable until Ollama starts'}. ${(inventory.warnings || []).join(' ')}`;
     const activeNames = loadedChoices().map(modelKey);
     const current = $('generate-model').value; options($('generate-model'), activeNames, activeNames.length ? null : 'Load a model first'); if (activeNames.includes(current)) $('generate-model').value = current;
@@ -765,6 +771,16 @@ async function refresh() {
         }
       }
       row.append(actions); $('installed').append(row);
+      const remove = element('button', '🗑 Delete', 'delete-model');
+      remove.type = 'button'; remove.dataset.action = 'delete'; remove.dataset.model = model.name;
+      remove.setAttribute('aria-label', `Delete ${model.name} from storage`);
+      actionFeedback.bind(remove, JSON.stringify(['model', 'delete', model.name, '']));
+      remove.addEventListener('click', safe(async (event, control) => {
+        if (!JobProgress.canDelete(runtimeState, busy, model.name)) return;
+        if (!window.confirm(`Delete ${model.name} from shared model storage? You will need to download it again to use it.`)) return;
+        await submitAction(control, '/api/models/delete', {model: model.name}); await refresh();
+      }));
+      actions.append(remove);
     });
     renderModelUsage(history.models);
     BenchmarkResults.render(history.benchmarks);

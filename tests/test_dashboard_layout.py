@@ -35,6 +35,7 @@ def test_playground_closed_and_scroll_regions_accessible():
         attrs = parser.nodes[name][1]
         assert attrs["tabindex"] == "0" and attrs["role"] == "region"
     assert parser.nodes["runtime"][1]["aria-live"] == "polite"
+    assert parser.nodes["model-total-size"][1]["role"] == "status"
     for name in (
         "key-management",
         "usage-history",

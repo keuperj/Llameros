@@ -229,6 +229,57 @@ def test_real_docker_start_path_creates_distinct_cpu_gpu_containers(tmp_path, mo
         assert (name, "/api/version") in readiness
 
 
+@pytest.mark.parametrize("loaded_on", ["cpu", "gpu", "none", "unknown"])
+def test_delete_model_checks_all_slots_and_refreshes_inventory(pool, monkeypatch, loaded_on):
+    manager, states, cfg, hw = pool
+    gpu_id = next(key for key, target in manager.targets.items() if target["vendor"] == "nvidia")
+    gpu = manager.client(gpu_id, register=True)
+    cpu = manager.client("cpu", register=True)
+    if loaded_on in {"cpu", "gpu"}:
+        slot = cpu if loaded_on == "cpu" else gpu
+        slot.state.update(running=True, loaded=[{"name": "one:latest"}])
+    slot_type = type(cpu)
+    original_api, original_status = slot_type.api, slot_type.status
+    deleted = []
+
+    def api(slot, method, path, body=None, **kwargs):
+        if path == "/api/delete":
+            assert method == "DELETE" and slot.state["running"]
+            deleted.append(body["model"])
+            return {}
+        if deleted and path == "/api/tags":
+            return {"models": [{"name": "two:latest", "size": 123}]}
+        return original_api(slot, method, path, body, **kwargs)
+
+    def status(slot):
+        if loaded_on == "unknown" and slot.target["id"] == gpu_id:
+            raise DockerError("GPU state unavailable")
+        return original_status(slot)
+
+    monkeypatch.setattr(slot_type, "api", api)
+    monkeypatch.setattr(slot_type, "status", status)
+    app = create_app(
+        cfg, hardware_provider=lambda: hw, authenticator=lambda *args: True, sampling=False
+    )
+    with TestClient(
+        app, base_url="https://testserver", headers={"Origin": "https://testserver"}
+    ) as client:
+        assert client.post("/api/models/delete", json={"model": "one:latest"}).status_code == 403
+        sign_in(client)
+        assert client.post("/api/models/delete", json={"model": "../unsafe"}).status_code == 400
+        response = client.post("/api/models/delete", json={"model": "one:latest"})
+        assert response.status_code == 202
+        job = wait_job(client)
+        assert job["targets"] is None  # Shared storage requires a global reservation.
+        if loaded_on == "none":
+            assert job["state"] == "completed", job
+            assert deleted == ["one:latest"]
+            assert manager.storage.inventory()["models"] == [{"name": "two:latest", "size": 123}]
+        else:
+            assert job["state"] == "failed", job
+            assert not deleted
+
+
 def test_unified_gpu_uses_current_host_memory(pool):
     manager, states, cfg, hw = pool
     hw["gpus"] = [

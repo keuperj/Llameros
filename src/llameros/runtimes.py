@@ -285,6 +285,29 @@ class Runtimes:
             )
         return result
 
+    def delete(self, name, progress):
+        """Delete shared weights only after verifying every registered runtime is idle for this model."""
+        normalized = name if ":" in name else name + ":latest"
+        # Do not use the aggregate status: it intentionally catches per-slot errors.
+        # Unknown residency must fail closed for a destructive storage operation.
+        with self.lock:
+            identities = list(self.records)
+        for identity in identities:
+            state = self.client(identity).status()
+            if state.get("error"):
+                raise DockerError("Cannot verify model residency before deletion")
+            if any(
+                model.get("name", model.get("model")) == normalized
+                for model in state.get("loaded", [])
+            ):
+                raise ValueError("Stop the model on every hardware target before deleting it")
+        client = self.client("cpu", register=True)
+        client.start(progress=progress)
+        progress({"status": "Deleting model from shared storage"})
+        result = client.api("DELETE", "/api/delete", {"model": name})
+        self.storage.remember(client.api("GET", "/api/tags").get("models", []))
+        return result
+
     def stop(self):
         """Attempt to stop all registered owned runtimes and report collected failures."""
         errors = []
