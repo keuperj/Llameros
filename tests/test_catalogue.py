@@ -167,6 +167,7 @@ def test_config_menu_contains_storage_and_is_collapsed(tmp_path):
         def __init__(self):
             super().__init__()
             self.inside = False
+            self.depth = 0
             self.storage_inside = False
 
         def handle_starttag(self, tag, attrs):
@@ -174,12 +175,15 @@ def test_config_menu_contains_storage_and_is_collapsed(tmp_path):
             if tag == "details" and attrs.get("id") == "config-menu":
                 assert "open" not in attrs
                 self.inside = True
+            if tag == "details" and self.inside:
+                self.depth += 1
             if attrs.get("id") == "storage-form":
                 self.storage_inside = self.inside
 
         def handle_endtag(self, tag):
-            if tag == "details":
-                self.inside = False
+            if tag == "details" and self.inside:
+                self.depth -= 1
+                self.inside = self.depth > 0
 
     parser = MenuParser()
     app = create_app(Settings(state_dir=tmp_path), docker=FakeDocker(), sampling=False)

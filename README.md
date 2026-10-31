@@ -18,8 +18,16 @@ requests to finish, stop all Ollama runtimes, save and confirm container recreat
 then start Ollama and reload models. Container recreation is necessary to update
 `OLLAMA_NUM_PARALLEL`; model files and the configured storage location are retained.
 
-User Activity also plots hourly request and failed-request counts on a separate
-scale; failures are red and are included in total requests. Requests with an
+User Access, Scheduler, and Model storage are independent, initially collapsed
+items inside Configuration. Scheduler options use an aligned option/value table.
+
+User Activity plots tokens, hourly requests, failed requests, and maximum waiting
+queue size in one chart. Tokens use the left axis; requests and queue depth use
+the right axis. Failures are red and included in total requests; queue peaks are
+purple. Queue depth excludes executing requests. All users shows the simultaneous
+combined waiting depth across devices; selecting an account shows only that
+account's waiting depth. Peaks are recorded on admission and during sampling,
+persist for 90 days, and cannot be backfilled from older history. Requests with an
 authenticated key are counted even when token usage is unknown. Unauthenticated
 failures remain in activity logs, but cannot be attributed to a user. On upgrade,
 request counts are backfilled from retained request rows only, so older hourly
@@ -30,7 +38,8 @@ catalogue/download cards start expanded; other admin cards start collapsed.
 Usage history offers Hardware usage and User Activity tabs. User Activity shows
 hourly UTC input/output token totals, aggregated across users by default, with an
 individual-user selector. Ordinary accounts can only retrieve their own hourly
-totals. Direct-to-Ollama traffic and requests without reported counts are excluded.
+totals. Direct-to-Ollama traffic is excluded; requests without reported token counts
+are excluded from token totals but still contribute to request counts.
 
 Activity logs support last 24 hours, last week (7 days), last month (30 days), and
 all retained entries. Request, admin-event, and security logs are automatically

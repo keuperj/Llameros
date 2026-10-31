@@ -1,11 +1,36 @@
 """Offline scheduling regression tests for Llameros behavior and integration boundaries."""
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 from llameros.app import Jobs
+
+
+def test_queue_peak_excludes_active_requests_and_counts_across_targets():
+    async def scenario():
+        peaks = []
+        jobs = Jobs(SimpleNamespace(queue_peak=lambda users: peaks.append(users)), parallel=1)
+        scheduler = jobs.scheduler
+        gpu = await scheduler.acquire("gpu", "model", username="alice")
+        cpu = await scheduler.acquire("cpu", "model", username="bob")
+        assert peaks == []
+        first = asyncio.create_task(scheduler.acquire("gpu", "model", username="alice"))
+        await asyncio.sleep(0.03)
+        second = asyncio.create_task(scheduler.acquire("cpu", "model", username="bob"))
+        await asyncio.sleep(0.03)
+        assert peaks == [["alice"], ["alice", "bob"]]
+        for task in (first, second):
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        scheduler.release(gpu, "completed")
+        scheduler.release(cpu, "completed")
+        jobs.pool.shutdown()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("parallel", [2, 4])

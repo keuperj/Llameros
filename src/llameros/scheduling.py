@@ -85,6 +85,10 @@ class InferenceScheduler:
                 raise HTTPException(
                     429, "Distinct-user queue limit reached", headers={"Retry-After": "1"}
                 )
+            if will_wait and self.jobs.store is not None:
+                self.jobs.store.queue_peak(
+                    [t.username for t in self.tickets if not t.active] + [username]
+                )
             self.tickets.append(ticket)
         try:
             while True:

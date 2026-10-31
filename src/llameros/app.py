@@ -209,6 +209,10 @@ def create_app(
 
     def sample_once():
         """Persist one host/runtime observation while containing expected probe failures."""
+        with jobs.lock:
+            store.queue_peak(
+                [ticket.username for ticket in jobs.scheduler.tickets if not ticket.active]
+            )
         data = {"hardware": hardware()}
         try:
             data["ollama"] = runtime_status()

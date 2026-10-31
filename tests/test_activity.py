@@ -116,3 +116,25 @@ def test_hourly_request_migration_preserves_existing_tokens(multiuser):
     ApiKeys(store)
     row = store.token_history("alice")["rows"][0]
     assert (row["requests"], row["failed"], row["input_tokens"]) == (1, 1, 4)
+
+
+def test_queue_peaks_are_persistent_scoped_and_expire(multiuser):
+    app, admin, user = multiuser
+    store = app.state.store
+    store.queue_peak(["alice", "alice", "bob"])
+    store.queue_peak(["bob", "bob"])
+    store.queue_peak([])
+    data = admin.get("/api/token-history").json()
+    assert {row["username"]: row["max_size"] for row in data["queues"]} == {
+        "": 3,
+        "alice": 2,
+        "bob": 2,
+    }
+    own = user.get("/api/token-history").json()
+    assert own["queue_username"] == "alice"
+    assert len(own["queues"]) == 1 and own["queues"][0]["max_size"] == 2
+    restored = Store(store.path)
+    assert len(restored.token_history()["queues"]) == 3
+    with store.connect() as db:
+        db.execute("UPDATE queue_hours SET hour=0")
+    assert store.token_history()["queues"] == []

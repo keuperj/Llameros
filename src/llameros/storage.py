@@ -38,6 +38,10 @@ class Store:
                     PRIMARY KEY(hour,username)
                 );
                 CREATE TABLE IF NOT EXISTS activity_migrations (name TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS queue_hours (
+                    hour INTEGER NOT NULL, username TEXT NOT NULL,
+                    max_size INTEGER NOT NULL, PRIMARY KEY(hour,username)
+                );
                 CREATE TABLE IF NOT EXISTS benchmarks (
                     model TEXT NOT NULL, target TEXT NOT NULL, data TEXT NOT NULL,
                     PRIMARY KEY(model, target)
@@ -234,11 +238,40 @@ class Store:
             "alert": alert,
         }
 
+    def queue_peak(self, users):
+        """Record simultaneous waiting depth (global and per account), not active requests.
+
+        Called under the scheduler lock on queue admission so brief spikes are retained.
+        The empty username denotes the all-account total; peaks must never be summed.
+        """
+        hour = int(time.time()) // 3600 * 3600
+        counts = {"": len(users)}
+        for user in users:
+            if user:
+                counts[user] = counts.get(user, 0) + 1
+        with self.connect() as db:
+            db.executemany(
+                """INSERT INTO queue_hours(hour,username,max_size) VALUES(?,?,?)
+                ON CONFLICT(hour,username) DO UPDATE SET max_size=MAX(max_size,excluded.max_size)""",
+                [(hour, user, count) for user, count in counts.items()],
+            )
+            db.execute("DELETE FROM queue_hours WHERE hour<?", (hour - 90 * 86400,))
+
     def token_history(self, username=None):
         """Hourly UTC totals; administrators may aggregate across all accounts."""
         with self.connect() as db:
             cutoff = int(time.time() - 90 * 86400) // 3600 * 3600
             db.execute("DELETE FROM token_hours WHERE hour<?", (cutoff,))
+            db.execute("DELETE FROM queue_hours WHERE hour<?", (cutoff,))
+            queues = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM queue_hours"
+                    + (" WHERE username=?" if username is not None else "")
+                    + " ORDER BY hour,username",
+                    (username,) if username is not None else (),
+                )
+            ]
             rows = [
                 dict(row)
                 for row in db.execute(
@@ -250,7 +283,9 @@ class Store:
             ]
         return {
             "rows": rows,
-            "users": sorted({row["username"] for row in rows}),
+            "queues": queues,
+            "queue_username": username or "",
+            "users": sorted({row["username"] for row in [*rows, *queues] if row["username"]}),
             "start": cutoff,
             "end": int(time.time()) // 3600 * 3600,
         }
