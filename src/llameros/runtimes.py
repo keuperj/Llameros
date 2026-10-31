@@ -177,11 +177,7 @@ class Runtimes:
         state = self.status()
         slot = next((slot for slot in state["slots"] if slot["id"] == target_id), None)
         if not slot or not slot["available"]:
-            raise ValueError(
-                slot.get("error")
-                if slot and slot.get("error")
-                else "Select a free, supported hardware slot"
-            )
+            raise ValueError("Select a free, supported hardware slot")
         client = self.client(target_id, register=True)
         started = False
         if size is None:

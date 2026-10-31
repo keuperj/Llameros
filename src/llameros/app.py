@@ -758,6 +758,17 @@ def create_app(
         name = validate_model(body.model)
         if action not in {"pull", "load", "unload"}:
             raise HTTPException(404, "Unknown model action")
+        target_id = body.target
+        if runtimes and action == "load" and not target_id:
+            runtimes.refresh()
+            target_id = next(
+                (
+                    target["id"]
+                    for target in runtimes.targets.values()
+                    if target["vendor"] != "cpu" and target["supported"]
+                ),
+                "cpu",
+            )
 
         def work(progress):
             """Execute the enclosing lifecycle operation in the worker and publish progress/results."""
@@ -773,23 +784,12 @@ def create_app(
                     "POST", "/api/generate", {"model": name, "stream": False, "keep_alive": 0}
                 )
             if runtimes and action == "load":
-                normalized = name if ":" in name else name + ":latest"
-                # The CPU runtime is not a prerequisite for a GPU load. Resolve
-                # cached/disk inventory first; the selected runtime can verify
-                # its own live inventory when metadata is unavailable offline.
-                inventory = docker.inventory()
-                info = next(
-                    (
-                        model
-                        for model in inventory["models"]
-                        if model.get("name", model.get("model")) == normalized
-                    ),
-                    None,
-                )
+                # Start the selected runtime first. Its live inventory and all
+                # model operations must use that container, never the CPU adapter.
                 return runtimes.load(
                     name,
-                    info["size"] if info else None,
-                    body.target or "cpu",
+                    None,
+                    target_id,
                     cfg.context_length,
                     progress,
                 )
@@ -827,7 +827,7 @@ def create_app(
             action,
             name,
             work,
-            targets={body.target} if body.target and action in {"load", "unload"} else None,
+            targets={target_id} if target_id and action in {"load", "unload"} else None,
         )
 
     @app.post("/api/benchmark", dependencies=protected, status_code=202)

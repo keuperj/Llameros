@@ -720,7 +720,8 @@ async function refresh() {
       $('hardware').append(card);
     }
     const targetPrevious = $('load-target').value;
-    const freeSlots = (data.ollama.slots || []).filter(slot => slot.available);
+    const freeSlots = (data.ollama.slots || []).filter(slot => slot.available)
+      .sort((a, b) => Number(a.vendor === 'cpu') - Number(b.vendor === 'cpu'));
     options($('load-target'), freeSlots.map(slot => slot.id), freeSlots.length ? null : 'No free hardware');
     for (const option of $('load-target').options) { const slot = freeSlots.find(slot => slot.id === option.value); if (slot) option.textContent = slot.label; }
     if (freeSlots.some(slot => slot.id === targetPrevious)) $('load-target').value = targetPrevious;

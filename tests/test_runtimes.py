@@ -278,9 +278,22 @@ def test_app_routes_inference_and_stop_to_selected_slot(pool):
 
 
 @pytest.mark.parametrize("cached", [False, True])
-def test_gpu_load_starts_selected_container_with_cpu_stopped(pool, cached):
+@pytest.mark.parametrize("explicit_target", [False, True])
+def test_gpu_load_starts_selected_container_with_cpu_stopped(
+    pool, cached, explicit_target, monkeypatch
+):
     """A stopped CPU metadata runtime must not prevent starting a GPU model."""
-    _, states, cfg, hw = pool
+    manager, states, cfg, hw = pool
+    slot_type = type(manager.client("cpu"))
+    original_api = slot_type.api
+    operations = []
+
+    def checked_api(slot, method, path, body=None, **kwargs):
+        assert slot.state["running"], "Container must start before receiving model requests"
+        operations.append((slot.name, path))
+        return original_api(slot, method, path, body, **kwargs)
+
+    monkeypatch.setattr(slot_type, "api", checked_api)
     if cached:
         ModelStorage(cfg).remember([{"name": "one:latest", "size": 300_000_000}])
     app = create_app(
@@ -296,12 +309,18 @@ def test_gpu_load_starts_selected_container_with_cpu_stopped(pool, cached):
             if slot["vendor"] == "nvidia"
         )
         assert not states[cfg.container_name]["running"]
-        response = client.post("/api/models/load", json={"model": "one:latest", "target": target})
+        response = client.post(
+            "/api/models/load",
+            json={"model": "one:latest", **({"target": target} if explicit_target else {})},
+        )
         assert response.status_code == 202
         job = wait_job(client)
         assert job["state"] == "completed", job
         assert states[cfg.container_name + "-" + target]["running"]
         assert not states[cfg.container_name]["running"]
+        assert operations[0] == (cfg.container_name + "-" + target, "/api/tags")
+        assert all(name == cfg.container_name + "-" + target for name, _ in operations)
+        assert job["targets"] == [target]
         loaded = client.get("/api/status").json()["ollama"]["loaded"]
         assert any(model["name"] == "one:latest" and model["target"] == target for model in loaded)
 

@@ -4,6 +4,15 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 
+def test_downloaded_models_match_catalogue_and_contain_overflow():
+    static = Path(__file__).resolve().parents[1] / "src/llameros/static"
+    css = (static / "style.css").read_text()
+    assert ".columns:has(>.downloaded-card){grid-template-columns:repeat(2,minmax(0,1fr))}" in css
+    assert ".columns>.card{min-width:0}" in css
+    assert "contain:size;align-self:stretch;overflow:auto" in css
+    assert ".downloaded-card select{min-width:0;max-width:100%}" in css
+
+
 def test_playground_closed_and_scroll_regions_accessible():
     """Verify playground closed and scroll regions accessible."""
 

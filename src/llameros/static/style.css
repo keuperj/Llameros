@@ -3,6 +3,14 @@ details.card > summary{cursor:pointer;font-size:18px;font-weight:600;color:var(-
 details.card[open] > summary{margin-bottom:20px}
 details.card > summary:focus-visible{outline:2px solid var(--green);outline-offset:5px}
 #token-chart{height:260px}
+/* Keep model panels equally wide; size the inventory from the catalogue,
+   not from the number or intrinsic width of downloaded model rows. */
+.columns:has(>.downloaded-card){grid-template-columns:repeat(2,minmax(0,1fr))}
+.columns>.card{min-width:0}
+.columns>.downloaded-card[open]{height:auto;min-height:0;contain:size;align-self:stretch;overflow:auto;scrollbar-gutter:stable}
+.downloaded-card select{min-width:0;max-width:100%}
+.downloaded-card button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+@media(max-width:800px){.columns:has(>.downloaded-card){grid-template-columns:minmax(0,1fr)}.columns>.downloaded-card[open]{height:600px;min-height:320px;contain:none}}
 #scheduler-form{display:block}
 .scheduler-table{table-layout:fixed;width:100%}.scheduler-table th:first-child{width:65%}.scheduler-table label,.scheduler-table input{margin:0}.scheduler-table input{max-width:180px}.scheduler-table td{vertical-align:middle}
 .settings-menu{border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0}.settings-menu>summary{cursor:pointer;font-size:17px;font-weight:600;color:var(--green)}.settings-menu>summary:focus-visible{outline:2px solid var(--green);outline-offset:4px}
