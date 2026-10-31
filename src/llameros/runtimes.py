@@ -177,7 +177,27 @@ class Runtimes:
         state = self.status()
         slot = next((slot for slot in state["slots"] if slot["id"] == target_id), None)
         if not slot or not slot["available"]:
-            raise ValueError("Select a free, supported hardware slot")
+            raise ValueError(
+                slot.get("error")
+                if slot and slot.get("error")
+                else "Select a free, supported hardware slot"
+            )
+        client = self.client(target_id, register=True)
+        started = False
+        if size is None:
+            progress({"status": "Starting selected runtime to verify downloaded model inventory"})
+            client.start(progress=progress)
+            started = True
+            models = client.api("GET", "/api/tags").get("models", [])
+            self.storage.remember(models)
+            normalized = name if ":" in name else name + ":latest"
+            info = next(
+                (model for model in models if model.get("name", model.get("model")) == normalized),
+                None,
+            )
+            if info is None:
+                raise ValueError("Download this model before loading or running it")
+            size = info["size"]
         hw = self.hardware()
         target = self.targets[target_id]
         fit = assess_fit(size, hw, "cpu", self.settings.ollama_num_parallel, context)
@@ -192,8 +212,8 @@ class Runtimes:
             raise ValueError(
                 "Model does not fit selected GPU VRAM; select CPU or a larger free GPU"
             )
-        client = self.client(target_id, register=True)
-        client.start(progress=progress)
+        if not started:
+            client.start(progress=progress)
         # Recheck capacity after startup; free-memory estimates include resident models.
         previous = client.api("GET", "/api/ps").get("models", [])
         normalized = name if ":" in name else name + ":latest"

@@ -277,6 +277,45 @@ def test_app_routes_inference_and_stop_to_selected_slot(pool):
         assert "num_thread" not in options
 
 
+@pytest.mark.parametrize("cached", [False, True])
+def test_gpu_load_starts_selected_container_with_cpu_stopped(pool, cached):
+    """A stopped CPU metadata runtime must not prevent starting a GPU model."""
+    _, states, cfg, hw = pool
+    if cached:
+        ModelStorage(cfg).remember([{"name": "one:latest", "size": 300_000_000}])
+    app = create_app(
+        cfg, hardware_provider=lambda: hw, authenticator=lambda *args: True, sampling=False
+    )
+    with TestClient(
+        app, base_url="https://testserver", headers={"Origin": "https://testserver"}
+    ) as client:
+        sign_in(client)
+        target = next(
+            slot["id"]
+            for slot in client.get("/api/status").json()["ollama"]["slots"]
+            if slot["vendor"] == "nvidia"
+        )
+        assert not states[cfg.container_name]["running"]
+        response = client.post("/api/models/load", json={"model": "one:latest", "target": target})
+        assert response.status_code == 202
+        job = wait_job(client)
+        assert job["state"] == "completed", job
+        assert states[cfg.container_name + "-" + target]["running"]
+        assert not states[cfg.container_name]["running"]
+        loaded = client.get("/api/status").json()["ollama"]["loaded"]
+        assert any(model["name"] == "one:latest" and model["target"] == target for model in loaded)
+
+
+def test_unknown_model_does_not_warm_gpu_after_inventory_check(pool):
+    manager, states, cfg, _ = pool
+    target = next(key for key, value in manager.targets.items() if value["vendor"] == "nvidia")
+    with pytest.raises(ValueError, match="Download this model"):
+        manager.load("missing:latest", None, target, 4096, lambda value: None)
+    calls = states[cfg.container_name + "-" + target]["calls"]
+    assert any(path == "/api/tags" for _, path, _ in calls)
+    assert not any(path == "/api/generate" for _, path, _ in calls)
+
+
 def test_legacy_container_requires_explicit_recreation(tmp_path):
     """Verify legacy container requires explicit recreation."""
     import json

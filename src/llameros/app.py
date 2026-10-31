@@ -772,11 +772,28 @@ def create_app(
                 return client.api(
                     "POST", "/api/generate", {"model": name, "stream": False, "keep_alive": 0}
                 )
-            info = installed(name)
             if runtimes and action == "load":
-                return runtimes.load(
-                    name, info["size"], body.target or "cpu", cfg.context_length, progress
+                normalized = name if ":" in name else name + ":latest"
+                # The CPU runtime is not a prerequisite for a GPU load. Resolve
+                # cached/disk inventory first; the selected runtime can verify
+                # its own live inventory when metadata is unavailable offline.
+                inventory = docker.inventory()
+                info = next(
+                    (
+                        model
+                        for model in inventory["models"]
+                        if model.get("name", model.get("model")) == normalized
+                    ),
+                    None,
                 )
+                return runtimes.load(
+                    name,
+                    info["size"] if info else None,
+                    body.target or "cpu",
+                    cfg.context_length,
+                    progress,
+                )
+            info = installed(name)
             active = is_loaded(name)
             if active == (action == "load"):
                 raise ValueError(
