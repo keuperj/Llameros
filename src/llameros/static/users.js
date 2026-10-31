@@ -24,6 +24,7 @@ function configureBoard(data, asUser = data.role !== 'admin') {
   for (const node of document.querySelectorAll('#dashboard > *')) {
     node.hidden = asUser && !['runtime-models', 'key-management', 'usage-history', 'benchmark-history', 'user-intro'].includes(node.id);
   }
+  for (const node of document.querySelectorAll('[data-board-panel]')) node.open = asUser || node.dataset.boardPanel === 'open';
   document.getElementById('user-intro').hidden = !asUser;
   for (const id of ['events', 'events-heading']) document.getElementById(id).hidden = asUser;
   document.getElementById('usage-description').textContent = asUser
@@ -71,6 +72,10 @@ async function refreshUserBoard() {
   renderAccess(false);
   if (!data.models.length) panel.replaceChildren(element('p', 'No models are currently running. An administrator can start a model.'));
   renderKeyModels(data.models); renderKeyUsage(data.keys); renderModelUsage(data.history.models); draw(data.history.samples);
+  if (typeof UserActivity !== 'undefined') {
+    const tokens = await api('/api/token-history');
+    if (csrf && userBoard && dashboardIdentity === identity) UserActivity.render(tokens);
+  }
   if (typeof BenchmarkResults !== 'undefined') BenchmarkResults.render(data.history.benchmarks);
 }
 

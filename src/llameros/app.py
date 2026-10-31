@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -554,8 +555,12 @@ def create_app(
         }
 
     @app.get("/api/activity", dependencies=protected)
-    def activity():
-        return store.activity()
+    def activity(timeframe: Literal["24h", "week", "month", "all"] = "all"):
+        return store.activity({"24h": 1, "week": 7, "month": 30, "all": 0}[timeframe])
+
+    @app.get("/api/token-history", dependencies=signed_in)
+    def token_history(session=Depends(require_session)):
+        return store.token_history(None if session["role"] == "admin" else session["username"])
 
     @app.post("/api/activity/acknowledge", dependencies=protected)
     def acknowledge_activity(body: ActivityAcknowledgement):

@@ -15,6 +15,7 @@ let accessConfig = null, accessContext = 4096;
 let sessionEpoch = 0;
 /** Invalidate all outstanding account/board requests and erase private presentation. */
 function clearSessionView() {
+  if (typeof UserActivity !== 'undefined') UserActivity.reset();
   if (typeof ActivityLog !== 'undefined') ActivityLog.reset();
   if (typeof TokenLimits !== 'undefined') TokenLimits.reset();
   sessionEpoch++;
@@ -114,7 +115,9 @@ function renderAccess(allowManagement = true) {
     const identity = modelKey(model), name = model.name || model.model;
     let box = modelBoxes.get(identity);
     if (!box) {
-      box = element('section', '', 'card running-model');
+      box = element('details', '', 'card running-model');
+      box.open = true;
+      box.append(element('summary', name));
       box.dataset.identity = identity;
       const head = element('div', '', 'section-head');
       head.append(element('h3', name));
@@ -685,8 +688,9 @@ async function refresh() {
       await refreshKeys();
     }
     if (userBoard) { await refreshUserBoard(); return; }
-    const [data, history, inventory, keyUsage, activity] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage'), api('/api/activity')]);
+    const [data, history, inventory, keyUsage, activity, tokens] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage'), api('/api/activity?timeframe=' + $('activity-timeframe').value), api('/api/token-history')]);
     if (!csrf) return;
+    UserActivity.render(tokens);
     renderKeyUsage(keyUsage.keys); renderKeyModels(inventory.models || []);
     const storage = inventory.storage;
     $('storage-current').textContent = `Active location: ${storage.location} (${storage.mode === 'directory' ? 'host directory' : 'Docker volume'})`;

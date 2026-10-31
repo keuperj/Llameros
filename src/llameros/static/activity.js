@@ -38,6 +38,9 @@ const ActivityLog = {
     document.getElementById('activity-user-filter').setAttribute('aria-pressed', String(this.userErrors));
   },
   events(rows) {
+    const frame = document.getElementById('activity-timeframe')?.value || 'all';
+    const days = { '24h': 1, week: 7, month: 30, all: 0 }[frame];
+    if (days) rows = rows.filter(row => row.timestamp >= Date.now() / 1000 - days * 86400);
     this.table(document.getElementById('events'), rows.filter(row => !this.adminErrors || this.failed(row)),
       [r => new Date(r.timestamp * 1000).toLocaleString(), r => r.kind, r => r.model || '—', r => r.detail || '—']);
     document.getElementById('activity-admin-filter').textContent = this.adminErrors ? 'Show all activities' : 'Show only errors';
@@ -45,6 +48,7 @@ const ActivityLog = {
   },
 };
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('activity-timeframe').addEventListener('change', safe(refresh));
   const tabs = [...document.querySelectorAll('[data-activity-tab]')];
   function activate(tab) {
     for (const button of tabs) {

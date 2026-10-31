@@ -11,7 +11,7 @@ const vm = require('node:vm');
 
 function board() {
   class Node {
-    constructor() { this.children = []; this.hidden = false; this.value = ''; this.handlers = {}; this.scrollTop = 0; this.scrollLeft = 0; }
+    constructor() { this.dataset = {}; this.children = []; this.hidden = false; this.value = ''; this.handlers = {}; this.scrollTop = 0; this.scrollLeft = 0; }
     append(...nodes) { this.children.push(...nodes); }
     replaceChildren(...nodes) { this.children = nodes; }
     addEventListener(type, callback) { this.handlers[type] = callback; }

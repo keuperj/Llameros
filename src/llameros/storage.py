@@ -32,6 +32,12 @@ class Store:
                     acknowledged INTEGER NOT NULL
                 );
                 INSERT OR IGNORE INTO activity_alert VALUES(1,0,0);
+                CREATE TABLE IF NOT EXISTS token_hours (
+                    hour INTEGER NOT NULL, username TEXT NOT NULL,
+                    input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+                    PRIMARY KEY(hour,username)
+                );
+                CREATE TABLE IF NOT EXISTS activity_migrations (name TEXT PRIMARY KEY);
                 CREATE TABLE IF NOT EXISTS benchmarks (
                     model TEXT NOT NULL, target TEXT NOT NULL, data TEXT NOT NULL,
                     PRIMARY KEY(model, target)
@@ -83,9 +89,8 @@ class Store:
         """Apply age and row bounds in the writer transaction, independently of sampling."""
         if table not in {"events", "samples", "generations", "api_usage", "security_events"}:
             raise ValueError("Invalid retention table")
-        db.execute(
-            f"DELETE FROM {table} WHERE timestamp < ?", (time.time() - self.retention_days * 86400,)
-        )
+        days = 90 if table in {"events", "api_usage", "security_events"} else self.retention_days
+        db.execute(f"DELETE FROM {table} WHERE timestamp < ?", (time.time() - days * 86400,))
         db.execute(
             f"DELETE FROM {table} WHERE id NOT IN (SELECT id FROM {table} ORDER BY id DESC LIMIT ?)",
             (self.history_rows,),
@@ -146,8 +151,19 @@ class Store:
             )
             cutoff = time.time() - retention_days * 86400
             for table in ("samples", "events", "generations"):
-                db.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))
+                if table != "events":
+                    db.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))
                 self.trim(db, table)
+            tables = {
+                row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            if "api_usage" in tables:
+                self.trim(db, "api_usage")
+            self.trim(db, "security_events")
+            db.execute(
+                "DELETE FROM token_hours WHERE hour<?",
+                (int(time.time() - 90 * 86400) // 3600 * 3600,),
+            )
 
     def generation(self, data: dict):
         """Record model token counts and nanosecond timings from a completed generation."""
@@ -165,33 +181,47 @@ class Store:
             )
             self.trim(db, "generations")
 
-    def activity(self):
+    def activity(self, days=0):
         """Admin-only retained request/lifecycle records and durable failure watermark."""
         with self.connect() as db:
+            cutoff = time.time() - days * 86400 if days else 0
             self.trim(db, "api_usage")
             self.trim(db, "events")
             requests = [
                 dict(row)
-                for row in db.execute("""
+                for row in db.execute(
+                    """
                 SELECT u.*, k.name AS key_name, k.user AS username,
                        CASE WHEN u.duration>0 AND u.output_tokens IS NOT NULL
                             THEN u.output_tokens/u.duration ELSE NULL END AS tokens_per_second
                 FROM api_usage u LEFT JOIN api_keys k ON k.id=u.key_id
+                WHERE u.timestamp>=?
                 ORDER BY u.id DESC LIMIT 1000
-            """)
+            """,
+                    (cutoff,),
+                )
             ]
             admin = [
-                dict(row) for row in db.execute("SELECT * FROM events ORDER BY id DESC LIMIT 1000")
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM events WHERE timestamp>=? ORDER BY id DESC LIMIT 1000", (cutoff,)
+                )
             ]
             counts = dict(
-                db.execute("""SELECT COUNT(*) AS total,
+                db.execute(
+                    """SELECT COUNT(*) AS total,
                 COALESCE(SUM(status='completed'),0) AS successful,
-                COALESCE(SUM(status!='completed'),0) AS failed FROM api_usage""").fetchone()
+                COALESCE(SUM(status!='completed'),0) AS failed FROM api_usage WHERE timestamp>=?""",
+                    (cutoff,),
+                ).fetchone()
             )
             actions = dict(
-                db.execute("""SELECT COUNT(*) AS total,
+                db.execute(
+                    """SELECT COUNT(*) AS total,
                 COALESCE(SUM(kind LIKE '%:completed'),0) AS successful,
-                COALESCE(SUM(kind LIKE '%:failed'),0) AS failed FROM events""").fetchone()
+                COALESCE(SUM(kind LIKE '%:failed'),0) AS failed FROM events WHERE timestamp>=?""",
+                    (cutoff,),
+                ).fetchone()
             )
             alert = dict(
                 db.execute("SELECT failures,acknowledged FROM activity_alert WHERE id=1").fetchone()
@@ -202,6 +232,27 @@ class Store:
             "request_counts": counts,
             "admin_counts": actions,
             "alert": alert,
+        }
+
+    def token_history(self, username=None):
+        """Hourly UTC totals; administrators may aggregate across all accounts."""
+        with self.connect() as db:
+            cutoff = int(time.time() - 90 * 86400) // 3600 * 3600
+            db.execute("DELETE FROM token_hours WHERE hour<?", (cutoff,))
+            rows = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM token_hours"
+                    + (" WHERE username=?" if username is not None else "")
+                    + " ORDER BY hour,username",
+                    (username,) if username is not None else (),
+                )
+            ]
+        return {
+            "rows": rows,
+            "users": sorted({row["username"] for row in rows}),
+            "start": cutoff,
+            "end": int(time.time()) // 3600 * 3600,
         }
 
     def acknowledge_activity(self, failures):

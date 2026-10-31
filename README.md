@@ -1,3 +1,21 @@
+# Dashboard history
+
+Admin cards have disclosure controls. Ollama status, running models, and model
+catalogue/download cards start expanded; other admin cards start collapsed.
+Usage history offers Hardware usage and User Activity tabs. User Activity shows
+hourly UTC input/output token totals, aggregated across users by default, with an
+individual-user selector. Ordinary accounts can only retrieve their own hourly
+totals. Direct-to-Ollama traffic and requests without reported counts are excluded.
+
+Activity logs support last 24 hours, last week (7 days), last month (30 days), and
+all retained entries. Request, admin-event, and security logs are automatically
+pruned after 90 days (the three-month retention window); configured row limits can
+remove entries earlier. Hardware history retains its existing configured policy.
+Hourly token totals are retained separately for 90 days, independently of request
+row limits. Existing retained requests are backfilled once on upgrade; already
+deleted history cannot be recovered. Failure acknowledgement remains independent
+of the selected time frame and retention cleanup.
+
 <p align="center">
   <img src="src/llameros/static/logo.svg" alt="Llameros — a llama carrying a circuit-patterned saddle against Andean peaks" width="160" height="160">
 </p>

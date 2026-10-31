@@ -101,6 +101,18 @@ class ApiKeys:
                 db.execute("ALTER TABLE api_keys ADD COLUMN user TEXT NOT NULL DEFAULT ''")
                 db.execute("UPDATE api_keys SET user=?", (self.users.owner,))
             db.execute("CREATE INDEX IF NOT EXISTS api_keys_user ON api_keys(user)")
+            if not db.execute(
+                "SELECT 1 FROM activity_migrations WHERE name='token_hours'"
+            ).fetchone():
+                db.execute(
+                    """INSERT INTO token_hours
+                    SELECT CAST(u.timestamp/3600 AS INTEGER)*3600,k.user,
+                           SUM(COALESCE(u.prompt_tokens,0)),SUM(COALESCE(u.output_tokens,0))
+                    FROM api_usage u JOIN api_keys k ON k.id=u.key_id
+                    WHERE u.timestamp>=? GROUP BY 1,2""",
+                    (time.time() - 90 * 86400,),
+                )
+                db.execute("INSERT INTO activity_migrations VALUES('token_hours')")
 
     def create(self, body, user=None, actor=None):
         """Persist a new key and return its ID and one-time plaintext secret.
@@ -186,11 +198,12 @@ class ApiKeys:
     def record(self, identity, model, target, status, counts, duration):
         """Append status, known token counts, and elapsed seconds without storing request content."""
         with self.store.connect() as db:
+            now = time.time()
             db.execute(
                 "INSERT INTO api_usage(key_id,timestamp,model,target,status,prompt_tokens,output_tokens,duration) VALUES(?,?,?,?,?,?,?,?)",
                 (
                     identity,
-                    time.time(),
+                    now,
                     model,
                     target,
                     status,
@@ -203,6 +216,23 @@ class ApiKeys:
 
             if status != "completed":
                 db.execute("UPDATE activity_alert SET failures=failures+1 WHERE id=1")
+            owner = db.execute("SELECT user FROM api_keys WHERE id=?", (identity,)).fetchone()
+            if owner and (counts.get("prompt") is not None or counts.get("output") is not None):
+                db.execute(
+                    """INSERT INTO token_hours(hour,username,input_tokens,output_tokens) VALUES(?,?,?,?)
+                    ON CONFLICT(hour,username) DO UPDATE SET
+                    input_tokens=input_tokens+excluded.input_tokens,
+                    output_tokens=output_tokens+excluded.output_tokens""",
+                    (
+                        int(now) // 3600 * 3600,
+                        owner["user"],
+                        counts.get("prompt") or 0,
+                        counts.get("output") or 0,
+                    ),
+                )
+            db.execute(
+                "DELETE FROM token_hours WHERE hour<?", (int(now - 90 * 86400) // 3600 * 3600,)
+            )
 
     def delete(self, identity, user=None, actor=None):
         # Retain a tombstone and usage for history, including in-flight requests.

@@ -26,6 +26,18 @@ def test_playground_closed_and_scroll_regions_accessible():
         attrs = parser.nodes[name][1]
         assert attrs["tabindex"] == "0" and attrs["role"] == "region"
     assert parser.nodes["runtime"][1]["aria-live"] == "polite"
+    for name in (
+        "key-management",
+        "usage-history",
+        "activity-log",
+        "benchmark-history",
+        "config-menu",
+    ):
+        tag, attrs = parser.nodes[name]
+        assert tag == "details" and "open" not in attrs
+    assert parser.nodes["hardware-tab"][1]["aria-selected"] == "true"
+    assert "hidden" in parser.nodes["token-plot"][1]
+    assert parser.nodes["activity-timeframe"][0] == "select"
     css = (static / "style.css").read_text()
     assert "max-height:calc(10 * var(--event-height))" in css
     assert "height:var(--event-height)" in css
