@@ -9,7 +9,7 @@ import re
 import threading
 from dataclasses import replace
 
-from .diagnostics import diagnostic
+from .diagnostics import RuntimeStartupError, RuntimeStartupSummary, diagnostic
 from .docker import Docker, DockerError
 from .hardware import assess_fit
 from .model_storage import write_json
@@ -168,6 +168,33 @@ class Runtimes:
             raise ValueError("Choose a loaded model and its hardware slot")
         return self.client(matches[0]["target"])
 
+    def start(self, progress=lambda value: None):
+        """Start CPU and every detected supported GPU, retaining partial successes."""
+        self.refresh()
+        started, failures = [], []
+        for identity, target in self.targets.items():
+            if not target["supported"]:
+                continue
+
+            def report(value, identity=identity):
+                progress({**value, "target": identity})
+
+            report(
+                {
+                    "status": f"Starting {'CPU' if identity == 'cpu' else 'GPU'} Ollama container",
+                    "phase": "container",
+                }
+            )
+            try:
+                self.client(identity, register=True).start(progress=report)
+                started.append(identity)
+            except Exception as exc:
+                failures.append(diagnostic(RuntimeStartupError(identity, exc)))
+        if failures:
+            # These are already sanitized, fixed-vocabulary diagnostics.
+            raise RuntimeStartupSummary(failures)
+        return {"started": started}
+
     def load(self, name, size, target_id, context, progress):
         """Start and warm a model on selected hardware after fit/capacity checks.
 
@@ -176,13 +203,18 @@ class Runtimes:
         """
         state = self.status()
         slot = next((slot for slot in state["slots"] if slot["id"] == target_id), None)
+        if slot and slot.get("supported", True) and slot.get("error"):
+            raise RuntimeStartupSummary([slot["error"]])
         if not slot or not slot["available"]:
             raise ValueError("Select a free, supported hardware slot")
         client = self.client(target_id, register=True)
         started = False
         if size is None:
             progress({"status": "Starting selected runtime to verify downloaded model inventory"})
-            client.start(progress=progress)
+            try:
+                client.start(progress=progress)
+            except Exception as exc:
+                raise RuntimeStartupError(target_id, exc) from exc
             started = True
             models = client.api("GET", "/api/tags").get("models", [])
             self.storage.remember(models)
@@ -209,7 +241,10 @@ class Runtimes:
                 "Model does not fit selected GPU VRAM; select CPU or a larger free GPU"
             )
         if not started:
-            client.start(progress=progress)
+            try:
+                client.start(progress=progress)
+            except Exception as exc:
+                raise RuntimeStartupError(target_id, exc) from exc
         # Recheck capacity after startup; free-memory estimates include resident models.
         previous = client.api("GET", "/api/ps").get("models", [])
         normalized = name if ":" in name else name + ":latest"

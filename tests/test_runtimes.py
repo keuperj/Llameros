@@ -8,6 +8,7 @@ from test_core import HARDWARE, sign_in, wait_job
 
 from llameros.app import create_app
 from llameros.config import Settings
+from llameros.diagnostics import RuntimeStartupSummary, diagnostic
 from llameros.docker import Docker, DockerError
 from llameros.hardware import GIB
 from llameros.model_storage import ModelStorage
@@ -136,6 +137,96 @@ def test_cpu_and_two_gpu_models_coexist_with_stable_ports_and_routing(pool):
     assert "num_thread" not in options
     manager.stop()
     assert not manager.status()["running"]
+
+
+def test_start_ollama_starts_cpu_and_all_supported_gpus_and_retries(pool, monkeypatch):
+    manager, states, cfg, hw = pool
+    slot_type = type(manager.client("cpu"))
+    original_start = slot_type.start
+    fail = True
+
+    def start(slot, progress=lambda value: None):
+        if slot.target["vendor"] == "nvidia" and fail:
+            raise DockerError(
+                "could not select device driver with capabilities: [[gpu]] private-secret"
+            )
+        return original_start(slot, progress)
+
+    monkeypatch.setattr(slot_type, "start", start)
+    app = create_app(
+        cfg, hardware_provider=lambda: hw, authenticator=lambda *args: True, sampling=False
+    )
+    with TestClient(
+        app, base_url="https://testserver", headers={"Origin": "https://testserver"}
+    ) as client:
+        sign_in(client)
+        client.post("/api/container/start", json={})
+        job = wait_job(client)
+        assert job["state"] == "failed"
+        assert "GPU container startup failed" in job["error"]
+        assert "gpu-runtime" in job["error"]
+        assert "private-secret" not in job["error"]
+        assert states[cfg.container_name]["running"]
+        fail = False
+        client.post("/api/container/start", json={})
+        job = wait_job(client)
+        assert job["state"] == "completed", job
+        assert len(job["result"]["started"]) == 3
+        assert len(states) == 3  # Unsupported Intel GPU never gets a container.
+        assert all(state["running"] and not state["loaded"] for state in states.values())
+
+
+def test_gpu_status_configuration_failure_retains_safe_diagnostic(pool, monkeypatch):
+    manager, _, _, _ = pool
+    target = next(key for key, value in manager.targets.items() if value["vendor"] == "nvidia")
+    slot_type = type(manager.client(target, register=True))
+    original_status = slot_type.status
+
+    def status(slot):
+        if slot.target["id"] == target:
+            raise DockerError("Runtime parallelism differs from configuration /private/secret")
+        return original_status(slot)
+
+    monkeypatch.setattr(slot_type, "status", status)
+    with pytest.raises(RuntimeStartupSummary) as error:
+        manager.load("one:latest", None, target, 4096, lambda value: None)
+    text = diagnostic(error.value)
+    assert "container-parallelism" in text
+    assert "/private/secret" not in text
+
+
+def test_real_docker_start_path_creates_distinct_cpu_gpu_containers(tmp_path, monkeypatch):
+    """Exercise actual runtime clients and Docker.start, faking only daemon I/O."""
+    cfg = Settings(state_dir=tmp_path)
+    manager = Runtimes(cfg, lambda: {**HARDWARE, "gpus": GPUS})
+    calls, readiness = [], []
+    monkeypatch.setattr(Docker, "check_daemon", lambda self: None)
+    monkeypatch.setattr(Docker, "inspect", lambda self: None)
+    monkeypatch.setattr(Docker, "image_available", lambda self: True)
+    monkeypatch.setattr(Docker, "name_local_image", lambda self: None)
+
+    def command(client, *args, **kwargs):
+        calls.append((client.name, args))
+        return ""
+
+    def api(client, method, path, **kwargs):
+        assert any(name == client.name and args[0] == "run" for name, args in calls)
+        readiness.append((client.name, path))
+        return {}
+
+    monkeypatch.setattr(Docker, "command", command)
+    monkeypatch.setattr(Docker, "api", api)
+    result = manager.start()
+    assert len(result["started"]) == len(calls) == len(readiness) == 3
+    assert calls[0][0] == cfg.container_name
+    assert "--gpus" not in calls[0][1]
+    for (name, args), gpu in zip(calls[1:], GPUS[:2], strict=True):
+        assert name != cfg.container_name
+        assert args[args.index("--name") + 1] == name
+        assert args[args.index("--gpus") + 1] == f"device={gpu['id']}"
+        assert f"{cfg.container_name}-models:/root/.ollama" in args
+        assert "CUDA_VISIBLE_DEVICES=-1" not in args
+        assert (name, "/api/version") in readiness
 
 
 def test_unified_gpu_uses_current_host_memory(pool):

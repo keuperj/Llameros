@@ -176,8 +176,11 @@ docker info --format '{{json .SecurityOptions}}'
 
 ## First model and daily workflow
 
-- **Start Ollama:** first startup downloads the pinned runtime image; only public
-  images are supported. Progress/errors appear in the dashboard.
+- **Start Ollama:** starts the CPU container and a separate container for every
+  detected supported GPU, without loading models. First startup downloads the pinned
+  runtime image; only public images are supported. Progress/errors identify the
+  target. If a GPU fails, successful runtimes remain running and Start Ollama can
+  retry missing runtimes without stopping working ones.
 - Search the catalogue, select a tag, and download. **CPU-only** filters estimated
   RAM fits; it does not select the execution device.
 - Under **Start model on available hardware**, choose CPU or a supported GPU and

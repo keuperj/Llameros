@@ -13,7 +13,8 @@ const JobProgress = {
    */
   controls(runtime, busy) {
     const known = !!runtime && !runtime.error && typeof runtime.running === 'boolean';
-    return {start: !busy && known && !runtime.running, stop: !busy && known && runtime.running,
+    const missingRuntime = known && (runtime.slots || []).some(slot => slot.supported && (!slot.running || slot.error));
+    return {start: !busy && known && (!runtime.running || missingRuntime), stop: !busy && known && runtime.running,
       active: known && runtime.running ? (runtime.loaded || []).map(model => model.name || model.model) : []};
   },
   /**

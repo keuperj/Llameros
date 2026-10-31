@@ -7,6 +7,21 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const Progress = require('../src/llameros/static/progress.js');
 
+test('Start Ollama can repair a partial startup while CPU stays running', () => {
+  const runtime = {running: true, slots: [
+    {supported: true, running: true},
+    {supported: true, running: false},
+    {supported: false, running: false},
+  ]};
+  assert.equal(Progress.controls(runtime, false).start, true);
+  assert.equal(Progress.controls(runtime, false).stop, true);
+  assert.equal(Progress.controls(runtime, true).start, false);
+  runtime.slots[1].running = true;
+  assert.equal(Progress.controls(runtime, false).start, false);
+  runtime.slots[1].error = 'GPU unavailable';
+  assert.equal(Progress.controls(runtime, false).start, true);
+});
+
 test('state controls enable only opposite container actions and expose only active models', () => {
   assert.equal(Progress.controls(null, false).start, false);
   assert.equal(Progress.controls({running: false}, false).start, true);

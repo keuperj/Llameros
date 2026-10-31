@@ -712,6 +712,8 @@ def create_app(
 
         def work(progress):
             """Execute the enclosing lifecycle operation in the worker and publish progress/results."""
+            if action == "start" and runtimes:
+                return runtimes.start(progress=progress)
             running = runtime_status()["running"]
             if running == (action == "start"):
                 raise ValueError(
