@@ -1,13 +1,123 @@
-"""Exclusive, bounded synthetic benchmarks; persist metrics, never generated content."""
+"""Exclusive synthetic speed and adaptive sustained-load benchmarks."""
 
 import asyncio
 import threading
 import time
 from concurrent.futures import Future
+from types import SimpleNamespace
 
 import httpx
+from fastapi import HTTPException
 
 from .runtime_transport import RUNTIME_BASE_URL
+from .scheduling import InferenceScheduler
+
+
+async def stress_test(send, workloads, scheduler, progress, result, checkpoint, *, minute=60):
+    """Open-loop arrivals; stop at the first outcome reversal or manual cancellation.
+
+    Every stage offers at least six requests and one minute of arrivals. Outstanding
+    work is drained before changing rate; response deadlines include queue wait.
+    Synthetic scheduler/HTTP failures are metrics only, never activity log entries.
+    """
+    rate = 1.0
+    direction = None
+    stress = result["stress"] = {"status": "running", "best_rpm": 0, "rounds": [], "round_count": 0}
+    while True:
+        interval = minute / rate
+        duration = max(minute, len(workloads) * interval)
+        count = max(len(workloads), int(duration / interval))
+        stats = {
+            "rpm": rate,
+            "offered": 0,
+            "completed": 0,
+            "failed": 0,
+            "overflow": 0,
+            "timeouts": 0,
+        }
+        stress["current_round"] = stats
+        tasks = set()
+        failed = asyncio.Event()
+        started = time.monotonic()
+
+        async def request(index, stats=stats, failed=failed):
+            ticket = None
+            try:
+                async with asyncio.timeout(scheduler.timeout):
+                    ticket = await scheduler.acquire("benchmark", "benchmark", username="synthetic")
+                    await send(*workloads[index % len(workloads)])
+                stats["completed"] += 1
+            except Exception as exc:
+                stats["failed"] += 1
+                if isinstance(exc, HTTPException) and exc.status_code == 429:
+                    stats["overflow"] += 1
+                if (
+                    isinstance(exc, (TimeoutError, httpx.TimeoutException))
+                    or isinstance(exc, HTTPException)
+                    and exc.status_code == 504
+                ):
+                    stats["timeouts"] += 1
+                failed.set()
+            finally:
+                if ticket is not None:
+                    scheduler.release(ticket, "completed")
+
+        try:
+            for index in range(count):
+                delay = started + index * interval - time.monotonic()
+                if delay > 0:
+                    try:
+                        await asyncio.wait_for(failed.wait(), delay)
+                        break
+                    except TimeoutError:
+                        pass
+                if failed.is_set():
+                    break
+                stats["offered"] += 1
+                task = asyncio.create_task(request(index))
+                tasks.add(task)
+                task.add_done_callback(tasks.discard)
+                progress(
+                    {
+                        "status": f"Stress test · {rate:g} requests/min · {stats['offered']}/{count} offered · {stats['failed']} failures",
+                        "phase": "stress",
+                        "rpm": rate,
+                    }
+                )
+                await asyncio.sleep(0)
+            if not failed.is_set():
+                remaining = started + duration - time.monotonic()
+                if remaining > 0:
+                    try:
+                        await asyncio.wait_for(failed.wait(), remaining)
+                    except TimeoutError:
+                        pass
+            if tasks:
+                await asyncio.gather(*list(tasks))
+        finally:
+            for task in list(tasks):
+                task.cancel()
+            await asyncio.gather(*list(tasks), return_exceptions=True)
+        stats["wall_seconds"] = time.monotonic() - started
+        stats["successful"] = stats["failed"] == 0
+        stress["round_count"] += 1
+        stress["rounds"] = [*stress["rounds"], stats][-200:]
+        if stats["successful"]:
+            stress["best_rpm"] = max(stress["best_rpm"], rate)
+        if direction is None:
+            direction = "up" if stats["successful"] else "down"
+        elif (direction == "up" and not stats["successful"]) or (
+            direction == "down" and stats["successful"]
+        ):
+            stress["status"] = "completed"
+            stress["stop_reason"] = (
+                "failure-scaling-up" if direction == "up" else "success-scaling-down"
+            )
+            checkpoint(result)
+            return
+        checkpoint(result)
+        rate = rate * 2 if stats["successful"] else rate / 2
+
 
 TEXT = "A local library lends books, offers quiet study rooms, and teaches digital skills. "
 CHAT_CASES = [
@@ -29,12 +139,23 @@ EMBED_CASES = [
 
 
 async def measure(
-    runtime, model, target, context, parallel, progress, *, transport=None, budget=285
+    runtime,
+    model,
+    target,
+    context,
+    parallel,
+    progress,
+    control=None,
+    policy=None,
+    checkpoint=lambda result: None,
+    *,
+    transport=None,
+    budget=None,
 ):
-    """Cancel all benchmark HTTP work at an absolute deadline, including slow streams.
+    """Measure six sequential workloads then adapt load to its first outcome reversal.
 
-    Runs sequential requests to measure single-request speed at the configured runtime
-    parallelism. The budget includes connection setup and capability discovery.
+    No production overall deadline; budget is an optional test-only deadline.
+    Cancellation closes HTTP tasks and the isolated scheduler's reservations.
     """
     started = time.monotonic()
     result = {
@@ -54,7 +175,7 @@ async def measure(
         nonlocal transport
         if transport is None:
             # Docker inspection is blocking. Do not let asyncio.run's executor
-            # shutdown extend the benchmark deadline if Docker itself stalls.
+            # shutdown block manual cancellation if Docker itself stalls.
             ready = Future()
 
             def prepare():
@@ -69,7 +190,7 @@ async def measure(
             socket = ready.result()
             transport = httpx.AsyncHTTPTransport(uds=socket)
         async with httpx.AsyncClient(
-            base_url=RUNTIME_BASE_URL, transport=transport, trust_env=False, timeout=budget
+            base_url=RUNTIME_BASE_URL, transport=transport, trust_env=False, timeout=None
         ) as client:
 
             async def post(path, body):
@@ -89,6 +210,7 @@ async def measure(
             else:
                 raise ValueError("Unsupported benchmark capability")
             cases = CHAT_CASES if result["kind"] == "chat" else EMBED_CASES
+            workloads = []
             for index, (label, content, size) in enumerate(cases):
                 progress(
                     {
@@ -108,6 +230,7 @@ async def measure(
                 else:
                     body.update(input=[TEXT * content for _ in range(size)], truncate=True)
                     path = "/api/embed"
+                workloads.append((path, body))
                 before = time.monotonic()
                 data = await post(path, body)
                 elapsed = time.monotonic() - before
@@ -135,14 +258,62 @@ async def measure(
                     }
                 )
             result["status"] = "completed"
+            result["tokens_per_second"] = sum(c["tokens"] for c in result["cases"]) / sum(
+                c["seconds"] for c in result["cases"]
+            )
+            checkpoint(result)
+            if policy is not None:
+                jobs = SimpleNamespace(lock=threading.Lock(), job={"state": "idle"}, store=None)
+                scheduler = InferenceScheduler(
+                    jobs,
+                    capacity=policy["queue_size"],
+                    timeout=policy["queue_timeout"],
+                    parallel=parallel,
+                )
+                scheduler.queue_users = policy["queue_users"]
+                result["stress_policy"] = dict(policy)
+
+                async def stress_post(path, body):
+                    data = await post(path, body)
+                    if result["kind"] == "chat" and not data.get("done"):
+                        raise ValueError("Incomplete stress response")
+                    if result["kind"] == "embedding" and len(data.get("embeddings", [])) != len(
+                        body["input"]
+                    ):
+                        raise ValueError("Incomplete embedding stress response")
+
+                await stress_test(stress_post, workloads, scheduler, progress, result, checkpoint)
+
+    async def cancellable_run():
+        task = asyncio.create_task(run())
+        try:
+            while not task.done():
+                if control is not None and control.is_set():
+                    task.cancel()
+                    break
+                await asyncio.sleep(0.02)
+            await task
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     try:
         async with asyncio.timeout(budget):
-            await run()
+            await cancellable_run()
+    except asyncio.CancelledError:
+        if control is None or not control.is_set():
+            raise
+        if "stress" in result:
+            result["stress"]["status"] = "stopped"
+        else:
+            result["status"] = "stopped"
     except TimeoutError:
         result["status"] = "timed-out"
         result["error"] = "Benchmark deadline reached; partial results retained."
     except Exception:
+        if "stress" in result:
+            result["stress"]["status"] = "failed"
         result["error"] = (
             "Benchmark failed: unsupported capability, missing metrics, or runtime error."
         )

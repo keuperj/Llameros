@@ -1,5 +1,25 @@
 # Dashboard history
 
+### Adaptive benchmark stress tests
+
+After six existing speed cases, benchmarks rotate through those workloads in an
+open-loop stress test. Starting at 1 request/minute, clean stages double the rate
+and failed stages halve it. If the initial stage succeeds, scale up until the
+first failed stage, then stop automatically. If the initial stage fails, scale
+down until the first successful stage, then stop automatically. Stages offer at least six requests over at least one
+minute and drain pending work before moving on. The current queue size, timeout,
+and parallelism are exercised using an isolated production scheduler. The queue
+timeout also bounds a full stress request, including waiting and response time.
+Synthetic failures stay in benchmark metrics, not activity/error logs or quotas.
+
+No overall benchmark deadline applies. Use **Stop benchmark** in Ollama status;
+service shutdown also stops it. Until completion or manual stop, the gateway remains reserved and
+returns HTTP 503. Completed speed metrics are saved before the load phase, and
+load results are saved after every stage and on manual stop. Details include the
+highest clean tested rate and latest 200 stages. This is an observed estimate for
+the workload mix, not proof that a rate is sustainable permanently. Stress tests
+use one synthetic account and do not measure fairness across distinct users.
+
 ### Runtime recovery and restart errors
 
 New managed CPU/GPU Ollama containers use `--restart unless-stopped`. Existing

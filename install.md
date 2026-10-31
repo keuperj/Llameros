@@ -242,9 +242,26 @@ docker info --format '{{json .SecurityOptions}}'
 - Admins select **Benchmark** beside **Stop model**. Queues must be idle; confirm
   the interruption. During a run, the entire gateway returns HTTP 503 with
   `Retry-After: 5`, and model-management operations are reserved.
-- Six sequential chat/embedding cases measure single-request speed, not maximum
-  concurrent throughput or quality, with a 285-second measurement deadline.
-  Warm-up, context, parallelism, and direct runtime traffic can affect results.
+- Six sequential chat/embedding cases measure single-request speed. Afterwards,
+  the same six workloads rotate in an adaptive stress test, starting at 1 request
+  per minute. Initial success selects scale-up: double clean rates and stop at
+  the first failure. Initial failure selects scale-down: halve failed rates and
+  stop at the first success. Each
+  stage offers at least six requests over at least one minute, then drains pending
+  requests before changing rate. Queue overflows, response/queue timeouts, and
+  runtime errors fail the stage without creating activity errors or usage entries.
+  The configured queue timeout also bounds each complete stress request, including
+  queueing. The test uses an isolated instance of the production FIFO scheduler
+  with the current queue settings and parallelism, and one synthetic account.
+- There is no overall benchmark time limit. Select **Stop benchmark** in Ollama
+  status to cancel in-flight benchmark HTTP work and release the reservation.
+  Service shutdown also requests cancellation. Speed results remain ranked when
+  all six speed cases completed; stopping earlier leaves an unranked partial run.
+  The gateway remains unavailable until automatic completion or manual stop.
+- Results show the highest clean tested rate and the latest 200 completed load
+  stages, not a guarantee of permanent capacity. Warm-up, context, parallelism,
+  workload mix, and direct runtime traffic affect results. The load rate is offered
+  requests per minute, not token throughput or a production fairness test.
 - **Benchmarks → Model performance rankings** shows persisted model/device results,
   separate chat/embedding rankings, and per-case metrics on both boards. Compare
   matching settings/timing methods; failed runs retain metrics but are unranked.

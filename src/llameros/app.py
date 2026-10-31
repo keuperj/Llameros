@@ -91,6 +91,7 @@ class Jobs:
         self.lock = threading.Lock()
         self.job = {"state": "idle"}
         self.scheduler = InferenceScheduler(self, parallel=parallel)
+        self.benchmark_stop = threading.Event()
 
     def status(self):
         """Return a dashboard status snapshot without exposing mutable internal job state."""
@@ -118,6 +119,8 @@ class Jobs:
                 "job_id": secrets.token_hex(16),
             }
             job_id = self.job["job_id"]
+            if action == "benchmark":
+                self.benchmark_stop.clear()
 
         def progress(value):
             """Merge worker progress into job state while retaining per-layer download observations."""
@@ -241,6 +244,7 @@ def create_app(
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+        jobs.benchmark_stop.set()
         await run_in_threadpool(lambda: jobs.pool.shutdown(wait=True))
         await run_in_threadpool(close_relays)
 
@@ -811,7 +815,7 @@ def create_app(
 
     @app.post("/api/benchmark", dependencies=protected, status_code=202)
     def benchmark(body: ModelRequest):
-        """Reserve all devices for a bounded admin benchmark of one resident instance."""
+        """Reserve all devices for manually stoppable speed and sustained-load tests."""
         name = validate_model(body.model)
         client = runtimes.model_client(name, body.target) if runtimes else docker
         if not runtimes and not is_loaded(name):
@@ -820,12 +824,30 @@ def create_app(
 
         def work(progress):
             result = asyncio.run(
-                measure(client, name, target, cfg.context_length, cfg.ollama_num_parallel, progress)
+                measure(
+                    client,
+                    name,
+                    target,
+                    cfg.context_length,
+                    cfg.ollama_num_parallel,
+                    progress,
+                    jobs.benchmark_stop,
+                    scheduler_policy.model_dump(),
+                    store.save_benchmark,
+                )
             )
             store.save_benchmark(result)
             return result
 
         return jobs.submit("benchmark", name, work)
+
+    @app.post("/api/benchmark/stop", dependencies=protected)
+    def stop_benchmark():
+        with jobs.lock:
+            if jobs.job.get("action") != "benchmark" or jobs.job.get("state") != "running":
+                raise HTTPException(409, "No benchmark is running")
+            jobs.benchmark_stop.set()
+        return {"stopping": True}
 
     @app.post("/api/generate", dependencies=protected, status_code=202)
     def generate(body: GenerateRequest, session=Depends(require_admin)):

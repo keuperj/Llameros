@@ -35,6 +35,12 @@ const BenchmarkResults = {
         details.append(element('summary', 'View details'));
         details.append(element('p', `${row.cases.length} cases · context ${row.context_length} · parallel setting ${row.parallel}`));
         if (row.error) details.append(element('p', row.error));
+        if (row.stress) {
+          const stress = row.stress;
+          if (stress.stop_reason) details.append(element('p', stress.stop_reason === 'failure-scaling-up' ? 'Automatically stopped at the first failed rate while scaling up.' : 'Automatically stopped at the first successful rate while scaling down.'));
+          details.append(element('p', `Stress test: ${stress.status} · highest clean tested rate ${stress.best_rpm.toFixed(2)} requests/min · ${stress.round_count} rounds. Observed estimate, not a guarantee of permanent capacity. Latest 200 rounds retained.`));
+          for (const round of stress.rounds) details.append(element('p', `${round.rpm.toFixed(2)} requests/min: ${round.successful ? 'passed' : 'failed'} · ${round.completed}/${round.offered} completed · ${round.overflow} overflows · ${round.timeouts} timeouts · ${round.failed} total failures · ${round.wall_seconds.toFixed(1)}s`));
+        }
         for (const sample of row.cases) details.append(element('p', `${sample.name}: ${sample.tokens_per_second.toFixed(1)} tokens/s · ${sample.tokens} tokens · ${sample.wall_seconds.toFixed(2)}s wall time · ${sample.timing} timing`));
         const cell = element('td', ''); cell.append(details); item.append(cell); body.append(item);
       }

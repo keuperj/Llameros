@@ -133,7 +133,7 @@ function renderAccess(allowManagement = true) {
         benchmark.setAttribute('aria-label', `Benchmark ${name} on ${model.hardware || model.target || 'CPU'}`);
         actionFeedback.bind(benchmark, JSON.stringify(['benchmark', name, model.target || 'cpu']));
         benchmark.addEventListener('click', safe(async (event, control) => {
-          if (!window.confirm('Benchmark this model? The inference API will be temporarily unavailable for all users for up to 5 minutes.')) return;
+          if (!window.confirm('Benchmark this model? After six speed tests, the stress test stops on the first failure while scaling up, or the first success while scaling down. You can also select Stop benchmark. The inference API is unavailable for all users during the run.')) return;
           await submitAction(control, '/api/benchmark', {model: name, target: model.target || ''}); await refresh();
         }));
         actions.append(benchmark); head.append(actions);
@@ -302,6 +302,11 @@ function renderJob(job) {
   if (job.action === 'benchmark' && job.result) {
     const result = job.result;
     $('job').append(element('p', `Benchmark ${result.status}: ${result.tokens_per_second == null ? 'No throughput available' : result.tokens_per_second.toFixed(1) + ' tokens/s'}. ${result.error || 'Saved in Benchmarks → Model performance rankings.'}`));
+  }
+  if (job.action === 'benchmark' && busy) {
+    const stop = element('button', '■ Stop benchmark'); stop.type = 'button';
+    stop.addEventListener('click', safe(async () => { await api('/api/benchmark/stop', {}); stop.disabled = true; stop.textContent = 'Stopping benchmark…'; }));
+    $('job').append(stop);
   }
   updateControls();
   $('pull').disabled = busy || !selectedFit || !selectedFit.fits;
