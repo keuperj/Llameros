@@ -22,7 +22,7 @@ def test_playground_closed_and_scroll_regions_accessible():
     parser.feed((static / "index.html").read_text())
     tag, attrs = parser.nodes["try-model"]
     assert tag == "details" and "open" not in attrs
-    for name in ("events", "installed", "model-usage-scroll", "key-usage-scroll"):
+    for name in ("admin-activity-scroll", "installed", "model-usage-scroll", "key-usage-scroll"):
         attrs = parser.nodes[name][1]
         assert attrs["tabindex"] == "0" and attrs["role"] == "region"
     assert parser.nodes["runtime"][1]["aria-live"] == "polite"
@@ -36,7 +36,9 @@ def test_playground_closed_and_scroll_regions_accessible():
     html = (static / "index.html").read_text()
     assert html.index("/static/usage.js") < html.index("/static/app.js")
     assert html.index("/static/actions.js") < html.index("/static/app.js")
-    assert 'id="events-heading">Activity log' in html
+    assert 'id="events-heading">Admin activity log' in html
+    assert parser.nodes["events"][0] == "tbody"
+    assert html.index('id="activity-log"') > html.index('id="usage-history"')
     assert ".action-error{" in css
     assert ".action-error[hidden]{display:none}" in css
 
@@ -65,7 +67,7 @@ def test_usage_tables_have_compact_matching_headers():
     static = Path(__file__).resolve().parents[1] / "src/llameros/static"
     html = (static / "index.html").read_text()
     parser = Headers()
-    parser.feed(html[html.index('class="usage-tiles"') :])
+    parser.feed(html[html.index('class="usage-tiles"') : html.index('id="activity-log"')])
     assert parser.labels == [
         "Model",
         "Requests",

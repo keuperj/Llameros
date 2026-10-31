@@ -251,6 +251,30 @@ docker info --format '{{json .SecurityOptions}}'
 - Each run replaces the previous result, even on failure. Results are separate
   from usage/quotas and telemetry retention; prompts/responses/vectors are not saved.
 
+### Admin activity and error monitoring
+
+The independent **Activity and errors** panel at the bottom of the admin board
+has three keyboard-accessible tabs with scrollable tables:
+
+- **Overview:** successful/failed API requests and admin lifecycle activity totals
+  over retained history. Admin totals also include started events. A warning stays
+  visible until an administrator selects **Acknowledge failures**. Acknowledgement
+  is shared across admins and persists across restarts; new failures trigger it again.
+- **User activity log:** timestamp, user, key name/ID (never its secret), model,
+  target, status, input/output tokens and output tokens/s over full request time,
+  including queueing. Failed requests are red and can be isolated with
+  **Show only errors**. Early authentication/validation failures may have unknown
+  fields; incomplete usage is shown as unknown, not zero. Direct Ollama traffic
+  is not logged by Llameros.
+- **Admin activity log:** the existing lifecycle/action log, moved out of Usage
+  history, with red failure rows and an independent **Show only errors** toggle.
+
+Tables show the newest 1,000 retained entries; overview counts cover all retained
+entries. Normal history age/row limits apply. The unacknowledged-failure counter
+survives history cleanup, so old failures still require explicit acknowledgement.
+Prompts, generated responses and bearer secrets are not included in these logs.
+Only administrators can read this panel or acknowledge failures.
+
 ## Configuration
 
 ### Application settings

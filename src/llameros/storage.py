@@ -27,6 +27,11 @@ class Store:
         with self.connect() as db:
             db.executescript("""
                 PRAGMA journal_mode=WAL;
+                CREATE TABLE IF NOT EXISTS activity_alert (
+                    id INTEGER PRIMARY KEY CHECK(id=1), failures INTEGER NOT NULL,
+                    acknowledged INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO activity_alert VALUES(1,0,0);
                 CREATE TABLE IF NOT EXISTS benchmarks (
                     model TEXT NOT NULL, target TEXT NOT NULL, data TEXT NOT NULL,
                     PRIMARY KEY(model, target)
@@ -159,6 +164,53 @@ class Store:
                 ),
             )
             self.trim(db, "generations")
+
+    def activity(self):
+        """Admin-only retained request/lifecycle records and durable failure watermark."""
+        with self.connect() as db:
+            self.trim(db, "api_usage")
+            self.trim(db, "events")
+            requests = [
+                dict(row)
+                for row in db.execute("""
+                SELECT u.*, k.name AS key_name, k.user AS username,
+                       CASE WHEN u.duration>0 AND u.output_tokens IS NOT NULL
+                            THEN u.output_tokens/u.duration ELSE NULL END AS tokens_per_second
+                FROM api_usage u LEFT JOIN api_keys k ON k.id=u.key_id
+                ORDER BY u.id DESC LIMIT 1000
+            """)
+            ]
+            admin = [
+                dict(row) for row in db.execute("SELECT * FROM events ORDER BY id DESC LIMIT 1000")
+            ]
+            counts = dict(
+                db.execute("""SELECT COUNT(*) AS total,
+                COALESCE(SUM(status='completed'),0) AS successful,
+                COALESCE(SUM(status!='completed'),0) AS failed FROM api_usage""").fetchone()
+            )
+            actions = dict(
+                db.execute("""SELECT COUNT(*) AS total,
+                COALESCE(SUM(kind LIKE '%:completed'),0) AS successful,
+                COALESCE(SUM(kind LIKE '%:failed'),0) AS failed FROM events""").fetchone()
+            )
+            alert = dict(
+                db.execute("SELECT failures,acknowledged FROM activity_alert WHERE id=1").fetchone()
+            )
+        return {
+            "requests": requests,
+            "admin": admin,
+            "request_counts": counts,
+            "admin_counts": actions,
+            "alert": alert,
+        }
+
+    def acknowledge_activity(self, failures):
+        """Acknowledge only the displayed watermark, never failures arriving afterward."""
+        with self.connect() as db:
+            db.execute(
+                "UPDATE activity_alert SET acknowledged=MAX(acknowledged,MIN(failures,?)) WHERE id=1",
+                (failures,),
+            )
 
     def save_benchmark(self, result):
         """Keep the latest benchmark per model/device independently of telemetry retention."""

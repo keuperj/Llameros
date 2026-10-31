@@ -201,6 +201,9 @@ class ApiKeys:
             )
             self.store.trim(db, "api_usage")
 
+            if status != "completed":
+                db.execute("UPDATE activity_alert SET failures=failures+1 WHERE id=1")
+
     def delete(self, identity, user=None, actor=None):
         # Retain a tombstone and usage for history, including in-flight requests.
         """Tombstone and revoke a key while preserving usage, optionally enforcing ownership."""

@@ -45,6 +45,10 @@ class Login(BaseModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class ActivityAcknowledgement(BaseModel):
+    failures: int = Field(ge=0, le=2**63 - 1, strict=True)
+
+
 class ModelRequest(BaseModel):
     """Validated lifecycle model selection with an optional hardware target."""
 
@@ -254,7 +258,23 @@ def create_app(
                     return JSONResponse(
                         {"detail": "Invalid session or CSRF token"}, status_code=403
                     )
+        activity_started = time.monotonic()
         response = await call_next(request)
+        if (
+            gateway
+            and response.status_code >= 400
+            and not getattr(request.state, "activity_recorded", False)
+        ):
+            # Early validation/auth/queue failures otherwise bypass gateway finalization.
+            # Never record request bodies or bearer credentials.
+            app.state.api_keys.record(
+                getattr(request.state, "activity_key", ""),
+                "",
+                "",
+                f"HTTP {response.status_code}",
+                {},
+                time.monotonic() - activity_started,
+            )
         response.headers.update(
             {
                 "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
@@ -532,6 +552,15 @@ def create_app(
                 cfg.context_length,
             ),
         }
+
+    @app.get("/api/activity", dependencies=protected)
+    def activity():
+        return store.activity()
+
+    @app.post("/api/activity/acknowledge", dependencies=protected)
+    def acknowledge_activity(body: ActivityAcknowledgement):
+        store.acknowledge_activity(body.failures)
+        return {"acknowledged": True}
 
     @app.get("/api/history", dependencies=protected)
     def history(session=Depends(require_admin)):

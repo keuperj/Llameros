@@ -58,3 +58,5 @@ footer a:focus-visible{outline:2px solid var(--green);outline-offset:5px;border-
 #benchmark-results table{width:100%}
 #benchmark-results td{vertical-align:top}
 #benchmark-results details{min-width:160px}
+
+.activity-scroll{max-height:360px;overflow:auto} .activity-scroll table{width:100%} .activity-error td{color:#ff8e8e;background:#35191d} .activity-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0} .activity-tabs [aria-selected="true"]{border-color:var(--green)} #activity-warning{padding:12px;border:1px solid #ff8e8e;border-radius:8px;color:#ff8e8e} #events td{white-space:normal}

@@ -187,7 +187,9 @@ def install_gateway(
         authorization = request.headers.get("authorization", "")
         if not authorization and request.url.path.endswith("/v1/messages"):
             authorization = "Bearer " + request.headers.get("x-api-key", "")
-        return keys.authenticate(authorization)
+        identity = keys.authenticate(authorization)
+        request.state.activity_key = identity["id"]
+        return identity
 
     async def read_body(request):
         """Read bounded streamed JSON and require an object before protocol-specific validation."""
@@ -625,6 +627,7 @@ def install_gateway(
             if finished:
                 return
             finished = True
+            request.state.activity_recorded = True
             try:
                 if upstream is not None:
                     await upstream.aclose()

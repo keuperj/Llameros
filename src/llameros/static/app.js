@@ -15,6 +15,7 @@ let accessConfig = null, accessContext = 4096;
 let sessionEpoch = 0;
 /** Invalidate all outstanding account/board requests and erase private presentation. */
 function clearSessionView() {
+  if (typeof ActivityLog !== 'undefined') ActivityLog.reset();
   if (typeof TokenLimits !== 'undefined') TokenLimits.reset();
   sessionEpoch++;
   lastResult = ''; selectedFit = null; catalogueEntries = []; loadedCatalogueQuery = '';
@@ -60,6 +61,10 @@ const actionFeedback = ActionFeedback.create({document, notice, log: logActionEr
  * @param {Array<Object>} [events=[]] - Content-free server activity records.
  */
 function renderEvents(events = []) {
+  if (typeof ActivityLog !== 'undefined') {
+    ActivityLog.events([...localActionEvents.filter(event => !event.persisted), ...events].sort((a, b) => b.timestamp - a.timestamp).slice(0, 1000));
+    return;
+  }
   const panel = $('events'), top = panel.scrollTop, left = panel.scrollLeft;
   const merged = [...localActionEvents, ...events].sort((a, b) => b.timestamp - a.timestamp).slice(0, 240);
   panel.replaceChildren();
@@ -680,7 +685,7 @@ async function refresh() {
       await refreshKeys();
     }
     if (userBoard) { await refreshUserBoard(); return; }
-    const [data, history, inventory, keyUsage] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage')]);
+    const [data, history, inventory, keyUsage, activity] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage'), api('/api/activity')]);
     if (!csrf) return;
     renderKeyUsage(keyUsage.keys); renderKeyModels(inventory.models || []);
     const storage = inventory.storage;
@@ -751,7 +756,8 @@ async function refresh() {
     });
     renderModelUsage(history.models);
     BenchmarkResults.render(history.benchmarks);
-    serverEvents = history.events;
+    ActivityLog.render(activity);
+    serverEvents = activity.admin;
     for (let index = localActionEvents.length - 1; index >= 0; index--) {
       const local = localActionEvents[index];
       if (local.persisted && serverEvents.some(event => event.detail === local.detail &&
