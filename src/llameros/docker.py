@@ -33,6 +33,8 @@ class Docker:
         self.target = target
         self.name = name or settings.container_name
         self.storage = storage or ModelStorage(settings)
+        self.observer = None
+        self.expected_start = False
 
     def storage_info(self) -> dict:
         """Return storage metadata without changing the selected model location."""
@@ -203,7 +205,14 @@ class Docker:
             raise DockerError(
                 "Legacy or differently assigned container found. Stop Ollama and reapply model storage to recreate it safely; model files are retained."
             )
+        if self.observer:
+            self.observer(self.name, data, expected_start=self.expected_start)
         return data
+
+    def ensure_restart_policy(self, data):
+        """Upgrade owned managed containers in place, without restarting them."""
+        if data.get("HostConfig", {}).get("RestartPolicy", {}).get("Name") != "unless-stopped":
+            self.command("update", "--restart", "unless-stopped", self.name)
 
     def run_args(self) -> list[str]:
         """Build fixed isolation, storage, private-listener, and device flags."""
@@ -232,7 +241,7 @@ class Docker:
             "--pids-limit",
             "512",
             "--restart",
-            "no",
+            "unless-stopped",
             "--log-opt",
             "max-size=10m",
             "--log-opt",
@@ -334,6 +343,7 @@ class Docker:
             data = None
         if data:
             self.require_isolation(data)
+            self.ensure_restart_policy(data)
         if data and self.storage.directory:
             mounts = data.get("Mounts", [])
             if not any(
@@ -355,6 +365,12 @@ class Docker:
         elif not data["State"]["Running"]:
             progress({"status": "Starting existing Ollama container", "phase": "container"})
             self.command("start", self.name)
+        if self.observer:
+            self.expected_start = True
+            try:
+                self.inspect()
+            finally:
+                self.expected_start = False
         progress({"status": "Waiting for Ollama API readiness", "phase": "readiness"})
         for _ in range(60):
             try:
@@ -439,6 +455,8 @@ class Docker:
             "container": self.name,
         }
         if running:
+            self.require_isolation(data)
+            self.ensure_restart_policy(data)
             result["models"] = self.api("GET", "/api/tags", timeout=5).get("models", [])
             self.storage.remember(result["models"])
             result["loaded"] = self.api("GET", "/api/ps", timeout=5).get("models", [])

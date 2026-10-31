@@ -1,6 +1,13 @@
 /** Hourly token totals, including empty hours, without request content. */
 'use strict';
 const UserActivity = {
+  series: [
+    ['input', '#35d07f', 'tokens', 'Input tokens'],
+    ['output', '#ffb020', 'tokens', 'Output tokens'],
+    ['requests', '#38bdf8', 'counts', 'Requests/hour'],
+    ['failed', '#ff4545', 'counts', 'Failed requests/hour'],
+    ['queue', '#c084fc', 'counts', 'Maximum queue size'],
+  ],
   data: null,
   aggregate(data, user = '') {
     const hours = new Map();
@@ -35,7 +42,15 @@ const UserActivity = {
   draw() {
     if (!this.data) return;
     const rows = this.aggregate(this.data, document.getElementById('token-user').value);
-    this.plot('token-chart', rows, [['input', '#9cdd9b', 'tokens'], ['output', '#e7ad68', 'tokens'], ['requests', '#7dcfff', 'counts'], ['failed', '#ff5959', 'counts'], ['queue', '#c69cff', 'counts']]);
+    const legend = document.getElementById('activity-legend');
+    legend.replaceChildren();
+    for (const [, color, axis, label] of this.series) {
+      const item = document.createElement('span');
+      item.style.color = color;
+      item.textContent = `● ${label} (${axis === 'tokens' ? 'left' : 'right'} axis)`;
+      legend.append(item);
+    }
+    this.plot('token-chart', rows, this.series);
     const totals = field => rows.reduce((sum, row) => sum + row[field], 0).toLocaleString();
     document.getElementById('token-totals').textContent = `Input: ${totals('input')} · Output: ${totals('output')} tokens · Requests: ${totals('requests')} · Failed: ${totals('failed')} · Maximum queue size: ${Math.max(0, ...rows.map(row => row.queue))} · hourly UTC · retained 90 days`;
   },

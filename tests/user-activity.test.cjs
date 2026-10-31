@@ -41,3 +41,18 @@ test('queue aggregation selects recorded simultaneous peaks rather than summing 
   vm.runInContext("data.queue_username='alice';data.queues=data.queues.filter(row=>row.username==='alice')", context);
   assert.equal(vm.runInContext('UserActivity.aggregate(data)[0].queue', context), 3);
 });
+
+test('five activity series have unique colors and share those colors with the legend', () => {
+  const nodes = new Map();
+  const get = id => {
+    if (!nodes.has(id)) nodes.set(id, {value:'', children:[], style:{}, replaceChildren() { this.children=[]; }, append(item) { this.children.push(item); }});
+    return nodes.get(id);
+  };
+  const context = vm.createContext({document: {addEventListener() {}, getElementById:get, createElement() { return {style:{}}; }}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/llameros/static/user-activity.js'), 'utf8'), context);
+  vm.runInContext("UserActivity.data={start:0,end:0,rows:[]}; UserActivity.plot=()=>{}; UserActivity.draw()", context);
+  const colors = JSON.parse(vm.runInContext('JSON.stringify(UserActivity.series.map(row=>row[1]))', context));
+  assert.equal(new Set(colors).size, 5);
+  assert.deepEqual(get('activity-legend').children.map(item=>item.style.color), colors);
+  assert.equal(get('activity-legend').children[3].textContent.startsWith('● Failed requests'), true);
+});

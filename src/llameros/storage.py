@@ -38,6 +38,10 @@ class Store:
                     PRIMARY KEY(hour,username)
                 );
                 CREATE TABLE IF NOT EXISTS activity_migrations (name TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS container_observations (
+                    name TEXT PRIMARY KEY, container_id TEXT NOT NULL,
+                    restart_count INTEGER NOT NULL, started_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS queue_hours (
                     hour INTEGER NOT NULL, username TEXT NOT NULL,
                     max_size INTEGER NOT NULL, PRIMARY KEY(hour,username)
@@ -88,6 +92,43 @@ class Store:
                 (time.time(), model, kind, detail),
             )
             self.trim(db, "events")
+
+    def observe_container(self, name, data, expected_start=False):
+        """Atomically deduplicate observed restarts, including while the service was offline.
+
+        A new container establishes a baseline (existing restart counts are reported).
+        Controlled starts refresh the baseline without treating a user action as a fault.
+        """
+        identity = data.get("Id")
+        if not identity:
+            return
+        count = max(0, int(data.get("RestartCount", 0)))
+        started = data.get("State", {}).get("StartedAt", "")
+        if started.startswith("0001-"):
+            started = ""
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute(
+                "SELECT * FROM container_observations WHERE name=?", (name,)
+            ).fetchone()
+            same = previous is not None and previous["container_id"] == identity
+            delta = max(0, count - previous["restart_count"]) if same else count
+            changed = (
+                same and previous["started_at"] and started and previous["started_at"] != started
+            )
+            if delta or (changed and not expected_start):
+                detail = f"Container {name}: observed {delta or 1} restart(s); Docker restart count={count}; started at={started or 'unknown'}."
+                db.execute(
+                    "INSERT INTO events(timestamp,model,kind,detail) VALUES(?,?,?,?)",
+                    (time.time(), "", "container-restart:failed", detail),
+                )
+                self.trim(db, "events")
+            db.execute(
+                """INSERT INTO container_observations VALUES(?,?,?,?)
+                ON CONFLICT(name) DO UPDATE SET container_id=excluded.container_id,
+                restart_count=excluded.restart_count,started_at=excluded.started_at""",
+                (name, identity, count, started),
+            )
 
     def trim(self, db, table):
         """Apply age and row bounds in the writer transaction, independently of sampling."""

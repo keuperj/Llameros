@@ -1,5 +1,24 @@
 # Dashboard history
 
+### Runtime recovery and restart errors
+
+New managed CPU/GPU Ollama containers use `--restart unless-stopped`. Existing
+owned, compatible running containers receive the policy in place during status
+checks; stopped containers receive it when started. Explicit Stop remains stopped.
+No unrelated or archived containers are modified.
+
+Docker restart-count increases and observed start-timestamp changes are persisted
+as `container-restart:failed` admin activity entries, including changes first seen
+after a Llameros restart. Multiple automatic restarts between checks produce one
+error with the restart-count delta. Initial discovery reports an existing nonzero
+restart count; ordinary first starts, container replacements, and controlled
+Llameros starts do not produce timestamp-only errors. Restarts are detected during
+container inspection (periodic sampling by default); this is not a Docker event
+stream, so intermediate timestamp-only restarts cannot be counted individually.
+
+The User Activity chart and legend share five distinct colors: green input tokens,
+amber output tokens, blue requests, red failures, and purple maximum queue size.
+
 ### Scheduler configuration
 
 Administrators can edit **Configuration → Scheduler**. Defaults are 16 waiting

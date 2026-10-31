@@ -21,6 +21,7 @@ class Runtimes:
     def __init__(self, settings, hardware):
         """Load the private slot registry, shared storage, and current hardware capabilities."""
         self.settings = settings
+        self.observer = None
         self.hardware = hardware
         self.storage = Docker(settings).storage
         self.registry = settings.state_dir / "runtime-slots.json"
@@ -85,7 +86,9 @@ class Runtimes:
         record = self.records[target_id]
         cfg = replace(self.settings, gpu=target["vendor"], ollama_port=record["port"])
         name = self.settings.container_name + ("" if target_id == "cpu" else "-" + target_id)
-        return Docker(cfg, target=target, name=name, storage=self.storage)
+        client = Docker(cfg, target=target, name=name, storage=self.storage)
+        client.observer = self.observer
+        return client
 
     def status(self):
         """Merge registered runtime status with available hardware and annotate loaded models by slot."""
@@ -127,6 +130,7 @@ class Runtimes:
                     # remains usable, while never treating it as a free slot.
                     if identity == "cpu":
                         legacy = Docker(self.settings)
+                        legacy.observer = self.observer
                         try:
                             legacy.check_daemon()
                             data = legacy.inspect()

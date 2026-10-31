@@ -196,6 +196,9 @@ def create_app(
     hardware = hardware_provider or snapshot
     runtimes = Runtimes(cfg, hardware) if supplied_docker is None else None
     docker = supplied_docker or runtimes.client("cpu", register=True)
+    if runtimes:
+        runtimes.observer = store.observe_container
+    docker.observer = store.observe_container
 
     def runtime_status():
         """Read all isolated slots or the injected single-runtime test adapter."""
