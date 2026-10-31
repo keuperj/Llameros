@@ -90,3 +90,29 @@ def test_hourly_totals_survive_row_cleanup_and_are_owner_scoped(multiuser):
         db.execute("DELETE FROM api_usage")
     ApiKeys(store)
     assert store.token_history("alice")["rows"][0]["output_tokens"] == 14
+
+
+def test_hourly_requests_include_failures_without_token_counts(multiuser):
+    app, admin, user = multiuser
+    key = issue(user)
+    keys = app.state.api_keys
+    keys.record(key["id"], "model", "cpu", "completed", {"prompt": 3}, 1)
+    keys.record(key["id"], "model", "cpu", "failed", {}, 1)
+    keys.record(key["id"], "model", "cpu", "disconnected", {}, 1)
+    row = user.get("/api/token-history").json()["rows"][0]
+    assert (row["requests"], row["failed"], row["input_tokens"]) == (3, 2, 3)
+    ApiKeys(app.state.store)
+    assert admin.get("/api/token-history").json()["rows"][0]["requests"] == 3
+
+
+def test_hourly_request_migration_preserves_existing_tokens(multiuser):
+    app, _, user = multiuser
+    key = issue(user)
+    app.state.api_keys.record(key["id"], "model", "cpu", "failed", {"prompt": 4}, 1)
+    store = app.state.store
+    with store.connect() as db:
+        db.execute("ALTER TABLE token_hours DROP COLUMN requests")
+        db.execute("ALTER TABLE token_hours DROP COLUMN failed")
+    ApiKeys(store)
+    row = store.token_history("alice")["rows"][0]
+    assert (row["requests"], row["failed"], row["input_tokens"]) == (1, 1, 4)

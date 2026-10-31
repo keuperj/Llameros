@@ -105,7 +105,7 @@ class ApiKeys:
                 "SELECT 1 FROM activity_migrations WHERE name='token_hours'"
             ).fetchone():
                 db.execute(
-                    """INSERT INTO token_hours
+                    """INSERT INTO token_hours(hour,username,input_tokens,output_tokens)
                     SELECT CAST(u.timestamp/3600 AS INTEGER)*3600,k.user,
                            SUM(COALESCE(u.prompt_tokens,0)),SUM(COALESCE(u.output_tokens,0))
                     FROM api_usage u JOIN api_keys k ON k.id=u.key_id
@@ -113,6 +113,18 @@ class ApiKeys:
                     (time.time() - 90 * 86400,),
                 )
                 db.execute("INSERT INTO activity_migrations VALUES('token_hours')")
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(token_hours)")}
+            if "requests" not in columns:
+                db.execute("ALTER TABLE token_hours ADD COLUMN requests INTEGER NOT NULL DEFAULT 0")
+                db.execute("ALTER TABLE token_hours ADD COLUMN failed INTEGER NOT NULL DEFAULT 0")
+                db.execute(
+                    """INSERT INTO token_hours(hour,username,input_tokens,output_tokens,requests,failed)
+                    SELECT CAST(u.timestamp/3600 AS INTEGER)*3600,k.user,0,0,COUNT(*),SUM(u.status!='completed')
+                    FROM api_usage u JOIN api_keys k ON k.id=u.key_id
+                    WHERE u.timestamp>=? GROUP BY 1,2
+                    ON CONFLICT(hour,username) DO UPDATE SET requests=excluded.requests,failed=excluded.failed""",
+                    (time.time() - 90 * 86400,),
+                )
 
     def create(self, body, user=None, actor=None):
         """Persist a new key and return its ID and one-time plaintext secret.
@@ -217,17 +229,19 @@ class ApiKeys:
             if status != "completed":
                 db.execute("UPDATE activity_alert SET failures=failures+1 WHERE id=1")
             owner = db.execute("SELECT user FROM api_keys WHERE id=?", (identity,)).fetchone()
-            if owner and (counts.get("prompt") is not None or counts.get("output") is not None):
+            if owner:
                 db.execute(
-                    """INSERT INTO token_hours(hour,username,input_tokens,output_tokens) VALUES(?,?,?,?)
+                    """INSERT INTO token_hours(hour,username,input_tokens,output_tokens,requests,failed) VALUES(?,?,?,?,1,?)
                     ON CONFLICT(hour,username) DO UPDATE SET
                     input_tokens=input_tokens+excluded.input_tokens,
-                    output_tokens=output_tokens+excluded.output_tokens""",
+                    output_tokens=output_tokens+excluded.output_tokens,
+                    requests=requests+1,failed=failed+excluded.failed""",
                     (
                         int(now) // 3600 * 3600,
                         owner["user"],
                         counts.get("prompt") or 0,
                         counts.get("output") or 0,
+                        int(status != "completed"),
                     ),
                 )
             db.execute(

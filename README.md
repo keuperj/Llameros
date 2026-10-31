@@ -1,5 +1,30 @@
 # Dashboard history
 
+### Scheduler configuration
+
+Administrators can edit **Configuration → Scheduler**. Defaults are 16 waiting
+requests per hardware target, a 120-second queue timeout, 2 parallel Ollama
+requests, and 0 (unlimited) distinct waiting users. A user is an authenticated
+Linux account, shared across its API keys. The distinct-user limit is per target
+and counts waiting users only, not executing requests. A user already waiting may
+add requests up to the request limit. Limits reject excess admission with HTTP
+429; expired waiting requests receive HTTP 504. Lowering limits does not cancel
+existing tickets, although a shorter timeout applies to their elapsed wait.
+
+Saved dashboard settings persist in the private state directory's `scheduler.json`
+and override the TOML parallelism value on subsequent service starts. Queue
+settings apply immediately. To change Ollama parallelism, wait for all jobs and
+requests to finish, stop all Ollama runtimes, save and confirm container recreation,
+then start Ollama and reload models. Container recreation is necessary to update
+`OLLAMA_NUM_PARALLEL`; model files and the configured storage location are retained.
+
+User Activity also plots hourly request and failed-request counts on a separate
+scale; failures are red and are included in total requests. Requests with an
+authenticated key are counted even when token usage is unknown. Unauthenticated
+failures remain in activity logs, but cannot be attributed to a user. On upgrade,
+request counts are backfilled from retained request rows only, so older hourly
+token totals may have incomplete corresponding request counts.
+
 Admin cards have disclosure controls. Ollama status, running models, and model
 catalogue/download cards start expanded; other admin cards start collapsed.
 Usage history offers Hardware usage and User Activity tabs. User Activity shows

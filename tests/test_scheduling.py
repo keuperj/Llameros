@@ -42,6 +42,36 @@ def test_parallel_per_device_fifo_and_cleanup(parallel):
     asyncio.run(scenario())
 
 
+def test_distinct_waiting_users_are_per_device_and_released_on_cancellation():
+    async def scenario():
+        jobs = Jobs(None, parallel=1)
+        scheduler = jobs.scheduler
+        scheduler.queue_users = 1
+        active = await scheduler.acquire("gpu", "model", username="active")
+        alice = asyncio.create_task(scheduler.acquire("gpu", "model", username="alice"))
+        await asyncio.sleep(0.03)
+        same_user = asyncio.create_task(scheduler.acquire("gpu", "model", username="alice"))
+        await asyncio.sleep(0.03)
+        with pytest.raises(HTTPException) as error:
+            await scheduler.acquire("gpu", "model", username="bob")
+        assert error.value.status_code == 429
+        cpu = await scheduler.acquire("cpu", "model", username="bob")
+        for task in (alice, same_user):
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        bob = asyncio.create_task(scheduler.acquire("gpu", "model", username="bob"))
+        await asyncio.sleep(0.03)
+        scheduler.release(active, "completed")
+        admitted = await asyncio.wait_for(bob, 1)
+        scheduler.release(admitted, "completed")
+        scheduler.release(cpu, "completed")
+        assert not scheduler.tickets
+        jobs.pool.shutdown()
+
+    asyncio.run(scenario())
+
+
 def test_fifo_separate_devices_queue_limit_timeout_and_cancellation():
     """Verify fifo separate devices queue limit timeout and cancellation."""
 

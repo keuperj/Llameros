@@ -3,12 +3,14 @@
 import asyncio
 import copy
 import hashlib
+import json
 import logging
 import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -29,9 +31,10 @@ from .diagnostics import diagnostic
 from .docker import DockerError
 from .gateway import PREFIX, install_gateway
 from .hardware import assess_fit, snapshot
+from .model_storage import write_json
 from .runtime_transport import close_relays
 from .runtimes import Runtimes
-from .scheduling import InferenceScheduler
+from .scheduling import InferenceScheduler, SchedulerSettings
 from .storage import Store
 from .tls import public_certificate
 from .users import Users, UserUpdate
@@ -174,6 +177,13 @@ def create_app(
     """
     cfg = settings or Settings()
     cfg.prepare()
+    scheduler_path = cfg.state_dir / "scheduler.json"
+    scheduler_policy = (
+        SchedulerSettings.model_validate(json.loads(scheduler_path.read_text()))
+        if scheduler_path.exists()
+        else SchedulerSettings(ollama_num_parallel=cfg.ollama_num_parallel)
+    )
+    cfg = replace(cfg, ollama_num_parallel=scheduler_policy.ollama_num_parallel)
     store = Store(cfg.state_dir / "history.sqlite3")
     store.retention_days = cfg.retention_days
     store.account_check = account_checker or (
@@ -193,6 +203,9 @@ def create_app(
 
     sessions = Sessions(cfg.session_seconds)
     jobs = Jobs(store, cfg.ollama_num_parallel)
+    jobs.scheduler.capacity = scheduler_policy.queue_size
+    jobs.scheduler.timeout = scheduler_policy.queue_timeout
+    jobs.scheduler.queue_users = scheduler_policy.queue_users
 
     def sample_once():
         """Persist one host/runtime observation while containing expected probe failures."""
@@ -584,6 +597,47 @@ def create_app(
     def storage_info():
         """Describe the active model storage location for the admin configuration panel."""
         return docker.storage_info()
+
+    @app.get("/api/scheduler", dependencies=protected)
+    def scheduler_info():
+        with jobs.lock:
+            return scheduler_policy.model_dump()
+
+    @app.post("/api/scheduler", dependencies=protected)
+    def configure_scheduler(body: SchedulerSettings):
+        nonlocal cfg, scheduler_policy
+        with jobs.lock:
+            parallel_changed = body.ollama_num_parallel != cfg.ollama_num_parallel
+            if parallel_changed:
+                if jobs.scheduler.conflicts() or jobs.job.get("state") == "running":
+                    raise HTTPException(
+                        409, "Wait for all inference and lifecycle operations to finish"
+                    )
+                if not body.confirmed:
+                    raise HTTPException(400, "Confirm recreation of stopped Ollama containers")
+                if runtime_status()["running"]:
+                    raise HTTPException(409, "Stop all Ollama runtimes before changing parallelism")
+                # Existing, explicitly confirmed storage operation safely removes stopped owned
+                # containers without deleting model files, ready for the new environment.
+                if runtimes:
+                    runtimes.configure_storage(runtimes.storage.directory, True)
+                else:
+                    docker.configure_storage(docker.storage_info()["directory"], True)
+            write_json(scheduler_path, body.model_dump())
+            cfg = replace(cfg, ollama_num_parallel=body.ollama_num_parallel)
+            if runtimes:
+                runtimes.settings = cfg
+            if hasattr(docker, "settings"):
+                docker.settings = replace(
+                    docker.settings, ollama_num_parallel=body.ollama_num_parallel
+                )
+            scheduler_policy = body
+            jobs.scheduler.capacity = body.queue_size
+            jobs.scheduler.timeout = body.queue_timeout
+            jobs.scheduler.parallel = body.ollama_num_parallel
+            jobs.scheduler.queue_users = body.queue_users
+        store.event("scheduler:completed", detail="Scheduler configuration updated")
+        return body.model_dump()
 
     @app.post("/api/storage", dependencies=protected, status_code=202)
     def configure_storage(body: StorageRequest):

@@ -8,6 +8,18 @@ import time
 from dataclasses import dataclass
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class SchedulerSettings(BaseModel):
+    """Persistent admin policy; zero distinct users preserves unrestricted admission."""
+
+    model_config = ConfigDict(extra="forbid")
+    queue_size: int = Field(default=16, ge=0, le=10000, strict=True)
+    queue_timeout: int = Field(default=120, ge=1, le=86400, strict=True)
+    ollama_num_parallel: int = Field(default=2, ge=1, le=16, strict=True)
+    queue_users: int = Field(default=0, ge=0, le=10000, strict=True)
+    confirmed: bool = Field(default=False, strict=True, exclude=True)
 
 
 @dataclass(eq=False)
@@ -18,6 +30,7 @@ class Ticket:
     model: str
     queued: float
     active: bool = False
+    username: str = ""
 
 
 class InferenceScheduler:
@@ -29,19 +42,20 @@ class InferenceScheduler:
         self.capacity = capacity
         self.timeout = timeout
         self.parallel = parallel
+        self.queue_users = 0
         self.tickets = []
 
     def conflicts(self, targets=None):
         """Check outstanding reservations against targets; callers coordinate with the job lock."""
         return any(targets is None or ticket.target in targets for ticket in self.tickets)
 
-    async def acquire(self, target, model, request=None):
+    async def acquire(self, target, model, request=None, username=""):
         """Wait for this target's FIFO permit and return its ticket.
 
         Reject lifecycle conflicts, queue overflow, disconnects, or timeout with HTTP errors;
         cancellation releases the reservation.
         """
-        ticket = Ticket(target, model, time.monotonic())
+        ticket = Ticket(target, model, time.monotonic(), username=username)
         with self.jobs.lock:
             job = self.jobs.job
             if job["state"] == "running" and job.get("action") == "benchmark":
@@ -55,6 +69,21 @@ class InferenceScheduler:
             if sum(t.target == target for t in self.tickets) >= self.capacity + self.parallel:
                 raise HTTPException(
                     429, "Hardware inference queue is full", headers={"Retry-After": "1"}
+                )
+            waiting = [t for t in self.tickets if t.target == target and not t.active]
+            will_wait = (
+                bool(waiting)
+                or sum(t.target == target and t.active for t in self.tickets) >= self.parallel
+            )
+            users = {t.username for t in waiting}
+            if (
+                will_wait
+                and self.queue_users
+                and username not in users
+                and len(users) >= self.queue_users
+            ):
+                raise HTTPException(
+                    429, "Distinct-user queue limit reached", headers={"Retry-After": "1"}
                 )
             self.tickets.append(ticket)
         try:

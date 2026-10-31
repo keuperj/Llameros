@@ -735,7 +735,7 @@ def install_gateway(
                 )
             target = matches[0]["target"]
             keys.limits.check(quota_scopes)
-            ticket = await jobs.scheduler.acquire(target, model, request)
+            ticket = await jobs.scheduler.acquire(target, model, request, username=key["user"])
             # Keys may be revoked while waiting; do not start new upstream work afterward.
             await run_in_threadpool(bearer, request)
             runtime = (
