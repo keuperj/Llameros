@@ -298,7 +298,7 @@ class Store:
             )
             db.execute("DELETE FROM queue_hours WHERE hour<?", (hour - 90 * 86400,))
 
-    def token_history(self, username=None):
+    def token_history(self, username=None, *, include_totals=False):
         """Hourly UTC totals; administrators may aggregate across all accounts."""
         with self.connect() as db:
             cutoff = int(time.time() - 90 * 86400) // 3600 * 3600
@@ -322,11 +322,31 @@ class Store:
                     (username,) if username is not None else (),
                 )
             ]
+            totals = None
+            if include_totals:
+                totals = [
+                    dict(row)
+                    for row in db.execute(
+                        "SELECT hour,SUM(input_tokens) AS input_tokens,"
+                        "SUM(output_tokens) AS output_tokens,SUM(requests) AS requests,"
+                        "SUM(failed) AS failed FROM token_hours GROUP BY hour ORDER BY hour"
+                    )
+                ]
+                queues = [
+                    dict(row)
+                    for row in db.execute(
+                        "SELECT * FROM queue_hours WHERE username IN ('',?) ORDER BY hour,username",
+                        (username,),
+                    )
+                ]
         return {
             "rows": rows,
             "queues": queues,
-            "queue_username": username or "",
-            "users": sorted({row["username"] for row in [*rows, *queues] if row["username"]}),
+            "queue_username": "" if include_totals else username or "",
+            "users": [username]
+            if include_totals
+            else sorted({row["username"] for row in [*rows, *queues] if row["username"]}),
+            **({"totals": totals} if include_totals else {}),
             "start": cutoff,
             "end": int(time.time()) // 3600 * 3600,
         }

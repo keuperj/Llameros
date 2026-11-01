@@ -586,6 +586,11 @@ def create_app(
     def token_history(session=Depends(require_session)):
         return store.token_history(None if session["role"] == "admin" else session["username"])
 
+    @app.get("/api/user/token-history", dependencies=signed_in)
+    def personal_token_history(session=Depends(require_session)):
+        """Own hourly usage plus anonymous global totals, including for admin personal boards."""
+        return store.token_history(session["username"], include_totals=True)
+
     @app.post("/api/activity/acknowledge", dependencies=protected)
     def acknowledge_activity(body: ActivityAcknowledgement):
         store.acknowledge_activity(body.failures)

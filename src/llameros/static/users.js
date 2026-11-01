@@ -28,7 +28,7 @@ function configureBoard(data, asUser = data.role !== 'admin') {
   document.getElementById('user-intro').hidden = !asUser;
   for (const id of ['events', 'events-heading']) document.getElementById(id).hidden = asUser;
   document.getElementById('usage-description').textContent = asUser
-    ? 'Host CPU, RAM and GPU utilization history and overall usage by model across all users. Usage by key shows only your own keys, including deleted keys. Requests sent directly to Ollama are not included in token totals.'
+    ? 'Host CPU, RAM and GPU utilization history and overall usage by model across all users. User Activity shows only your own usage or aggregated totals for all users, never individual other users. Usage by key shows only your own keys, including deleted keys. Requests sent directly to Ollama are not included in token totals.'
     : 'Host CPU, RAM and GPU utilization samples, plus per-model inference totals. Requests sent directly to Ollama are not included in token totals.';
   document.getElementById('api-key-owner-label').hidden = asUser;
   clearKeySecret();
@@ -73,7 +73,7 @@ async function refreshUserBoard() {
   if (!data.models.length) panel.replaceChildren(element('p', 'No models are currently running. An administrator can start a model.'));
   renderKeyModels(data.models); renderKeyUsage(data.keys); renderModelUsage(data.history.models); draw(data.history.samples);
   if (typeof UserActivity !== 'undefined') {
-    const tokens = await api('/api/token-history');
+    const tokens = await api('/api/user/token-history');
     if (csrf && userBoard && dashboardIdentity === identity) UserActivity.render(tokens);
   }
   if (typeof BenchmarkResults !== 'undefined') BenchmarkResults.render(data.history.benchmarks);

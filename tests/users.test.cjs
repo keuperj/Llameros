@@ -70,6 +70,14 @@ test('user refresh uses restricted data and shared access cards without manageme
   assert.equal(ui.run('accessConfig.secure_url'), 'https://host/inference');
 });
 
+test('personal board requests privacy-scoped history even for an administrator', async () => {
+  const ui = board();
+  ui.run('UserActivity = {render(data) { globalThis.renderedTokens = data; }}');
+  ui.run('configureBoard({username: "owner", role: "admin"}, true)');
+  await ui.run('refreshUserBoard()');
+  assert.deepEqual(ui.calls, ['/api/user/dashboard', '/api/user/token-history']);
+});
+
 test('model search placeholder remains until the first response and is replaced on completion', async () => {
   const ui = board();
   ui.run('configureBoard({username: "alice", role: "user"})');

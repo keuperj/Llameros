@@ -12,7 +12,7 @@ const UserActivity = {
   aggregate(data, user = '') {
     const hours = new Map();
     for (let hour = data.start; hour <= data.end; hour += 3600) hours.set(hour, {hour, input: 0, output: 0, requests: 0, failed: 0, queue: 0});
-    for (const row of data.rows) {
+    for (const row of (!user && data.totals ? data.totals : data.rows)) {
       if (user && row.username !== user) continue;
       const bucket = hours.get(row.hour);
       if (bucket) { bucket.input += row.input_tokens; bucket.output += row.output_tokens; bucket.requests += row.requests || 0; bucket.failed += row.failed || 0; }

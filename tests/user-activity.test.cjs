@@ -4,6 +4,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+test('personal history uses anonymous global totals without double counting own rows', () => {
+  const context = vm.createContext({document: {addEventListener() {}}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/llameros/static/user-activity.js'), 'utf8'), context);
+  vm.runInContext(`data={start:0,end:0,users:['alice'],rows:[{hour:0,username:'alice',input_tokens:3,output_tokens:5,requests:1,failed:0}],totals:[{hour:0,input_tokens:10,output_tokens:16,requests:4,failed:1}],queues:[{hour:0,username:'',max_size:4},{hour:0,username:'alice',max_size:2}]}`, context);
+  assert.equal(vm.runInContext('UserActivity.aggregate(data)[0].input', context), 10);
+  assert.equal(vm.runInContext("UserActivity.aggregate(data,'alice')[0].input", context), 3);
+  assert.equal(vm.runInContext('UserActivity.aggregate(data)[0].queue', context), 4);
+  assert.equal(vm.runInContext("UserActivity.aggregate(data,'alice')[0].queue", context), 2);
+});
 test('hourly activity aggregates all users, filters individuals and fills empty hours', () => {
   const context = vm.createContext({document: {addEventListener() {}}});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/llameros/static/user-activity.js'), 'utf8'), context);

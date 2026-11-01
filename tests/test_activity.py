@@ -92,6 +92,33 @@ def test_hourly_totals_survive_row_cleanup_and_are_owner_scoped(multiuser):
     assert store.token_history("alice")["rows"][0]["output_tokens"] == 14
 
 
+def test_personal_history_exposes_only_self_and_anonymous_totals_for_both_roles(multiuser):
+    app, admin, user = multiuser
+    keys, store = app.state.api_keys, app.state.store
+    own, other = issue(user), issue(admin)
+    keys.record(own["id"], "model", "cpu", "completed", {"prompt": 4, "output": 7}, 1)
+    keys.record(other["id"], "model", "cpu", "failed", {"prompt": 10, "output": 20}, 1)
+    store.queue_peak(["alice", "alice", "other-private-user"])
+    store.queue_peak(["other-private-user"] * 4)
+    admin_name = next(
+        row["username"] for row in store.token_history()["rows"] if row["username"] != "alice"
+    )
+    for client, username in ((user, "alice"), (admin, admin_name)):
+        # Even an injected username query cannot select a different account.
+        data = client.get("/api/user/token-history?username=other-private-user").json()
+        assert data["users"] == [username]
+        assert {row["username"] for row in data["rows"]} <= {username}
+        assert {row["username"] for row in data["queues"]} <= {"", username}
+        assert "other-private-user" not in json.dumps(data)
+        assert data["totals"][0]["input_tokens"] == 14
+        assert data["totals"][0]["output_tokens"] == 27
+        assert data["totals"][0]["requests"] == 2
+        assert data["totals"][0]["failed"] == 1
+        assert all("username" not in row for row in data["totals"])
+        assert next(row["max_size"] for row in data["queues"] if row["username"] == "") == 4
+    assert len(admin.get("/api/token-history").json()["users"]) >= 2
+
+
 def test_hourly_requests_include_failures_without_token_counts(multiuser):
     app, admin, user = multiuser
     key = issue(user)
