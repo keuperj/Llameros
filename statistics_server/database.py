@@ -54,8 +54,8 @@ def issue_voucher(state_dir, *, max_entries=10, hours=72):
     return token
 
 
-def review_entries(state_dir, status="pending", limit=100):
-    if status not in {"pending", "approved", "rejected"} or not 1 <= limit <= 1000:
+def review_entries(state_dir, status="pending", limit=100, offset=0):
+    if status not in {"pending", "approved", "rejected"} or not 1 <= limit <= 1000 or offset < 0:
         raise ValueError("Invalid moderation filter")
     with sqlite3.connect(initialize(Path(state_dir))) as db:
         return [
@@ -66,20 +66,22 @@ def review_entries(state_dir, status="pending", limit=100):
                 "entry": json.loads(data),
             }
             for digest, data, flags in db.execute(
-                "SELECT digest,data,flags FROM entries WHERE status=? ORDER BY digest LIMIT ?",
-                (status, limit),
+                "SELECT digest,data,flags FROM entries WHERE status=? ORDER BY digest LIMIT ? OFFSET ?",
+                (status, limit, offset),
             )
         ]
 
 
-def moderate(state_dir, digest, status):
+def moderate(state_dir, digest, status, *, expected_status=None):
     if status not in {"approved", "rejected"}:
         raise ValueError("Use approved or rejected")
     with sqlite3.connect(initialize(Path(state_dir))) as db:
         db.execute("BEGIN IMMEDIATE")
-        row = db.execute("SELECT data FROM entries WHERE digest=?", (digest,)).fetchone()
+        row = db.execute("SELECT data,status FROM entries WHERE digest=?", (digest,)).fetchone()
         if not row:
             raise ValueError("Entry not found")
+        if expected_status is not None and row[1] != expected_status:
+            raise ValueError("Entry changed; refresh before reviewing again")
         if status == "approved":
             # Legacy v1 reports lack evidence; cannot approve until resubmitted as v2.
             SharedBenchmark.model_validate(json.loads(row[0]))

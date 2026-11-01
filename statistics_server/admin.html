@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Llameros statistics administration</title><link rel="stylesheet" href="/table.css"><script src="/admin.js" defer></script></head>
+<body><main><h1>Statistics administration</h1><p><a href="/">Public benchmarks</a></p>
+<p>Only the Linux account running this server can sign in, using its PAM password. No contributor identity is collected. Approval means reviewed, not proven genuine.</p>
+<form id="login-form"><label>Linux username<input id="username" autocomplete="username" required maxlength="256"></label><label>Password<input id="password" type="password" autocomplete="current-password" required maxlength="1024"></label><button type="submit">Sign in</button></form>
+<p id="feedback" role="status" aria-live="polite"></p>
+<section id="dashboard" hidden>
+<button id="logout" type="button">Sign out</button><button id="refresh" type="button">Refresh monitoring</button>
+<h2>Overview</h2><p id="overview"></p>
+<h2>Allow upload requests</h2><p>Authorize a contributor by issuing a single-use upload voucher. Deliver it privately, without storing the recipient identity. There is no public identity-bearing request form or automatic approval. Tokens are not linked to entries.</p>
+<form id="voucher-form"><label>Maximum entries<input id="max-entries" type="number" min="1" max="10" value="10" required></label><label>Expires after hours<input id="hours" type="number" min="1" max="720" value="72" required></label><button type="submit">Issue upload voucher</button></form>
+<div id="voucher-result" hidden><label>Copy now — secret shown once<input id="voucher-secret" type="password" readonly autocomplete="off" spellcheck="false"></label><button id="show-voucher" type="button">Show / hide voucher</button><button id="clear-voucher" type="button">Clear secret</button><p>Share only through a private channel. This secret cannot be retrieved later. It clears automatically after five minutes.</p></div>
+<h2>Review pushed results</h2><label>Status<select id="status"><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></label>
+<p>Review hardware, artifact identity, six-case evidence and warning flags before approval. Approving publishes an entry and permits it to influence recommendations. Rejection removes it from the public API; client caches can take ten minutes to expire. Legacy entries without valid v2 evidence cannot be approved.</p>
+<p id="page-info" role="status"></p><div class="scroll"><table><caption>Moderation queue</caption><thead><tr><th scope="col">Model / artifact</th><th scope="col">Hardware</th><th scope="col">Throughput / settings</th><th scope="col">Review flags</th><th scope="col">Evidence</th><th scope="col">Decision</th></tr></thead><tbody id="entries"></tbody></table></div>
+<button id="previous" type="button">Previous page</button><button id="next" type="button">Next page</button>
+</section></main></body></html>

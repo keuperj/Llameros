@@ -21,6 +21,11 @@ def main():
     parser.add_argument("--cert-file", default="")
     parser.add_argument("--key-file", default="")
     parser.add_argument("--max-entries", type=int, default=100000)
+    parser.add_argument(
+        "--pam-service",
+        default="login",
+        help="Host PAM service for the process owner's admin login",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535 or args.max_entries < 1:
         parser.error("Invalid port or database capacity")
@@ -30,7 +35,7 @@ def main():
         Settings(host=args.host, state_dir=state, cert_file=args.cert_file, key_file=args.key_file)
     )
     uvicorn.run(
-        create_app(state, max_entries=args.max_entries),
+        create_app(state, max_entries=args.max_entries, pam_service=args.pam_service),
         host=args.host,
         port=args.port,
         ssl_certfile=str(cert),

@@ -14,28 +14,45 @@ from fastapi.responses import FileResponse, JSONResponse
 from llameros.benchmark_exchange import VoucherUpload
 from llameros.body_limits import BodyLimits
 
+from .admin import install_admin
 from .database import flags_for, initialize
 
 
 def create_app(
-    state_dir: Path, *, max_entries=100000, requests_per_minute=120, uploads_per_minute=20
+    state_dir: Path,
+    *,
+    max_entries=100000,
+    requests_per_minute=120,
+    uploads_per_minute=20,
+    pam_service="login",
+    session_seconds=1800,
+    authenticator=None,
+    account_checker=None,
 ):
     database = initialize(state_dir)
     lock = threading.Lock()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(BodyLimits, inference_bytes=131072)
     budgets = {"read": [time.monotonic(), 0], "upload": [time.monotonic(), 0]}
+    budgets["admin"] = [time.monotonic(), 0]
 
     @app.middleware("http")
     async def privacy_headers(request: Request, call_next):
         # Global limiter: deliberately no IP-based tracking, not even hashed IPs.
         upload = request.method not in {"GET", "HEAD"}
+        admin = (
+            request.url.path == "/admin"
+            or request.url.path == "/admin.js"
+            or request.url.path.startswith("/admin/")
+        )
         with lock:
-            budget = budgets["upload" if upload else "read"]
+            budget = budgets["admin" if admin else "upload" if upload else "read"]
             if time.monotonic() - budget[0] >= 60:
                 budget[:] = [time.monotonic(), 0]
             budget[1] += 1
-            limited = budget[1] > (uploads_per_minute if upload else requests_per_minute)
+            limited = budget[1] > (
+                120 if admin else uploads_per_minute if upload else requests_per_minute
+            )
         if request.url.scheme != "https":
             response = JSONResponse({"detail": "HTTPS required"}, 400)
         elif limited:
@@ -44,7 +61,7 @@ def create_app(
             response = await call_next(request)
         response.headers.update(
             {
-                "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+                "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
                 "Referrer-Policy": "no-referrer",
                 "X-Content-Type-Options": "nosniff",
                 "Cache-Control": "no-store",
@@ -110,4 +127,14 @@ def create_app(
             db.execute("UPDATE vouchers SET redeemed=1 WHERE digest=?", (voucher_digest,))
         return {"accepted": len(new), "duplicates": len(records) - len(new), "status": "pending"}
 
+    install_admin(
+        app,
+        state_dir,
+        database,
+        max_entries,
+        pam_service=pam_service,
+        session_seconds=session_seconds,
+        authenticator=authenticator,
+        account_checker=account_checker,
+    )
     return app

@@ -188,6 +188,10 @@ required (up to 10 entries); submissions remain private until manually approved.
 Only newly hardware-snapshotted, completed official-model
 benchmarks are eligible; re-run old benchmarks if necessary.
 
+The benchmark server also provides `/admin`, restricted to the Linux user running
+it via PAM, for monitoring, voucher issuance and approval/rejection of pushed
+results. The local moderation CLI remains available.
+
 The separate Python/SQLite service, self-signed TLS setup, shared field allowlist,
 privacy limitations and deployment instructions are documented in
 `statistics_server/README.md`. No user/instance identifiers are stored, but the

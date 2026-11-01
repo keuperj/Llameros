@@ -3,7 +3,8 @@
 This is a separate Python HTTPS service using the same installed dependencies as
 Llameros (FastAPI, Uvicorn, cryptography) and Python's built-in SQLite database.
 No Docker, Redis, external database, third-party JavaScript, analytics, cookies,
-accounts or telemetry are required.
+contributor accounts or telemetry are required. The optional operator UI uses the
+host account running the service and its PAM password.
 
 ## Setup
 
@@ -114,11 +115,63 @@ safeguards, not comprehensive Internet DDoS protection: connections and network
 bandwidth are still shared. A concurrent approval can change pagination order;
 refresh to obtain a newer view.
 
+## Owner-only administration website
+
+Open `/admin` over HTTPS and sign in with the **Linux username and PAM password
+of the effective user running the statistics server**. The identity is captured
+from the process effective UID at startup; `USER`, `SUDO_USER`, submitted usernames,
+and other valid PAM accounts cannot grant access. If you use `sudo` to run the
+service as another user, that effective user is the administrator, not the
+original shell user. Run as an unprivileged account. There is no initial web
+password, separate admin database, password reset or additional web administrator.
+
+The default PAM service is `login`; configure a host-specific policy with
+`--pam-service SERVICE`. The account needs a valid login shell, a usable password,
+and a PAM configuration that permits the unprivileged service to authenticate it.
+Locked, disabled, passwordless or `nologin` service accounts may be unable to use
+the UI. Do not make the process root or weaken PAM merely to enable web login;
+choose an appropriate host policy/account or continue using the local CLI.
+PAM/system authentication facilities may retain their own security logs; these are
+outside the benchmark application and should be reviewed against your privacy
+policy. No contributor identity is introduced by the operator login.
+
+The dashboard provides:
+
+- Pending/approved/rejected counts, database capacity and aggregate voucher counts.
+- Status-filtered, paginated benchmark review with full six-case evidence, model
+  digest, hardware/settings and warning flags; refreshes every 30 seconds.
+- **Allow upload requests:** issue a single-use voucher with a bounded entry
+  allowance and expiry, then privately deliver it to a contributor. There is no
+  public request/contact form that collects contributor identity. This authorizes
+  a push; it does not approve any pushed result.
+- Explicit **Approve / publish** and **Reject / unpublish** confirmations. Stale
+  decisions are rejected if another reviewer/CLI changed the entry's status.
+  Approval validates v2 evidence again; legacy evidence remains blocked.
+- Sign out and automatic 30-minute session expiry. Sessions, CSRF tokens and
+  credentials are never written to SQLite. Session identity is checked against
+  current host account policy on every protected request.
+
+The new voucher is returned once and shown in a password field; it can be revealed
+and selected/copied manually. Clear it after delivery. It clears automatically
+after five minutes, on sign-out, or when leaving the page. No clipboard or browser
+storage API is used. Existing voucher secrets cannot be retrieved. A lost creation
+response can leave an unused voucher until expiry; do not issue excess vouchers.
+
+Admin APIs live under `/admin/api/` and require the owner session. Writes require
+same-origin HTTPS, a CSRF token, and explicit action confirmation. Cookies are
+Secure, HttpOnly, SameSite=Strict and host-only with a `__Host-` prefix. Login has
+one global five-attempt-per-minute limit and at most four concurrent PAM calls,
+without source-IP or submitted-username tracking. The admin request budget is
+separate from public browsing/uploads, although an attacker can still target the
+admin endpoint's global budget. No security mechanism here guarantees DDoS
+resistance. The application logs no passwords, vouchers, sessions or identities.
+There is no cross-origin API access or trusted forwarded-identity header.
+
 ## Operator: vouchers and moderation
 
-Run these commands locally on the statistics host, as the service account, using
-the same absolute state directory as the running service. There is deliberately
-**no remote moderation or voucher-issuance API**.
+Use the owner-only web UI at `/admin`, or run these commands locally on the
+statistics host, as the service account, using the same absolute state directory
+as the running service. The CLI remains available for offline operations.
 
 Issue one voucher (default 10 entries, expires in 72 hours):
 
