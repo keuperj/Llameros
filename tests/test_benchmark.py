@@ -20,6 +20,8 @@ def test_workloads_metrics_and_persistence(tmp_path, kind):
     calls = []
 
     def handle(request):
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": [{"name": "model", "digest": "a" * 64}]})
         body = json.loads(request.content)
         calls.append((request.url.path, body))
         if request.url.path == "/api/show":
@@ -46,6 +48,7 @@ def test_workloads_metrics_and_persistence(tmp_path, kind):
         )
     )
     assert result["status"] == "completed" and result["kind"] == kind
+    assert result["model_digest"] == "sha256:" + "a" * 64
     assert len(result["cases"]) == 6
     assert result["tokens_per_second"] > 0
     if kind == "chat":
@@ -66,6 +69,8 @@ def test_absolute_deadline_partial_results_and_errors():
 
     async def handle(request):
         nonlocal completed
+        if request.url.path == "/api/tags":
+            return httpx.Response(200, json={"models": []})
         if request.url.path == "/api/show":
             return httpx.Response(200, json={"capabilities": ["completion"]})
         completed += 1

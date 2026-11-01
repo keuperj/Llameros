@@ -17,6 +17,8 @@ from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -24,6 +26,15 @@ from starlette.concurrency import run_in_threadpool
 
 from .auth import COOKIE, Sessions, account_available, verify_password
 from .benchmark import measure
+from .benchmark_exchange import (
+    ShareConfirmation,
+    SharedBenchmark,
+    SharingSettings,
+    exchange,
+    hardware_profile,
+    rank_matches,
+    shareable,
+)
 from .body_limits import BodyLimits
 from .catalog import Catalog, validate_model
 from .config import Settings, current_user
@@ -200,6 +211,13 @@ def create_app(
         )
     )
     cfg = replace(cfg, **ollama_policy.model_dump())
+    sharing_path = cfg.state_dir / "benchmark-sharing.json"
+    sharing_policy = (
+        SharingSettings.model_validate(json.loads(sharing_path.read_text()))
+        if sharing_path.exists()
+        else SharingSettings()
+    )
+    recommendation_cache = {"expires": 0, "entries": []}
     store = Store(cfg.state_dir / "history.sqlite3")
     store.retention_days = cfg.retention_days
     store.account_check = account_checker or (
@@ -324,6 +342,13 @@ def create_app(
             }
         )
         return response
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error(request, exc):
+        if request.url.path.startswith("/api/benchmark-sharing"):
+            # Pydantic input errors can otherwise echo the secret voucher.
+            return JSONResponse({"detail": "Invalid benchmark sharing request"}, status_code=422)
+        return await request_validation_exception_handler(request, exc)
 
     @app.exception_handler(DockerError)
     async def docker_error(request, exc):
@@ -713,6 +738,116 @@ def create_app(
         )
         return body.model_dump()
 
+    @app.get("/api/benchmark-sharing", dependencies=protected)
+    def sharing_info():
+        with jobs.lock:
+            return sharing_policy.model_dump()
+
+    @app.post("/api/benchmark-sharing", dependencies=protected)
+    def configure_sharing(body: SharingSettings):
+        nonlocal sharing_policy
+        with jobs.lock:
+            write_json(sharing_path, body.model_dump())
+            sharing_policy = body
+            recommendation_cache.update(expires=0, entries=[])
+        return body.model_dump()
+
+    def share_preview():
+        entries = []
+        for row in store.benchmarks():
+            try:
+                candidate = shareable(row)
+                # A syntactically public name can still be a private alias. Verify its
+                # manifest against the official catalogue before allowing disclosure.
+                catalog.size(candidate.model)
+                entries.append(candidate.model_dump())
+            except (ValueError, KeyError, TypeError, httpx.HTTPError):
+                continue
+        return entries[:10]
+
+    @app.get("/api/benchmark-sharing/preview", dependencies=protected)
+    def preview_sharing():
+        if not sharing_policy.enabled:
+            raise HTTPException(409, "Enable the statistics server first")
+        entries = share_preview()
+        return {
+            "destination": sharing_policy.url,
+            "entries": entries,
+            "note": "Up to 10 completed public-library results with six-case metrics. A single-use voucher is required. Results stay private and pending until server operator approval. Older or private models are excluded.",
+        }
+
+    @app.post("/api/benchmark-sharing/share", dependencies=protected)
+    def share_benchmarks(body: ShareConfirmation):
+        with jobs.lock:
+            policy = sharing_policy
+        if not policy.enabled:
+            raise HTTPException(409, "Benchmark sharing is disabled")
+        if not body.confirmed:
+            raise HTTPException(400, "Confirm the exact public payload")
+        if body.destination != policy.url:
+            raise HTTPException(409, "Server changed; preview and confirm again")
+        available = share_preview()
+        if any(entry.model_dump() not in available for entry in body.entries):
+            raise HTTPException(409, "Results changed; preview and confirm again")
+        try:
+            return exchange(
+                policy,
+                "POST",
+                "/api/v1/benchmarks",
+                {
+                    "entries": [entry.model_dump() for entry in body.entries],
+                    "voucher": body.voucher,
+                },
+            )
+        except (ValueError, httpx.HTTPError):
+            raise HTTPException(
+                502,
+                "Statistics upload failed; check voucher validity/limit, server availability and certificate trust. A used voucher cannot be retried.",
+            ) from None
+
+    @app.get("/api/benchmark-sharing/recommendations", dependencies=protected)
+    def community_recommendations(cpu_only: bool = False):
+        with jobs.lock:
+            policy = sharing_policy
+            entries = recommendation_cache["entries"]
+            cached = recommendation_cache["expires"] > time.monotonic()
+        if not policy.enabled:
+            return {"models": [], "note": "Community benchmarks disabled"}
+        if not cached:
+            try:
+                # Download the same public pages for every machine; match hardware locally.
+                entries, offset = [], 0
+                while offset < 100000:
+                    data = exchange(policy, "GET", f"/api/v1/benchmarks?limit=1000&offset={offset}")
+                    page = data["entries"]
+                    entries.extend(SharedBenchmark.model_validate(row) for row in page)
+                    offset += len(page)
+                    if not page or offset >= data["total"]:
+                        break
+                with jobs.lock:
+                    if sharing_policy == policy:
+                        recommendation_cache.update(entries=entries, expires=time.monotonic() + 600)
+            except (ValueError, KeyError, TypeError, httpx.HTTPError):
+                return {
+                    "models": [],
+                    "note": "Community server unavailable or untrusted; local suggestions remain available",
+                }
+        hw = hardware()
+        profiles = [hardware_profile(hw)]
+        if not cpu_only:
+            profiles.extend(hardware_profile(hw, gpu) for gpu in hw.get("gpus", []))
+        return {
+            "models": rank_matches(
+                entries,
+                profiles,
+                cfg.context_length,
+                cfg.ollama_num_parallel,
+                cfg.ollama_flash_attention,
+                cfg.ollama_kv_cache_type,
+            ),
+            "note": "Operator-approved community medians for matching hardware/settings/artifact. Approval is not proof. Throughput is not model quality. Sample counts are not independent users; ranges show disagreement.",
+        }
+
     @app.post("/api/storage", dependencies=protected, status_code=202)
     def configure_storage(body: StorageRequest):
         """Queue confirmed storage reconfiguration under lifecycle scheduling protection."""
@@ -919,6 +1054,18 @@ def create_app(
         if not runtimes and not is_loaded(name):
             raise HTTPException(409, "Load the model before benchmarking")
         target = client.target["id"] if runtimes else body.target or "cpu"
+        benchmark_hardware = hardware_profile(
+            hardware(), client.target if runtimes else None
+        ).model_dump()
+        benchmark_environment = {
+            "flash_attention": cfg.ollama_flash_attention,
+            "kv_cache_type": cfg.ollama_kv_cache_type,
+        }
+
+        def save_result(result):
+            result["share_hardware"] = benchmark_hardware
+            result["share_environment"] = benchmark_environment
+            store.save_benchmark(result)
 
         def work(progress):
             result = asyncio.run(
@@ -931,10 +1078,10 @@ def create_app(
                     progress,
                     jobs.benchmark_stop,
                     scheduler_policy.model_dump(),
-                    store.save_benchmark,
+                    save_result,
                 )
             )
-            store.save_benchmark(result)
+            save_result(result)
             return result
 
         return jobs.submit("benchmark", name, work)

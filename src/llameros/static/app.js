@@ -17,6 +17,7 @@ let sessionEpoch = 0;
 function clearSessionView() {
   if (typeof SchedulerConfig !== 'undefined') SchedulerConfig.reset();
   if (typeof OllamaConfig !== 'undefined') OllamaConfig.reset();
+  if (typeof BenchmarkSharing !== 'undefined') BenchmarkSharing.reset();
   if (typeof UserActivity !== 'undefined') UserActivity.reset();
   if (typeof ActivityLog !== 'undefined') ActivityLog.reset();
   if (typeof TokenLimits !== 'undefined') TokenLimits.reset();
@@ -554,6 +555,9 @@ async function catalogue(event, control) {
   $('families').value = ''; updateModelInfo();
   const query = $('search').value.trim(), cpu = cpuOnly();
   $('catalog-progress').textContent = 'Searching Ollama…';
+  if (typeof BenchmarkSharing !== 'undefined') BenchmarkSharing.recommendations(cpu).catch(() => {
+    if (version === catalogueVersion) $('community-models').textContent = 'Community suggestions unavailable; local search remains available.';
+  });
   const data = await api('/api/catalog?q=' + encodeURIComponent(query));
   if (version !== catalogueVersion) return;
   loadedCatalogueQuery = query;
@@ -700,11 +704,12 @@ async function refresh() {
       await refreshKeys();
     }
     if (userBoard) { await refreshUserBoard(); return; }
-    const [data, history, inventory, keyUsage, activity, tokens, scheduler, ollamaConfig] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage'), api('/api/activity?timeframe=' + $('activity-timeframe').value), api('/api/token-history'), api('/api/scheduler'), api('/api/ollama')]);
+    const [data, history, inventory, keyUsage, activity, tokens, scheduler, ollamaConfig, sharingConfig] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage'), api('/api/activity?timeframe=' + $('activity-timeframe').value), api('/api/token-history'), api('/api/scheduler'), api('/api/ollama'), api('/api/benchmark-sharing')]);
     if (!csrf) return;
     UserActivity.render(tokens);
     SchedulerConfig.render(scheduler);
     OllamaConfig.render(ollamaConfig);
+    if (typeof BenchmarkSharing !== 'undefined') BenchmarkSharing.render(sharingConfig);
     renderKeyUsage(keyUsage.keys); renderKeyModels(inventory.models || []);
     const storage = inventory.storage;
     $('storage-current').textContent = `Active location: ${storage.location} (${storage.mode === 'directory' ? 'host directory' : 'Docker volume'})`;

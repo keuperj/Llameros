@@ -1,6 +1,7 @@
 """Exclusive synthetic speed and adaptive sustained-load benchmarks."""
 
 import asyncio
+import re
 import threading
 import time
 from concurrent.futures import Future
@@ -203,6 +204,18 @@ async def measure(
 
             info = await post("/api/show", {"model": model})
             capabilities = info.get("capabilities", [])
+            # Optional public model artifact identity; never derive one from private paths.
+            try:
+                tags = await client.get("/api/tags", timeout=5)
+                tags.raise_for_status()
+                for item in tags.json().get("models", []):
+                    if item.get("name") in {model, model + ":latest"}:
+                        digest = item.get("digest", "")
+                        if re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", digest):
+                            result["model_digest"] = "sha256:" + digest.removeprefix("sha256:")
+                        break
+            except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+                pass  # Missing artifact identity is explicitly flagged during moderation.
             if "completion" in capabilities:
                 result["kind"] = "chat"
             elif "embedding" in capabilities:

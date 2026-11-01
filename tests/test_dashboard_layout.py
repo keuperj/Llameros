@@ -53,6 +53,7 @@ def test_playground_closed_and_scroll_regions_accessible():
         "scheduler-settings",
         "model-storage-settings",
         "ollama-settings",
+        "benchmark-sharing-settings",
     ):
         assert parser.nodes[name][0] == "details"
         assert "open" not in parser.nodes[name][1]

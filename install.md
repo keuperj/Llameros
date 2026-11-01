@@ -176,6 +176,24 @@ docker info --format '{{json .SecurityOptions}}'
 
 ## First model and daily workflow
 
+### Optional external benchmark database
+
+Admin Configuration → Community benchmark server configures the HTTPS server IP,
+port and trusted public certificate. The feature is **disabled by default**.
+Enabling permits public result downloads for local hardware matching in model
+search; it does not upload anything automatically. Use **Share benchmarks** in
+the admin Benchmarks section to preview and explicitly confirm the exact public
+payload and destination. A single-use upload voucher from the server operator is
+required (up to 10 entries); submissions remain private until manually approved.
+Only newly hardware-snapshotted, completed official-model
+benchmarks are eligible; re-run old benchmarks if necessary.
+
+The separate Python/SQLite service, self-signed TLS setup, shared field allowlist,
+privacy limitations and deployment instructions are documented in
+`statistics_server/README.md`. No user/instance identifiers are stored, but the
+network operator necessarily sees connection IPs and hardware combinations may be
+distinctive. Disable identifying logs in any hosting/proxy infrastructure too.
+
 ### Ollama environment settings
 
 Admin **Configuration → Ollama** persists settings in `state_dir/ollama.json`,

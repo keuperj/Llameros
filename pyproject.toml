@@ -25,10 +25,11 @@ dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 llameros = "llameros.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/llameros"]
+packages = ["src/llameros", "statistics_server"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 target-version = "py311"
