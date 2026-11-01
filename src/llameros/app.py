@@ -32,6 +32,7 @@ from .docker import DockerError
 from .gateway import PREFIX, install_gateway
 from .hardware import assess_fit, snapshot
 from .model_storage import write_json
+from .ollama_settings import OllamaSettings, keep_alive_value
 from .runtime_transport import close_relays
 from .runtimes import Runtimes
 from .scheduling import InferenceScheduler, SchedulerSettings
@@ -187,6 +188,18 @@ def create_app(
         else SchedulerSettings(ollama_num_parallel=cfg.ollama_num_parallel)
     )
     cfg = replace(cfg, ollama_num_parallel=scheduler_policy.ollama_num_parallel)
+    ollama_path = cfg.state_dir / "ollama.json"
+    ollama_policy = (
+        OllamaSettings.model_validate(json.loads(ollama_path.read_text()))
+        if ollama_path.exists()
+        else OllamaSettings(
+            **{
+                name: getattr(cfg, name)
+                for name in ("ollama_keep_alive", "ollama_flash_attention", "ollama_kv_cache_type")
+            }
+        )
+    )
+    cfg = replace(cfg, **ollama_policy.model_dump())
     store = Store(cfg.state_dir / "history.sqlite3")
     store.retention_days = cfg.retention_days
     store.account_check = account_checker or (
@@ -655,6 +668,51 @@ def create_app(
         store.event("scheduler:completed", detail="Scheduler configuration updated")
         return body.model_dump()
 
+    @app.get("/api/ollama", dependencies=protected)
+    def ollama_info():
+        with jobs.lock:
+            return ollama_policy.model_dump()
+
+    @app.post("/api/ollama", dependencies=protected)
+    def configure_ollama(body: OllamaSettings):
+        nonlocal cfg, ollama_policy
+        with jobs.lock:
+            if jobs.scheduler.conflicts() or jobs.job.get("state") == "running":
+                raise HTTPException(
+                    409, "Wait for all inference and lifecycle operations to finish"
+                )
+            if not body.confirmed:
+                raise HTTPException(400, "Confirm recreation of stopped Ollama containers")
+            # Inspect each runtime directly; aggregate status may mask errors.
+            if runtimes:
+                for identity in list(runtimes.records):
+                    client = runtimes.client(identity)
+                    client.check_daemon()
+                    data = client.inspect()
+                    if data and data["State"]["Running"]:
+                        raise HTTPException(
+                            409, "Stop all Ollama runtimes before saving Ollama settings"
+                        )
+                runtimes.configure_storage(runtimes.storage.directory, True)
+            else:
+                if docker.status()["running"]:
+                    raise HTTPException(
+                        409, "Stop all Ollama runtimes before saving Ollama settings"
+                    )
+                docker.configure_storage(docker.storage_info()["directory"], True)
+            write_json(ollama_path, body.model_dump())
+            cfg = replace(cfg, **body.model_dump())
+            if runtimes:
+                runtimes.settings = cfg
+            if hasattr(docker, "settings"):
+                docker.settings = replace(docker.settings, **body.model_dump())
+            ollama_policy = body
+        store.event(
+            "ollama-config:completed",
+            detail="Ollama environment settings updated; start Ollama to apply",
+        )
+        return body.model_dump()
+
     @app.post("/api/storage", dependencies=protected, status_code=202)
     def configure_storage(body: StorageRequest):
         """Queue confirmed storage reconfiguration under lifecycle scheduling protection."""
@@ -841,7 +899,7 @@ def create_app(
                 {
                     "model": name,
                     "stream": False,
-                    "keep_alive": 0 if action == "unload" else -1,
+                    "keep_alive": 0 if action == "unload" else keep_alive_value(cfg),
                     "options": {"num_ctx": cfg.context_length},
                 },
             )
@@ -925,7 +983,7 @@ def create_app(
                         "prompt": body.prompt,
                         "stream": False,
                         "options": options,
-                        "keep_alive": -1,
+                        "keep_alive": keep_alive_value(cfg),
                     },
                 )
             finally:

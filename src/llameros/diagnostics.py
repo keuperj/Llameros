@@ -34,6 +34,11 @@ def diagnostic(exc: Exception) -> str:
         text = str(exc).lower()
         reasons = (
             (
+                ("ollama environment differs",),
+                "container-environment",
+                "Ollama environment settings changed. Stop all runtimes, save Ollama settings with container recreation confirmed, then Start Ollama. Model files are retained.",
+            ),
+            (
                 ("runtime parallelism differs",),
                 "container-parallelism",
                 "Container parallelism differs from scheduler settings. Stop all runtimes and reapply model storage to recreate containers; model files are retained.",

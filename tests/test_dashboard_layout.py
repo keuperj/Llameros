@@ -48,7 +48,12 @@ def test_playground_closed_and_scroll_regions_accessible():
     assert parser.nodes["hardware-tab"][1]["aria-selected"] == "true"
     assert "hidden" in parser.nodes["token-plot"][1]
     assert parser.nodes["activity-timeframe"][0] == "select"
-    for name in ("user-access-settings", "scheduler-settings", "model-storage-settings"):
+    for name in (
+        "user-access-settings",
+        "scheduler-settings",
+        "model-storage-settings",
+        "ollama-settings",
+    ):
         assert parser.nodes[name][0] == "details"
         assert "open" not in parser.nodes[name][1]
     assert "request-chart" not in parser.nodes

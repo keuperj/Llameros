@@ -261,6 +261,12 @@ class Docker:
             f"OLLAMA_NUM_PARALLEL={cfg.ollama_num_parallel}",
             "-e",
             f"OLLAMA_CONTEXT_LENGTH={cfg.context_length}",
+            "-e",
+            f"OLLAMA_KEEP_ALIVE={cfg.ollama_keep_alive}",
+            "-e",
+            f"OLLAMA_FLASH_ATTENTION={int(cfg.ollama_flash_attention)}",
+            "-e",
+            f"OLLAMA_KV_CACHE_TYPE={cfg.ollama_kv_cache_type}",
         ]
         if self.target:
             args += ["--label", f"io.llameros.target={self.target['id']}"]
@@ -322,6 +328,21 @@ class Docker:
         self.check_daemon()
         data = self.inspect()
         obsolete = bool(data and data.get("Config", {}).get("Image") != self.image)
+        environment_changed = bool(
+            data
+            and any(
+                value not in data.get("Config", {}).get("Env", [])
+                for value in (
+                    f"OLLAMA_KEEP_ALIVE={self.settings.ollama_keep_alive}",
+                    f"OLLAMA_FLASH_ATTENTION={int(self.settings.ollama_flash_attention)}",
+                    f"OLLAMA_KV_CACHE_TYPE={self.settings.ollama_kv_cache_type}",
+                )
+            )
+        )
+        if environment_changed and not obsolete:
+            raise DockerError(
+                "Ollama environment differs from configuration. Stop all runtimes and save Ollama settings with container recreation confirmed; model files are retained."
+            )
         if obsolete:
             if data["State"]["Running"]:
                 raise DockerError(

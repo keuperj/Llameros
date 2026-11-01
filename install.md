@@ -176,6 +176,30 @@ docker info --format '{{json .SecurityOptions}}'
 
 ## First model and daily workflow
 
+### Ollama environment settings
+
+Admin **Configuration → Ollama** persists settings in `state_dir/ollama.json`,
+overriding the corresponding TOML values on service startup:
+
+- `OLLAMA_KEEP_ALIVE=-1`: negative values keep models resident indefinitely;
+  `0` unloads immediately; positive integer seconds or durations such as `5m`
+  and `1h30m` expire after inactivity. Immediate unloading makes a model unavailable
+  to the gateway, which routes only resident models.
+- `OLLAMA_FLASH_ATTENTION=1`: enabled; select `0` to disable.
+- `OLLAMA_KV_CACHE_TYPE=q4_0`: allowed types are `f16`, `q8_0`, `q4_0`.
+  Quantized KV cache requires Flash Attention and compatible model/backend support;
+  lower precision saves memory but can affect output quality.
+
+**Applying changes requires recreation of stopped containers:** Stop Ollama,
+save and confirm container recreation, then Start Ollama. Model files are retained.
+Restarting only Llameros or the existing Docker container does not change its
+environment. Existing containers missing these settings are explicitly rejected at
+startup with migration guidance rather than silently using stale defaults.
+Normal load/inference requests honor the configured keep-alive; benchmark requests
+deliberately pin residency for reproducible measurements.
+
+Reference: [Ollama FAQ](https://docs.ollama.com/faq).
+
 - **Start Ollama:** starts the CPU container and a separate container for every
   detected supported GPU, without loading models. First startup downloads the pinned
   runtime image; only public images are supported. Progress/errors identify the

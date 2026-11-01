@@ -16,6 +16,7 @@ let sessionEpoch = 0;
 /** Invalidate all outstanding account/board requests and erase private presentation. */
 function clearSessionView() {
   if (typeof SchedulerConfig !== 'undefined') SchedulerConfig.reset();
+  if (typeof OllamaConfig !== 'undefined') OllamaConfig.reset();
   if (typeof UserActivity !== 'undefined') UserActivity.reset();
   if (typeof ActivityLog !== 'undefined') ActivityLog.reset();
   if (typeof TokenLimits !== 'undefined') TokenLimits.reset();
@@ -699,10 +700,11 @@ async function refresh() {
       await refreshKeys();
     }
     if (userBoard) { await refreshUserBoard(); return; }
-    const [data, history, inventory, keyUsage, activity, tokens, scheduler] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage'), api('/api/activity?timeframe=' + $('activity-timeframe').value), api('/api/token-history'), api('/api/scheduler')]);
+    const [data, history, inventory, keyUsage, activity, tokens, scheduler, ollamaConfig] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage'), api('/api/activity?timeframe=' + $('activity-timeframe').value), api('/api/token-history'), api('/api/scheduler'), api('/api/ollama')]);
     if (!csrf) return;
     UserActivity.render(tokens);
     SchedulerConfig.render(scheduler);
+    OllamaConfig.render(ollamaConfig);
     renderKeyUsage(keyUsage.keys); renderKeyModels(inventory.models || []);
     const storage = inventory.storage;
     $('storage-current').textContent = `Active location: ${storage.location} (${storage.mode === 'directory' ? 'host directory' : 'Docker volume'})`;

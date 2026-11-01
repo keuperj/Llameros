@@ -42,6 +42,9 @@ class Settings:
     context_length: int = 4096
     max_loaded_models: int = 2
     ollama_num_parallel: int = 2
+    ollama_keep_alive: str = "-1"
+    ollama_flash_attention: bool = True
+    ollama_kv_cache_type: str = "q4_0"
     inference_body_bytes: int = 16 * 1024 * 1024
     image_max_bytes: int = 8 * 1024 * 1024
     image_max_count: int = 8
@@ -49,6 +52,14 @@ class Settings:
 
     def __post_init__(self):
         """Normalize the state path and reject inconsistent or out-of-range settings."""
+        from .ollama_settings import OllamaSettings
+
+        OllamaSettings(
+            **{
+                name: getattr(self, name)
+                for name in ("ollama_keep_alive", "ollama_flash_attention", "ollama_kv_cache_type")
+            }
+        )
         object.__setattr__(self, "state_dir", Path(self.state_dir).expanduser().absolute())
         if type(self.certificate_download_enabled) is not bool:
             raise ValueError("certificate_download_enabled must be boolean")

@@ -20,6 +20,7 @@ from .api_keys import ApiKeys, KeyRequest, normalize
 from .docker import DockerError
 from .limits import LimitConfig
 from .multimodal import reject_documents, validate_images
+from .ollama_settings import keep_alive_value
 from .runtime_transport import RUNTIME_BASE_URL
 
 PREFIX = "/inference"
@@ -746,7 +747,11 @@ def install_gateway(
             base_url = RUNTIME_BASE_URL
             if embedding:
                 body.update(
-                    model=model, keep_alive=-1, options={**options, "num_ctx": cfg.context_length}
+                    model=model,
+                    keep_alive=keep_alive_value(
+                        runtime.settings if hasattr(runtime, "settings") else cfg
+                    ),
+                    options={**options, "num_ctx": cfg.context_length},
                 )
                 if target == "cpu":
                     body["options"]["num_gpu"] = 0
@@ -765,7 +770,9 @@ def install_gateway(
                 body["options"] = {**options, "num_ctx": cfg.context_length, "num_predict": limit}
                 if target == "cpu":
                     body["options"]["num_gpu"] = 0
-                body["keep_alive"] = -1
+                body["keep_alive"] = keep_alive_value(
+                    runtime.settings if hasattr(runtime, "settings") else cfg
+                )
             client = httpx.AsyncClient(
                 base_url=base_url,
                 transport=transport

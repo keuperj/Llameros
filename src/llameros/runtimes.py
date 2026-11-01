@@ -13,6 +13,7 @@ from .diagnostics import RuntimeStartupError, RuntimeStartupSummary, diagnostic
 from .docker import Docker, DockerError
 from .hardware import assess_fit
 from .model_storage import write_json
+from .ollama_settings import keep_alive_value
 
 
 class Runtimes:
@@ -263,7 +264,7 @@ class Runtimes:
             {
                 "model": name,
                 **({"input": "warmup", "truncate": False} if embedding else {"stream": False}),
-                "keep_alive": -1,
+                "keep_alive": keep_alive_value(self.settings),
                 "options": options,
             },
         )
