@@ -25,6 +25,7 @@ from llameros.benchmark_exchange import (
 )
 from llameros.catalog import Catalog, validate_model
 from llameros.config import Settings
+from llameros.diagnostics import diagnostic
 from llameros.filesystem import trusted_directory
 from llameros.hardware import assess_fit, snapshot
 from llameros.model_storage import write_json
@@ -33,6 +34,10 @@ from llameros.runtimes import Runtimes
 
 class RunnerConfigurationError(ValueError):
     """Locally generated, safe-to-display configuration diagnostics."""
+
+
+class RunnerRuntimeError(RuntimeError):
+    """Safe local runtime/recovery failure, without raw Docker or HTTP output."""
 
 
 @dataclass(frozen=True)
@@ -121,26 +126,64 @@ def evaluate(settings, job, folder):
         # Validate the publication evidence before marking a job successful.
         payload = shareable(result).model_dump()
         write_json(folder / "worker-result.json", {"status": "completed", "entry": payload})
-    except Exception:
+    except Exception as exc:
         write_json(
-            folder / "worker-result.json", {"status": "failed", "error": "model-evaluation-failed"}
+            folder / "worker-result.json",
+            {"status": "failed", "error": "model-evaluation-failed", "diagnostic": diagnostic(exc)},
         )
 
 
 def cleanup(settings, job, folder):
     """Remove only this runner's model; container stop also recovers stalled inference."""
-    pool = Runtimes(settings, snapshot)
-    client = pool.client(job["target"], register=True)
+    client = None
+    stage = "runtime-init"
     try:
+        pool = Runtimes(settings, snapshot)
+        client = pool.client(job["target"], register=True)
+        stage = "container-stop"
         client.stop()
+        stage = "container-start"
         client.start()
+        stage = "model-list"
         models = client.api("GET", "/api/tags", timeout=10).get("models", [])
         if any(item.get("name", item.get("model")) == job["model"] for item in models):
+            stage = "model-delete"
             client.api("DELETE", "/api/delete", {"model": job["model"]}, timeout=30)
+        stage = "final-stop"
         client.stop()
         write_json(folder / "cleanup-result.json", {"ok": True})
-    except Exception:
-        write_json(folder / "cleanup-result.json", {"ok": False})
+    except Exception as exc:
+        if client is not None:
+            try:
+                client.stop()
+            except Exception:
+                pass
+        write_json(
+            folder / "cleanup-result.json",
+            {"ok": False, "stage": stage, "diagnostic": diagnostic(exc)},
+        )
+
+
+def cleanup_failure(folder, *, interrupted):
+    result = read_json(folder / "cleanup-result.json", {})
+    stages = {
+        "runtime-init",
+        "container-stop",
+        "container-start",
+        "model-list",
+        "model-delete",
+        "final-stop",
+    }
+    stage = result.get("stage")
+    stage = stage if stage in stages else "worker-timeout-or-crash"
+    # Do not echo arbitrary contents from existing checkpoint files.
+    reason = "Interrupted-model cleanup failed" if interrupted else "Cleanup failed"
+    return RunnerRuntimeError(
+        f"{reason} at {stage}; stopping to avoid accumulating model weights. "
+        "Inspect cleanup-result.json and progress.json in --run-dir, check Docker access "
+        "and the isolated container logs, then resume with the same options. "
+        "Preserve the checkpoint and model volume for recovery."
+    )
 
 
 def bounded(function, args, seconds):
@@ -293,7 +336,7 @@ def run(args, folder):
         (folder / "cleanup-result.json").unlink(missing_ok=True)
         bounded(cleanup, (settings, recover, folder), args.cleanup_timeout)
         if not read_json(folder / "cleanup-result.json", {}).get("ok"):
-            raise RuntimeError("Interrupted-model cleanup failed; inspect isolated runtime")
+            raise cleanup_failure(folder, interrupted=True)
         state.pop("active")
         for row in state["results"]:
             if row["model"] == recover["model"] and row["target"] == recover["target"]:
@@ -323,7 +366,7 @@ def run(args, folder):
             flush=True,
         )
         if not cleaned:
-            raise RuntimeError("Cleanup failed; stopping to avoid accumulating model weights")
+            raise cleanup_failure(folder, interrupted=False)
     state.update(phase="upload", updated=time.time())
     upload(state, folder, policy)
     state.update(phase="finished", updated=time.time())
@@ -469,7 +512,7 @@ def main(argv=None):
         signal.signal(signal.SIGTERM, stop)
         try:
             return run(args, folder)
-        except RunnerConfigurationError as exc:
+        except (RunnerConfigurationError, RunnerRuntimeError) as exc:
             print(f"Run stopped: {exc}", file=sys.stderr)
             return 1
         except (Exception, KeyboardInterrupt) as exc:

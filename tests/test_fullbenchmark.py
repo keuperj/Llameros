@@ -185,6 +185,42 @@ def test_cleanup_deletes_only_evaluated_model(monkeypatch, tmp_path):
     assert json.loads((tmp_path / "cleanup-result.json").read_text())["ok"]
 
 
+def test_cleanup_initialization_failure_is_reported_without_raw_error(monkeypatch, tmp_path):
+    from llameros.docker import DockerError
+
+    def unavailable(*args):
+        raise DockerError("permission denied: private-path private-token")
+
+    monkeypatch.setattr(runner, "Runtimes", unavailable)
+    runner.cleanup(None, {"target": "cpu", "model": "gemma3:270m"}, tmp_path)
+    result = json.loads((tmp_path / "cleanup-result.json").read_text())
+    assert result["ok"] is False
+    assert result["stage"] == "runtime-init"
+    assert "docker-permission" in result["diagnostic"]
+    assert "private-token" not in json.dumps(result)
+    assert "runtime-init" in str(runner.cleanup_failure(tmp_path, interrupted=True))
+
+
+def test_cleanup_failure_attempts_container_stop(monkeypatch, tmp_path):
+    calls = []
+
+    class Client:
+        def stop(self):
+            calls.append("stop")
+
+        def start(self):
+            raise RuntimeError("private upstream failure")
+
+    monkeypatch.setattr(
+        runner, "Runtimes", lambda *a: SimpleNamespace(client=lambda *a, **k: Client())
+    )
+    runner.cleanup(None, {"target": "cpu", "model": "gemma3:270m"}, tmp_path)
+    result = json.loads((tmp_path / "cleanup-result.json").read_text())
+    assert result["stage"] == "container-start"
+    assert calls == ["stop", "stop"]
+    assert "private upstream failure" not in json.dumps(result)
+
+
 def test_interrupted_cleanup_blocks_new_downloads(monkeypatch, tmp_path):
     args = options(tmp_path)
     monkeypatch.setattr(runner, "snapshot", lambda: HARDWARE)
