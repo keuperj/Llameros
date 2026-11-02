@@ -12,11 +12,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
 import llameros
-from llameros.benchmark_exchange import VoucherUpload
+from llameros.benchmark_exchange import PublicUpload
 from llameros.body_limits import BodyLimits
 
 from .admin import install_admin
-from .database import flags_for, initialize
+from .database import approved_averages, flags_for, initialize
 
 
 def create_app(
@@ -113,23 +113,20 @@ def create_app(
             )
             return {"entries": [json.loads(row[0]) for row in rows], "total": total}
 
+    @app.get("/api/v1/averages")
+    def averages(offset: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
+        with sqlite3.connect(database) as db:
+            rows = approved_averages(db)
+        return {"entries": rows[offset : offset + limit], "total": len(rows)}
+
     @app.post("/api/v1/benchmarks")
-    def collect(body: VoucherUpload):
+    def collect(body: PublicUpload):
         records = {}
         for entry in body.entries:
             data = json.dumps(entry.model_dump(), sort_keys=True, separators=(",", ":"))
             records[hashlib.sha256(data.encode()).hexdigest()] = (data, entry)
         with lock, sqlite3.connect(database) as db:
             db.execute("BEGIN IMMEDIATE")
-            voucher_digest = hashlib.sha256(body.voucher.encode()).hexdigest()
-            voucher = db.execute(
-                "SELECT expires,max_entries,redeemed FROM vouchers WHERE digest=?",
-                (voucher_digest,),
-            ).fetchone()
-            if not voucher or voucher[0] <= int(time.time()) or voucher[2]:
-                raise HTTPException(403, "Invalid, expired or redeemed upload voucher")
-            if len(body.entries) > voucher[1]:
-                raise HTTPException(400, "Batch exceeds this voucher's entry limit")
             new = [
                 (key, data, "pending", json.dumps(flags_for(entry, db)))
                 for key, (data, entry) in records.items()
@@ -139,8 +136,6 @@ def create_app(
             if count + len(new) > max_entries:
                 raise HTTPException(503, "Database capacity reached")
             db.executemany("INSERT INTO entries(digest,data,status,flags) VALUES (?,?,?,?)", new)
-            # Atomic with insertion; never store any voucher reference on an entry.
-            db.execute("UPDATE vouchers SET redeemed=1 WHERE digest=?", (voucher_digest,))
         return {"accepted": len(new), "duplicates": len(records) - len(new), "status": "pending"}
 
     install_admin(

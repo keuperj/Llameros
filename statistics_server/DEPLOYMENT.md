@@ -3,7 +3,7 @@
 Run the benchmark statistics server as a **systemd user service under your normal
 Linux login account**, not as root. That account is also the `/admin` PAM
 administrator. This guide is not for an Ollama runtime or separate backup service.
-See `README.md` in this directory for privacy, vouchers and moderation.
+See `README.md` in this directory for privacy, open uploads and moderation.
 
 ## 1. Requirements and installation
 
@@ -154,7 +154,7 @@ administrator is now your login user, not the previous dedicated service account
 
 Startup creates `cert.pem`, `key.pem` and `benchmarks.sqlite3` under
 `statistics-state`. Keep the private key mode 0600;
-never distribute it. The database includes private moderation/voucher data.
+never distribute it. The database includes private moderation data.
 
 Binding to a specific IP includes it in the generated certificate. For wildcard
 binding (`0.0.0.0`) or NAT, supply a certificate with the client-visible IP SAN
@@ -188,19 +188,15 @@ downloads, not automatic uploads. Never transfer `key.pem`.
 
 ## 4. Administration
 
-Use `/admin` to monitor capacity/queues, issue bounded single-use upload vouchers,
-and review six-case evidence/warning flags before approval or rejection. Approval
-means reviewed, not proven genuine. Only approved results are public/recommended;
-clients may cache a previously approved entry for ten minutes.
-
-Deliver vouchers privately without keeping recipient-to-voucher lists or recording
-screens/terminal sessions containing secrets. They cannot be retrieved later;
-the browser clears displayed secrets after five minutes or logout. The CLI runs
-as your login user, without sudo:
+Use `/admin` to monitor capacity/queues and review six-case evidence and warning
+flags before approval or rejection. Anyone can upload without credentials; only
+approved reports affect public averages/recommendations. Approval means reviewed,
+not proven genuine. Clients may cache approved reports for ten minutes. Monitor
+queue capacity because open uploads can be abused. The CLI runs as your login user,
+without sudo:
 
 ```sh
 .venv/bin/python -m statistics_server.manage --state-dir statistics-state review
-.venv/bin/python -m statistics_server.manage --state-dir statistics-state issue-voucher --max-entries 3 --hours 24
 ```
 
 See `README.md` for decision commands. CLI authorization relies on OS access to
@@ -265,8 +261,7 @@ tested scheduler; these instructions do not install a timer.
    journal with a snapshot from another time.
 3. Ensure ownership belongs to your login user, directories are 0700 and
    database/key are 0600. Restore the matching certificate/key pair together.
-4. Check integrity and **invalidate restored vouchers** before startup. Restoring
-   old redemption flags otherwise makes previously consumed vouchers usable again:
+4. Check database integrity before startup:
 
 ```sh
 .venv/bin/python - <<'PY'
@@ -277,13 +272,12 @@ database = Path("statistics-state/benchmarks.sqlite3")
 with sqlite3.connect(database) as db:
     if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
         raise RuntimeError("Restored database integrity check failed")
-    db.execute("DELETE FROM vouchers")
 PY
 ```
 
 5. Run `systemctl --user start llameros-statistics.service`, then test HTTPS and
    owner PAM login. Review restored approvals: later-rejected entries might be
-   approved in an older snapshot. Issue replacement vouchers. Sessions are
+   approved in an older snapshot. Sessions are
    memory-only and restart invalidates them. A changed host/address may regenerate
    the certificate; update client trust if needed.
 
@@ -306,7 +300,7 @@ environment while serving requests. Unit edits also need
 The launcher suppresses access logs and request-context error logging. The user
 journal still records lifecycle/startup failures. PAM, OS, firewalls, proxies and
 hosting systems may retain security data; review them and crash collectors.
-Never log passwords, sessions, vouchers or bodies. Connection IPs remain visible
+Never log passwords, sessions or bodies. Connection IPs remain visible
 at the network layer; do not promise complete anonymity.
 
 | Symptom | Check |

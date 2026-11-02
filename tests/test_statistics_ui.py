@@ -86,13 +86,6 @@ def test_admin_page_keeps_all_javascript_control_ids(tmp_path):
             "logout",
             "refresh",
             "overview",
-            "voucher-form",
-            "max-entries",
-            "hours",
-            "voucher-result",
-            "voucher-secret",
-            "show-voucher",
-            "clear-voucher",
             "status",
             "page-info",
             "entries",
@@ -100,7 +93,5 @@ def test_admin_page_keeps_all_javascript_control_ids(tmp_path):
             "next",
         }
         assert expected <= ids.keys()
-        assert "hidden" in ids["dashboard"] and "hidden" in ids["voucher-result"]
+        assert "hidden" in ids["dashboard"]
         assert ids["password"]["type"] == "password"
-        assert ids["voucher-secret"]["type"] == "password"
-        assert ids["voucher-secret"]["autocomplete"] == "off"

@@ -8,7 +8,6 @@ import hashlib
 import json
 import multiprocessing
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -150,22 +149,18 @@ def bounded(function, args, seconds):
     return process.exitcode == 0
 
 
-def upload(state, folder, policy, vouchers, send=exchange, pause=time.sleep):
-    """Consume each voucher once; persist intent before sending to avoid rollback replay."""
+def upload(state, folder, policy, send=exchange, pause=time.sleep):
+    """Persist upload intent before sending; leave uncertain submissions for manual review."""
     pending = [
         row for row in state["results"] if row["status"] == "completed" and "upload" not in row
     ]
     for offset in range(0, len(pending), 10):
-        index = state.setdefault("vouchers_used", 0)
-        if index >= len(vouchers):
-            break
         if offset:
             # Stay below the statistics server's default 20 uploads/minute.
             pause(3.2)
         batch = pending[offset : offset + 10]
         for row in batch:
             row["upload"] = "uncertain"
-        state["vouchers_used"] = index + 1
         write_json(folder / "status.json", state)
         try:
             send(
@@ -174,11 +169,10 @@ def upload(state, folder, policy, vouchers, send=exchange, pause=time.sleep):
                 "/api/v1/benchmarks",
                 {
                     "entries": [row["entry"] for row in batch],
-                    "voucher": vouchers[index],
                 },
             )
         except Exception:
-            # A timeout may occur after redemption: never automatically replay it.
+            # A timeout may occur after acceptance: never automatically replay it.
             continue
         for row in batch:
             row["upload"] = "submitted-for-moderation"
@@ -200,17 +194,6 @@ def run(args, folder):
         port=args.port,
         ca_certificate=args.ca_cert.read_text() if args.ca_cert else "",
     )
-    vouchers = json.loads(args.vouchers_file.read_text())
-    if (
-        not isinstance(vouchers, list)
-        or not vouchers
-        or any(
-            not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", value)
-            for value in vouchers
-        )
-        or len(set(vouchers)) != len(vouchers)
-    ):
-        raise ValueError("Use a JSON array of distinct single-use vouchers")
     fingerprint = {
         "context": args.context,
         "destination": policy.url,
@@ -222,11 +205,6 @@ def run(args, folder):
     if state and state["configuration"] != fingerprint:
         raise ValueError("Resume configuration differs; use a separate run directory")
     state = state or {"configuration": fingerprint, "results": [], "created": time.time()}
-    voucher_hashes = [hashlib.sha256(value.encode()).hexdigest() for value in vouchers]
-    previous = state.get("voucher_hashes", [])
-    if voucher_hashes[: len(previous)] != previous:
-        raise ValueError("Keep the existing voucher list unchanged; append new vouchers only")
-    state["voucher_hashes"] = voucher_hashes
     state.update(pid=os.getpid(), phase="discovery", updated=time.time())
     write_json(folder / "status.json", state)
 
@@ -285,7 +263,7 @@ def run(args, folder):
         if not cleaned:
             raise RuntimeError("Cleanup failed; stopping to avoid accumulating model weights")
     state.update(phase="upload", updated=time.time())
-    upload(state, folder, policy, vouchers)
+    upload(state, folder, policy)
     state.update(phase="finished", updated=time.time())
     write_json(folder / "status.json", state)
     submitted = sum(row.get("upload") == "submitted-for-moderation" for row in state["results"])
@@ -303,11 +281,6 @@ def main(argv=None):
     parser.add_argument("--server", default="127.0.0.1", help="Statistics server literal IP")
     parser.add_argument("--port", type=int, default=9443)
     parser.add_argument("--ca-cert", type=Path)
-    parser.add_argument(
-        "--vouchers-file",
-        type=Path,
-        help="Private JSON array; one voucher per batch of up to ten results",
-    )
     parser.add_argument(
         "--confirm-share",
         action="store_true",
@@ -366,14 +339,12 @@ def main(argv=None):
             )
         )
         return 0
-    if not args.confirm_share or not args.vouchers_file:
-        parser.error(
-            "--confirm-share and --vouchers-file are required; uploads are not automatic without consent"
-        )
+    if not args.confirm_share:
+        parser.error("--confirm-share is required; uploads are not automatic without consent")
     if min(args.context, args.model_timeout, args.cleanup_timeout) <= 0:
         parser.error("Context and timeouts must be positive")
-    if not args.vouchers_file.is_file() or args.ca_cert and not args.ca_cert.is_file():
-        parser.error("Voucher file and optional CA certificate must exist")
+    if args.ca_cert and not args.ca_cert.is_file():
+        parser.error("Optional CA certificate must exist")
     for family in args.family or []:
         if ":" in validate_model(family):
             parser.error("--family takes an official model family without a tag")

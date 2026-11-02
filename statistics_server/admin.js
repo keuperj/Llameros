@@ -1,15 +1,11 @@
 /** Owner-only administration. Render untrusted benchmark fields exclusively as text. */
 'use strict';
 const $ = id => document.getElementById(id);
-let csrf = '', offset = 0, total = 0, epoch = 0, voucherTimer = null, loading = false, refreshQueued = false;
+let csrf = '', offset = 0, total = 0, epoch = 0, loading = false, refreshQueued = false;
 const pageSize = 25;
 function node(tag, text = '') { const item = document.createElement(tag); item.textContent = text; return item; }
-function clearVoucher() {
-  clearTimeout(voucherTimer); voucherTimer = null;
-  $('voucher-secret').value = ''; $('voucher-secret').type = 'password'; $('voucher-result').hidden = true;
-}
 function signedOut() {
-  epoch++; csrf = ''; offset = 0; total = 0; clearVoucher();
+  epoch++; csrf = ''; offset = 0; total = 0;
   $('password').value = ''; $('username').value = ''; $('dashboard').hidden = true; $('login-form').hidden = false;
   $('entries').replaceChildren(); $('overview').textContent = ''; $('page-info').textContent = '';
 }
@@ -35,6 +31,7 @@ function renderRows(rows) {
   $('entries').replaceChildren();
   for (const row of rows) {
     const item = row.entry, tr = node('tr');
+    if (row.flags.includes('disagrees-with-approved-results')) tr.className = 'result-disagreement';
     tr.append(node('td', `${item.model || 'Legacy entry'} · ${item.model_digest || 'unknown artifact'} · ${row.status}`));
     const hw = item.hardware || {};
     tr.append(node('td', `${hw.architecture || 'unknown'} · ${hw.logical_cores ?? '?'} cores · ${hw.memory_gib ?? '?'} GiB RAM · ${hw.accelerator || 'unknown'} · ${hw.accelerator_memory_gib ?? '?'} GiB VRAM`));
@@ -48,7 +45,7 @@ function renderRows(rows) {
       if (status === row.status) continue;
       const button = node('button', label); button.type = 'button';
       button.addEventListener('click', safe(async () => {
-        if (!window.confirm(`${label} ${item.model || 'this entry'}?\nDigest: ${row.digest}\n${status === 'approved' ? 'This makes the result public and eligible for recommendations. Approval is not proof of genuine hardware.' : 'This removes the result from public browsing and future recommendation downloads.'}`)) return;
+        if (!window.confirm(`${label} ${item.model || 'this entry'}?\nDigest: ${row.digest}\n${status === 'approved' ? 'This includes the result in the public average and recommendations. Approval is not proof of genuine hardware.' : 'This removes the result from public browsing and future recommendation downloads.'}`)) return;
         button.disabled = true;
         try {
           await api('benchmarks/' + encodeURIComponent(row.digest), {status, expected_status:row.status, confirmed:true});
@@ -69,7 +66,7 @@ async function refresh() {
   try {
     const [summary, page] = await Promise.all([api('overview'), api(`benchmarks?status=${encodeURIComponent(status)}&offset=${currentOffset}&limit=${pageSize}`)]);
     if (version !== epoch || !csrf || status !== $('status').value || currentOffset !== offset) return;
-    $('overview').textContent = `${summary.entries.pending} pending · ${summary.entries.approved} approved · ${summary.entries.rejected} rejected · capacity ${summary.used}/${summary.capacity} · ${summary.vouchers.available} usable vouchers · ${summary.vouchers.redeemed} redeemed vouchers. No independent-user counts.`;
+    $('overview').textContent = `${summary.entries.pending} pending · ${summary.entries.approved} approved · ${summary.entries.rejected} rejected · capacity ${summary.used}/${summary.capacity}. No independent-user counts.`;
     total = page.total;
     if (offset && offset >= total) { offset = Math.max(0, Math.floor((total - 1) / pageSize) * pageSize); }
     else renderRows(page.entries);
@@ -96,20 +93,6 @@ $('refresh').addEventListener('click', safe(refresh));
 $('status').addEventListener('change', safe(async () => { offset = 0; await refresh(); }));
 $('previous').addEventListener('click', safe(async () => { offset = Math.max(0, offset - pageSize); await refresh(); }));
 $('next').addEventListener('click', safe(async () => { if (offset + pageSize < total) offset += pageSize; await refresh(); }));
-$('voucher-form').addEventListener('submit', safe(async event => {
-  event.preventDefault(); clearVoucher();
-  const max_entries = Number($('max-entries').value), hours = Number($('hours').value);
-  if (!window.confirm(`Allow one upload batch of up to ${max_entries} entries, expiring in ${hours} hours? Deliver the voucher privately; no recipient identity will be recorded.`)) return;
-  const version = epoch;
-  const data = await api('vouchers', {max_entries, hours, confirmed:true});
-  if (version !== epoch || !csrf) return;
-  $('voucher-secret').value = data.voucher; $('voucher-result').hidden = false;
-  voucherTimer = setTimeout(clearVoucher, 300000);
-  $('feedback').textContent = 'Voucher issued. Copy it now; it cannot be retrieved later.';
-  await refresh();
-}));
-$('show-voucher').addEventListener('click', () => { $('voucher-secret').type = $('voucher-secret').type === 'password' ? 'text' : 'password'; });
-$('clear-voucher').addEventListener('click', clearVoucher);
 window.addEventListener('pagehide', signedOut);
 async function restore() {
   try {

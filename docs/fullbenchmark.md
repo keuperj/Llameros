@@ -27,14 +27,10 @@ and each supported isolated GPU sequentially by default. Internal target IDs are
 recorded locally in the progress/plan; only coarse hardware buckets leave the host.
 Use `--target cpu` for CPU only, or repeat `--target` with existing GPU target IDs.
 
-### Authorize uploads
+### Configure uploads
 
-Obtain single-use vouchers from the statistics-server operator. Create a private
-JSON array in `benchmark-vouchers.json`, containing the actual voucher strings.
-Protect it with `chmod 600 benchmark-vouchers.json`; do not commit or log secrets.
-Each voucher is used for **one batch of up to ten completed results** and must
-authorize that many entries. The last batch may be smaller. Ask for enough
-vouchers with expiration times covering the whole long-running evaluation.
+Uploads are open to anyone; no token or contributor account is required. Every
+submitted result stays private until an administrator confirms it.
 
 Obtain the server's public certificate through a trusted channel and save it as
 `certificates/statistics-cert.pem`. The file must contain no private key. TLS
@@ -48,7 +44,7 @@ Replace the example IP with the statistics server's literal IP:
 uv run --no-sync python RunFullbenchmark.py start \
   --server 192.0.2.10 --port 9443 \
   --ca-cert certificates/statistics-cert.pem \
-  --vouchers-file benchmark-vouchers.json --confirm-share
+  --confirm-share
 ```
 
 The command prints a background PID and returns; terminal logout does not send it
@@ -109,17 +105,15 @@ containers, volumes and the shared Docker image are not automatically removed.
 Uploads happen after evaluation. `--confirm-share` explicitly consents to sending
 the allowlisted model identity, coarse hardware class and six-case measurements
 to the selected destination. No Linux password, prompt, hostname, GPU UUID or
-voucher-recipient mapping is sent. Successful uploads enter the **private
+contributor identity is sent. Successful uploads enter the **private
 moderation queue**, not immediate publication.
 
-Insufficient vouchers leave results local. Keep the existing voucher array in
-order and **append** new vouchers, then rerun the same command: completed jobs
-are not rerun and unsent results are submitted. Consumed voucher hashes and upload
-intent are checkpointed before sending. An error/timeout is marked `uncertain`
-because the server may already have redeemed the voucher. Such batches are never
-automatically retried. Check with the server operator before manually resubmitting
-uncertain entries using a fresh voucher. Keep the complete checkpoint history;
-restoring an older checkpoint can lose submission knowledge.
+Upload intent is checkpointed before sending. An error/timeout is marked
+`uncertain` because the server may already have accepted the batch. Such batches
+are not automatically retried. Check with the server operator before manually
+resubmitting uncertain entries. Exact duplicate payloads are ignored by the server.
+Keep the complete checkpoint history; restoring older state can lose submission
+knowledge. Confirmed compatible reports contribute equally to arithmetic averages.
 
 No live full-library download/evaluation is part of the automated tests. Tests
 use fake runtimes and network exchanges to exercise recovery and privacy behavior.

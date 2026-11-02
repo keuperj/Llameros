@@ -162,12 +162,10 @@ class ShareConfirmation(BenchmarkBatch):
     entries: list[SharedBenchmark] = Field(min_length=1, max_length=10)
     confirmed: bool = False
     destination: str = Field(max_length=256)
-    voucher: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]{43}$", repr=False)
 
 
-class VoucherUpload(BenchmarkBatch):
+class PublicUpload(BenchmarkBatch):
     entries: list[SharedBenchmark] = Field(min_length=1, max_length=10)
-    voucher: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]{43}$", repr=False)
 
 
 def bucket(value, choices):
@@ -278,7 +276,7 @@ def rank_matches(entries, profiles, context, parallel, flash_attention, kv_cache
             entry.timing,
             entry.hardware.model_dump_json(),
         )
-        groups.setdefault(key, set()).add(entry.tokens_per_second)
+        groups.setdefault(key, {})[entry.model_dump_json()] = entry.tokens_per_second
     results = [
         {
             "kind": kind,
@@ -286,10 +284,10 @@ def rank_matches(entries, profiles, context, parallel, flash_attention, kv_cache
             "model_digest": digest,
             "hardware": json.loads(hardware),
             "timing": timing,
-            "tokens_per_second": statistics.median(values),
+            "tokens_per_second": statistics.mean(values.values()),
             "samples": len(values),
-            "minimum": min(values),
-            "maximum": max(values),
+            "minimum": min(values.values()),
+            "maximum": max(values.values()),
         }
         for (kind, model, digest, timing, hardware), values in groups.items()
     ]

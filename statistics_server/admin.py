@@ -4,7 +4,6 @@ import os
 import pwd
 import secrets
 import sqlite3
-import time
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -16,7 +15,7 @@ from pydantic import Field
 from llameros.auth import Sessions, account_available, verify_password
 from llameros.benchmark_exchange import StrictModel
 
-from .database import issue_voucher, moderate, review_entries
+from .database import moderate, review_entries
 
 COOKIE = "__Host-llameros-statistics-admin"
 
@@ -24,12 +23,6 @@ COOKIE = "__Host-llameros-statistics-admin"
 class Login(StrictModel):
     username: str = Field(min_length=1, max_length=256)
     password: str = Field(min_length=1, max_length=1024, repr=False)
-
-
-class VoucherRequest(StrictModel):
-    max_entries: int = Field(default=10, ge=1, le=10)
-    hours: int = Field(default=72, ge=1, le=720)
-    confirmed: bool = False
 
 
 class ModerationRequest(StrictModel):
@@ -152,18 +145,12 @@ def install_admin(
                     "SELECT status,count(*) FROM entries GROUP BY status"
                 )
             }
-            now = int(time.time())
-            vouchers = db.execute(
-                "SELECT coalesce(sum(CASE WHEN redeemed=0 AND expires>? THEN 1 ELSE 0 END),0), coalesce(sum(redeemed),0) FROM vouchers",
-                (now,),
-            ).fetchone()
         return {
             "entries": {
                 status: counts.get(status, 0) for status in ("pending", "approved", "rejected")
             },
             "capacity": max_entries,
             "used": sum(counts.values()),
-            "vouchers": {"available": vouchers[0], "redeemed": vouchers[1]},
         }
 
     @app.get("/admin/api/benchmarks", dependencies=protected)
@@ -177,16 +164,6 @@ def install_admin(
                 0
             ]
         return {"entries": review_entries(state_dir, status, limit, offset), "total": total}
-
-    @app.post("/admin/api/vouchers", dependencies=protected)
-    def vouchers(body: VoucherRequest):
-        if not body.confirmed:
-            raise HTTPException(400, "Confirm permission to upload one batch")
-        return {
-            "voucher": issue_voucher(state_dir, max_entries=body.max_entries, hours=body.hours),
-            "max_entries": body.max_entries,
-            "hours": body.hours,
-        }
 
     @app.post("/admin/api/benchmarks/{digest}", dependencies=protected)
     def review(digest: str, body: ModerationRequest):

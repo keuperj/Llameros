@@ -40,10 +40,7 @@
 .statistics-site #login-form{display:block}
 .dashboard-toolbar{margin:10px 0 24px}
 .overview-summary{font-size:16px;line-height:1.9;margin-bottom:0}
-.statistics-site .voucher-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto;gap:16px;align-items:end}
-.voucher-form label{margin:10px 0 0}
 .secret-panel{padding:18px;border:1px solid var(--orange);border-radius:10px;margin-top:24px;background:#27251b}
-#voucher-secret{font-family:ui-monospace,monospace;letter-spacing:.04em}
 .status-filter{min-width:160px;margin:0}
 .moderation-card table{min-width:1250px;table-layout:fixed}
 .moderation-card th,.moderation-card td{white-space:normal;overflow-wrap:anywhere}
@@ -57,5 +54,6 @@
 .moderation-card pre{max-height:28rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--bg);border-radius:8px;font-size:12px}
 .pagination{margin-top:20px;justify-content:flex-end}
 .statistics-site>footer{gap:18px;flex-wrap:wrap}
-@media(max-width:800px){.benchmark-principles{grid-template-columns:1fr}.statistics-site .intro{align-items:flex-start;flex-direction:column}.intro-note{max-width:none}.statistics-site .voucher-form{grid-template-columns:repeat(2,minmax(0,1fr))}.voucher-form button{grid-column:1/-1}}
-@media(max-width:520px){.statistics-site>header,.statistics-site>main,.statistics-site>footer{padding:20px 16px}.statistics-site header nav{width:100%}.statistics-site .card{padding:20px 16px}.statistics-site .voucher-form{grid-template-columns:1fr}.statistics-site .nav-link{padding:8px 10px}.statistics-site .section-head>.primary{width:100%}.statistics-site .brand-logo{width:56px;height:56px}.statistics-site h1{font-size:28px}.statistics-site th,.statistics-site td{padding:10px 12px}}
+@media(max-width:800px){.benchmark-principles{grid-template-columns:1fr}.statistics-site .intro{align-items:flex-start;flex-direction:column}.intro-note{max-width:none}}
+@media(max-width:520px){.statistics-site>header,.statistics-site>main,.statistics-site>footer{padding:20px 16px}.statistics-site header nav{width:100%}.statistics-site .card{padding:20px 16px}.statistics-site .nav-link{padding:8px 10px}.statistics-site .section-head>.primary{width:100%}.statistics-site .brand-logo{width:56px;height:56px}.statistics-site h1{font-size:28px}.statistics-site th,.statistics-site td{padding:10px 12px}}
+.statistics-site .result-disagreement td{background:rgba(255,180,0,.12);border-bottom-color:#d7a400}

@@ -6,7 +6,7 @@ const columns = [
   ['Unified memory', r => String(r.hardware.unified_memory)], ['Context', r => r.context_length],
   ['Parallel', r => r.parallel], ['Flash Attention', r => String(r.flash_attention)],
   ['KV cache', r => r.kv_cache_type], ['Timing', r => r.timing], ['Tokens/s', r => r.tokens_per_second],
-  ['Protocol', r => r.protocol],
+  ['Samples', r => r.samples], ['Minimum', r => r.minimum], ['Maximum', r => r.maximum], ['Protocol', r => r.protocol],
   ['Artifact digest', r => r.model_digest || 'unknown'],
 ];
 let rows = [], selected = 13, ascending = false;
@@ -37,7 +37,7 @@ document.getElementById('load').addEventListener('click', async () => {
   try {
     let total = 1;
     while (rows.length < total) {
-      const response = await fetch('/api/v1/benchmarks?limit=1000&offset=' + rows.length, {credentials:'omit', referrerPolicy:'no-referrer'});
+      const response = await fetch('/api/v1/averages?limit=1000&offset=' + rows.length, {credentials:'omit', referrerPolicy:'no-referrer'});
       if (!response.ok) throw new Error('Service unavailable; retry later.');
       const data = await response.json(); total = data.total;
       rows.push(...data.entries);

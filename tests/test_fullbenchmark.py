@@ -12,14 +12,11 @@ import RunFullbenchmark as runner
 
 
 def options(tmp_path):
-    vouchers = tmp_path / "vouchers.json"
-    vouchers.write_text(json.dumps(["a" * 43]))
     return SimpleNamespace(
         context=4096,
         server="127.0.0.1",
         port=9443,
         ca_cert=None,
-        vouchers_file=vouchers,
         allow_rootful_docker=False,
         family=["gemma3"],
         target=["cpu"],
@@ -63,7 +60,7 @@ def test_isolated_storage_identity(tmp_path):
     assert first.container_name != runner.Settings().container_name
 
 
-def test_upload_batches_and_never_replays_uncertain_vouchers(tmp_path):
+def test_upload_batches_without_vouchers_and_never_replays_uncertain_results(tmp_path):
     state = {"results": [{"status": "completed", "entry": {"model": str(i)}} for i in range(23)]}
     requests = []
 
@@ -71,17 +68,17 @@ def test_upload_batches_and_never_replays_uncertain_vouchers(tmp_path):
         requests.append(body)
         # Intent must already be durable before the network operation.
         saved = json.loads((tmp_path / "status.json").read_text())
-        assert saved["vouchers_used"] == len(requests)
+        assert any(row.get("upload") == "uncertain" for row in saved["results"])
         if len(requests) == 1:
             raise TimeoutError()
 
-    runner.upload(state, tmp_path, None, ["a", "b"], send, pause=lambda seconds: None)
-    assert [len(request["entries"]) for request in requests] == [10, 10]
+    runner.upload(state, tmp_path, None, send, pause=lambda seconds: None)
+    assert [len(request["entries"]) for request in requests] == [10, 10, 3]
     assert state["results"][0]["upload"] == "uncertain"
     assert state["results"][10]["upload"] == "submitted-for-moderation"
-    assert "upload" not in state["results"][20]
-    runner.upload(state, tmp_path, None, ["a", "b", "c"], send)
-    assert requests[-1]["voucher"] == "c" and len(requests[-1]["entries"]) == 3
+    assert state["results"][20]["upload"] == "submitted-for-moderation"
+    runner.upload(state, tmp_path, None, send)
+    assert all("voucher" not in request for request in requests)
     assert len(requests) == 3
 
 
@@ -162,9 +159,6 @@ def test_run_recovers_after_failure_and_resumes(monkeypatch, tmp_path):
     ]
     assert runner.run(args, tmp_path) == 0
     assert len(calls) == 4
-    args.vouchers_file.write_text(json.dumps(["b" * 43]))
-    with pytest.raises(ValueError, match="append"):
-        runner.run(args, tmp_path)
 
 
 def test_cleanup_deletes_only_evaluated_model(monkeypatch, tmp_path):
@@ -232,7 +226,6 @@ def test_worker_deadline_terminates_process():
 
 
 def test_background_launch_detaches_without_secrets(monkeypatch, tmp_path):
-    args = options(tmp_path)
     monkeypatch.setattr(runner.os, "geteuid", lambda: 1000)
     calls = []
 
@@ -250,8 +243,6 @@ def test_background_launch_detaches_without_secrets(monkeypatch, tmp_path):
                     "--run-dir",
                     str(tmp_path / "run"),
                     "--confirm-share",
-                    "--vouchers-file",
-                    str(args.vouchers_file),
                 ]
             )
             == 0

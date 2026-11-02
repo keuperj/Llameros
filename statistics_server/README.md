@@ -10,7 +10,7 @@ host account running the service and its PAM password.
 
 For unattended six-case benchmarking across discoverable compatible Ollama models,
 see `docs/fullbenchmark.md` from the repository root and `RunFullbenchmark.py`.
-The runner skips stress tests and requires explicit voucher-authorized uploads.
+The runner skips stress tests and requires explicit consent for uploads.
 
 For the complete installation, **systemd user service configuration**, TLS verification,
 operations and **backup/restore** procedures, see `DEPLOYMENT.md` in this directory.
@@ -65,7 +65,7 @@ review the exact JSON and destination, and explicitly confirm. Only completed
 six-case benchmarks with hardware snapshots and resolvable official-library
 names are eligible. Re-run older benchmarks to create snapshots. Private aliases,
 failed/partial results and stress-test details are excluded. Each action handles
-at most 10 entries and requires a single-use upload voucher from the operator. The displayed payload is checked against current results
+at most 10 entries without contributor credentials. The displayed payload is checked against current results
 again at submission. Model-name verification contacts the existing official
 catalogue, just like normal model discovery.
 
@@ -82,7 +82,7 @@ No username, instance ID, hostname, CPU name, IP address, GPU UUID, device path,
 serial number, precise memory reading, benchmark timestamp, prompt, response,
 API key, runtime address, local file path or raw error is stored in the database.
 Content hashes deduplicate identical public payloads; they are not client IDs.
-There is no per-client tracking. Entry records contain only the public payload, its content hash, moderation status and fixed review flags. Voucher records store only a secret hash, expiry, entry allowance and a redeemed boolean; there is no voucher-to-entry relationship.
+There is no per-client tracking. Entry records contain only the public payload, its content hash, moderation status and review flags.
 Invalid request responses do not echo submitted values. The application writes
 no access logs; the launcher also suppresses Uvicorn request/error logs that may
 contain connection context. Monitor service health without storing request data.
@@ -104,14 +104,14 @@ does not retract already published records.
 Results are client-reported measurements, not quality scores or independent-user
 counts. **Approval means reviewed, not proven genuine.** The server cannot prove
 that reported hardware, model digest or measurements are truthful. An approved
-attacker can still submit plausible false data; keep voucher distribution limited
+attacker can still submit plausible false data; review open submissions carefully
 and review suspicious reports. There is no automatic approval or identity-based
 reputation. Coarse CPU classes cannot distinguish processor generations. Check
 local fit before downloading.
 
 Only approved records are returned by the public API and website, so pending or
-rejected records cannot affect model search. Medians and min/max ranges are shown
-for distinct throughput values, not unique installations. Grouping separates
+rejected records cannot affect model search. Arithmetic averages and min/max ranges are shown
+for distinct approved reports, not unique installations. Grouping separates
 hardware, artifact digest (including an explicit unknown group), workload,
 settings and timing method. Local recommendation caches expire after ten minutes;
 rejecting a previously approved entry may take that long to disappear on clients.
@@ -148,25 +148,16 @@ policy. No contributor identity is introduced by the operator login.
 
 The dashboard provides:
 
-- Pending/approved/rejected counts, database capacity and aggregate voucher counts.
+- Pending/approved/rejected counts, database capacity.
 - Status-filtered, paginated benchmark review with full six-case evidence, model
   digest, hardware/settings and warning flags; refreshes every 30 seconds.
-- **Allow upload requests:** issue a single-use voucher with a bounded entry
-  allowance and expiry, then privately deliver it to a contributor. There is no
-  public request/contact form that collects contributor identity. This authorizes
-  a push; it does not approve any pushed result.
+
 - Explicit **Approve / publish** and **Reject / unpublish** confirmations. Stale
   decisions are rejected if another reviewer/CLI changed the entry's status.
   Approval validates v2 evidence again; legacy evidence remains blocked.
 - Sign out and automatic 30-minute session expiry. Sessions, CSRF tokens and
   credentials are never written to SQLite. Session identity is checked against
   current host account policy on every protected request.
-
-The new voucher is returned once and shown in a password field; it can be revealed
-and selected/copied manually. Clear it after delivery. It clears automatically
-after five minutes, on sign-out, or when leaving the page. No clipboard or browser
-storage API is used. Existing voucher secrets cannot be retrieved. A lost creation
-response can leave an unused voucher until expiry; do not issue excess vouchers.
 
 Admin APIs live under `/admin/api/` and require the owner session. Writes require
 same-origin HTTPS, a CSRF token, and explicit action confirmation. Cookies are
@@ -175,39 +166,20 @@ one global five-attempt-per-minute limit and at most four concurrent PAM calls,
 without source-IP or submitted-username tracking. The admin request budget is
 separate from public browsing/uploads, although an attacker can still target the
 admin endpoint's global budget. No security mechanism here guarantees DDoS
-resistance. The application logs no passwords, vouchers, sessions or identities.
+resistance. The application logs no passwords, sessions or identities.
 There is no cross-origin API access or trusted forwarded-identity header.
 
-## Operator: vouchers and moderation
+## Operator: open uploads and moderation
 
 Use the owner-only web UI at `/admin`, or run these commands locally on the
 statistics host, as the service account, using the same absolute state directory
 as the running service. The CLI remains available for offline operations.
 
-Issue one voucher (default 10 entries, expires in 72 hours):
-
-```sh
-python -m statistics_server.manage --state-dir statistics-state issue-voucher
-python -m statistics_server.manage --state-dir statistics-state issue-voucher --max-entries 3 --hours 24
-```
-
-The secret is printed once; deliver it through a private channel. Do not record
-recipient identities alongside tokens, paste tokens into URLs, or keep terminal
-recordings. Issuance allows 1–10 entries and 1–720 hours. Only a SHA-256 hash is
-stored. Expired hashes are purged on subsequent issuance. No voucher redemption
-time, client identity or benchmark reference is stored. Ordinary vouchers are
-**not cryptographically unlinkable**: an operator retaining issuance records or
-observing requests can correlate them. Do not claim Privacy Pass anonymity.
-
-The Llameros admin pastes the voucher into the password field in Benchmarks, then
-selects **Share benchmarks** and confirms the exact public payload and destination.
-The confirmation explains that the secret voucher is also sent over verified
-HTTPS. It is never included in the public preview, settings file or entry records.
-The field clears on submission/session reset. A voucher permits one successful
-batch only, including duplicate-only batches. Failed validation, over-limit or
-capacity-rejected requests do not redeem it. Redemption and insertion are atomic,
-so simultaneous reuse cannot admit two batches. If a successful response is lost,
-check the moderation queue; do not retry the used voucher.
+Anyone can submit up to ten valid reports per request, without credentials.
+Reports remain private and pending until an administrator approves them. Exact
+payload duplicates are ignored, including reports already rejected. Global upload
+rate limits, request size limits, and database capacity still apply. Open admission
+can be abused to fill the queue; monitor capacity and review submissions regularly.
 
 Review the private moderation queue (default first 100 records; up to 1,000 with
 `--limit`). The JSON includes the public-payload digest needed for moderation:
@@ -230,8 +202,8 @@ Every new record starts **pending**, private and excluded from recommendations.
 The server validates six ordered standard cases, token limits, finite positive
 durations, wall/evaluation timing consistency and recomputes aggregate throughput.
 It rejects mismatching totals rather than accepting a claimed rate. All unknown
-fields are rejected. High throughput, missing artifact digest, or a >3× difference
-from comparable approved medians produces fixed review flags, never automatic
+fields are rejected. High throughput, missing artifact digest, or a difference greater than 50%
+from the comparable approved arithmetic average produces review flags, never automatic
 approval. There is intentionally no hardware-dependent hard performance ceiling:
 new hardware may legitimately be faster.
 
@@ -243,12 +215,21 @@ best-effort from local runtime inventory and is still a client claim.
 
 ## API
 
-- `POST /api/v1/benchmarks`: `{ "entries": [ ... ], "voucher": "SECRET" }`; returns counts of new and
+- `POST /api/v1/benchmarks`: `{ "entries": [ ... ] }`; returns counts of new and
   duplicate records and `status: "pending"`. Unknown fields are rejected.
 - `GET /api/v1/benchmarks?offset=0&limit=200`: approved public entries and total count;
   maximum page size 1,000.
-- `/`: sortable public table, with all rows fetched in bounded pages. No remote
+- `GET /api/v1/averages?offset=0&limit=200`: arithmetic averages, sample counts and
+  min/max of approved reports, grouped by matching hardware, artifact, workload,
+  settings and timing. Recomputed from originals after confirmation or rejection.
+  The raw benchmark endpoint remains available for six-case evidence and clients.
+- `/`: sortable public averages table, with all rows fetched in bounded pages. No remote
   scripts or tracking requests.
 
 For development, run `pytest -q` and
 `node --test tests/*.test.cjs` from the repository root.
+
+Review warnings are refreshed against current approvals, including for reports
+submitted before a baseline existed. A warning never auto-rejects a report.
+Original six-case evidence remains unchanged. Samples are not independent users.
+Legacy voucher hashes are discarded on initialization; entries are preserved.

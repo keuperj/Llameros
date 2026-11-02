@@ -1,6 +1,5 @@
-"""Owner-only PAM UI, session security, voucher permissions and moderation isolation."""
+"""Owner-only PAM UI, session security, open submissions and moderation isolation."""
 
-import hashlib
 import os
 import pwd
 import sqlite3
@@ -93,23 +92,28 @@ def test_csrf_origin_https_and_validation_do_not_echo_secrets(dashboard):
     assert "private" not in invalid.text
     login(client)
     csrf = client.headers.pop("X-CSRF-Token")
-    assert client.post("/admin/api/vouchers", json={"confirmed": True}).status_code == 403
+    decision = {"confirmed": True, "status": "approved", "expected_status": "pending"}
+    assert client.post("/admin/api/benchmarks/missing", json=decision).status_code == 403
     client.headers["X-CSRF-Token"] = csrf
     assert (
         client.post(
-            "/admin/api/vouchers",
-            json={"confirmed": True},
+            "/admin/api/benchmarks/missing",
+            json=decision,
             headers={"Origin": "https://evil.example"},
         ).status_code
         == 403
     )
-    assert client.post("/admin/api/vouchers", json={}).status_code == 400
     assert (
-        client.post("/admin/api/vouchers", json={"confirmed": True, "max_entries": 11}).status_code
-        == 422
+        client.post(
+            "/admin/api/benchmarks/missing", json={**decision, "confirmed": False}
+        ).status_code
+        == 400
     )
     assert (
-        client.post("/admin/api/vouchers", json={"confirmed": True, "hours": 0}).status_code == 422
+        client.post(
+            "/admin/api/benchmarks/missing", json={**decision, "status": "other"}
+        ).status_code
+        == 422
     )
     with TestClient(app, base_url="http://statistics") as insecure:
         assert insecure.get("/admin").status_code == 400
@@ -151,29 +155,20 @@ def test_session_expiry_account_disable_and_rotation(dashboard):
     assert client.get("/admin/api/overview").status_code == 401
 
 
-def test_ui_voucher_submission_monitoring_pagination_and_moderation(dashboard, tmp_path):
+def test_ui_open_submission_monitoring_pagination_and_moderation(dashboard, tmp_path):
     app, client, calls, available = dashboard
     login(client)
-    issued = client.post(
-        "/admin/api/vouchers", json={"confirmed": True, "max_entries": 3, "hours": 24}
-    )
-    assert issued.status_code == 200
-    token = issued.json()["voucher"]
-    assert len(token) == 43
     entry = shareable(local_result()).model_dump()
     with TestClient(app, base_url="https://statistics") as contributor:
-        assert (
-            contributor.post(
-                "/api/v1/benchmarks", json={"voucher": token, "entries": [entry]}
-            ).status_code
-            == 200
-        )
+        assert contributor.post("/api/v1/benchmarks", json={"entries": [entry]}).status_code == 200
         for path in ("overview", "benchmarks", "session"):
             assert contributor.get("/admin/api/" + path).status_code == 401
-        assert contributor.post("/admin/api/vouchers", json={"confirmed": True}).status_code == 401
+        assert (
+            contributor.post("/admin/api/benchmarks/missing", json={"confirmed": True}).status_code
+            == 401
+        )
     summary = client.get("/admin/api/overview").json()
     assert summary["entries"] == {"pending": 1, "approved": 0, "rejected": 0}
-    assert summary["vouchers"] == {"available": 0, "redeemed": 1}
     queue = client.get("/admin/api/benchmarks?status=pending&limit=1&offset=0").json()
     assert queue["total"] == 1
     record = queue["entries"][0]
@@ -205,10 +200,8 @@ def test_ui_voucher_submission_monitoring_pagination_and_moderation(dashboard, t
     assert client.get("/admin/api/benchmarks?status=rejected").json()["total"] == 1
     with sqlite3.connect(initialize(tmp_path)) as db:
         dump = "\n".join(db.iterdump())
-        assert "private-password" not in dump and token not in dump
+        assert "private-password" not in dump
         assert client.headers["X-CSRF-Token"] not in dump
-        rows = db.execute("SELECT * FROM entries").fetchall()
-        assert hashlib.sha256(token.encode()).hexdigest() not in str(rows)
 
 
 def test_admin_budgets_separate_from_public_traffic(tmp_path):

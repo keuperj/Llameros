@@ -1,11 +1,9 @@
-"""Local moderation and anonymous single-use admission. Never link vouchers to entries."""
+"""Private original reports, moderation, and approved like-for-like averages."""
 
-import hashlib
 import json
 import os
-import secrets
 import sqlite3
-import time
+import statistics
 from pathlib import Path
 
 from llameros.benchmark_exchange import SharedBenchmark
@@ -29,29 +27,45 @@ def initialize(state_dir: Path):
         if "flags" not in columns:
             db.execute("ALTER TABLE entries ADD COLUMN flags TEXT NOT NULL DEFAULT '[]'")
         db.execute("CREATE INDEX IF NOT EXISTS entries_status ON entries(status, digest)")
-        db.execute(
-            "CREATE TABLE IF NOT EXISTS vouchers (digest TEXT PRIMARY KEY, expires INTEGER NOT NULL, max_entries INTEGER NOT NULL, redeemed INTEGER NOT NULL DEFAULT 0)"
-        )
+        # Admission vouchers are obsolete; discard existing secret hashes on upgrade.
+        db.execute("DROP TABLE IF EXISTS vouchers")
     return path
 
 
-def issue_voucher(state_dir, *, max_entries=10, hours=72):
-    if not 1 <= max_entries <= 10 or not 1 <= hours <= 720:
-        raise ValueError("Voucher limit must be 1–10 entries and expiry 1–720 hours")
-    path = initialize(Path(state_dir))
-    token = secrets.token_urlsafe(32)
-    with sqlite3.connect(path) as db:
-        # Expired hashes are no longer needed to prevent replay.
-        db.execute("DELETE FROM vouchers WHERE expires <= ?", (int(time.time()),))
-        db.execute(
-            "INSERT INTO vouchers VALUES (?,?,?,0)",
-            (
-                hashlib.sha256(token.encode()).hexdigest(),
-                int(time.time()) + hours * 3600,
-                max_entries,
-            ),
-        )
-    return token
+KEY_FIELDS = (
+    "protocol",
+    "model",
+    "model_digest",
+    "kind",
+    "hardware",
+    "context_length",
+    "parallel",
+    "flash_attention",
+    "kv_cache_type",
+    "timing",
+)
+
+
+def comparison_key(row):
+    return json.dumps({key: row.get(key) for key in KEY_FIELDS}, sort_keys=True)
+
+
+def approved_averages(db):
+    """Compute from original approved reports, never average previous averages."""
+    groups = {}
+    for (data,) in db.execute("SELECT data FROM entries WHERE status='approved' ORDER BY digest"):
+        row = json.loads(data)
+        groups.setdefault(comparison_key(row), []).append(row["tokens_per_second"])
+    return [
+        {
+            **json.loads(key),
+            "tokens_per_second": statistics.mean(rates),
+            "samples": len(rates),
+            "minimum": min(rates),
+            "maximum": max(rates),
+        }
+        for key, rates in sorted(groups.items())
+    ]
 
 
 def review_entries(state_dir, status="pending", limit=100, offset=0):
@@ -62,7 +76,9 @@ def review_entries(state_dir, status="pending", limit=100, offset=0):
             {
                 "digest": digest,
                 "status": status,
-                "flags": json.loads(flags),
+                "flags": flags_for(SharedBenchmark.model_validate(json.loads(data)), db, digest)
+                if json.loads(data).get("protocol") == "llameros-six-cases-v2"
+                else json.loads(flags),
                 "entry": json.loads(data),
             }
             for digest, data, flags in db.execute(
@@ -88,35 +104,23 @@ def moderate(state_dir, digest, status, *, expected_status=None):
         db.execute("UPDATE entries SET status=? WHERE digest=?", (status, digest))
 
 
-def flags_for(entry, db):
+def flags_for(entry, db, exclude_digest=None):
     flags = []
     if entry.model_digest is None:
         flags.append("missing-model-digest")
     if entry.tokens_per_second > (1000 if entry.kind == "chat" else 100000):
         flags.append("high-throughput-review")
     # Compare only like-for-like hardware, artifact, workload, settings and timing.
-    key_fields = (
-        "protocol",
-        "model",
-        "model_digest",
-        "kind",
-        "hardware",
-        "context_length",
-        "parallel",
-        "flash_attention",
-        "kv_cache_type",
-        "timing",
-    )
     candidate = entry.model_dump()
     rates = []
-    for (data,) in db.execute("SELECT data FROM entries WHERE status='approved'"):
+    for digest, data in db.execute("SELECT digest,data FROM entries WHERE status='approved'"):
+        if digest == exclude_digest:
+            continue
         row = json.loads(data)
-        if all(row.get(key) == candidate.get(key) for key in key_fields):
+        if comparison_key(row) == comparison_key(candidate):
             rates.append(row["tokens_per_second"])
     if rates:
-        import statistics
-
-        baseline = statistics.median(rates)
-        if entry.tokens_per_second > baseline * 3 or entry.tokens_per_second < baseline / 3:
+        baseline = statistics.mean(rates)
+        if abs(entry.tokens_per_second - baseline) > baseline * 0.5:
             flags.append("disagrees-with-approved-results")
     return flags

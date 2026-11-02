@@ -17,7 +17,7 @@ from llameros.benchmark_exchange import (
     shareable,
 )
 from statistics_server.app import create_app
-from statistics_server.database import issue_voucher, moderate, review_entries
+from statistics_server.database import moderate, review_entries
 
 
 def local_result():
@@ -117,9 +117,7 @@ def test_server_validation_deduplication_pagination_capacity_and_privacy(tmp_pat
     with TestClient(app, base_url="https://statistics.test") as client:
 
         def upload(entries):
-            return client.post(
-                "/api/v1/benchmarks", json={"entries": entries, "voucher": issue_voucher(tmp_path)}
-            )
+            return client.post("/api/v1/benchmarks", json={"entries": entries})
 
         assert client.get("/").status_code == 200
         assert client.get("/table.js").status_code == 200
@@ -200,7 +198,6 @@ def test_admin_consent_disabled_preview_and_exact_payload(multiuser, monkeypatch
     payload = {
         "entries": preview["entries"],
         "destination": preview["destination"],
-        "voucher": "A" * 43,
     }
     assert admin.post("/api/benchmark-sharing/share", json=payload).status_code == 400
     assert (
@@ -227,7 +224,7 @@ def test_admin_consent_disabled_preview_and_exact_payload(multiuser, monkeypatch
         admin.post("/api/benchmark-sharing/share", json={**payload, "confirmed": True}).status_code
         == 200
     )
-    assert calls[0][3] == {"entries": preview["entries"], "voucher": "A" * 43}
+    assert calls[0][3] == {"entries": preview["entries"]}
     assert (
         admin.post("/api/benchmark-sharing", json={**policy, "enabled": False}).status_code == 200
     )

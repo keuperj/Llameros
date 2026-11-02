@@ -2,7 +2,7 @@
 'use strict';
 const BenchmarkSharing = {
   data: null,
-  reset() { this.data = null; document.getElementById('sharing-voucher').value = ''; document.getElementById('community-models').replaceChildren(); document.getElementById('sharing-preview').textContent = ''; document.getElementById('sharing-feedback').textContent = ''; },
+  reset() { this.data = null; document.getElementById('community-models').replaceChildren(); document.getElementById('sharing-preview').textContent = ''; document.getElementById('sharing-feedback').textContent = ''; },
   render(data) {
     if (this.data) return;
     this.data = data;
@@ -40,18 +40,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('sharing-feedback').textContent = 'Saved. No benchmarks were uploaded. Sharing always requires manual confirmation.';
   }));
   document.getElementById('share-benchmarks').addEventListener('click', safe(async () => {
-    const voucher = document.getElementById('sharing-voucher').value.trim();
-    if (!/^[A-Za-z0-9_-]{43}$/.test(voucher)) { document.getElementById('sharing-feedback').textContent = 'Enter a valid single-use voucher from the statistics server operator (up to 10 entries).'; return; }
     const epoch = sessionEpoch;
     const preview = await api('/api/benchmark-sharing/preview');
     if (epoch !== sessionEpoch || userBoard) return;
     const payload = JSON.stringify({entries: preview.entries}, null, 2);
     document.getElementById('sharing-preview').textContent = payload;
     if (!preview.entries.length) { document.getElementById('sharing-feedback').textContent = 'No eligible results. Run a new benchmark of an official public-library model first.'; return; }
-    if (!window.confirm(`Submit these benchmarks for review at ${preview.destination}?\n\n${payload}\n\nThese public fields plus your secret single-use upload voucher are sent over HTTPS. The voucher is not included in public records. No usernames, hostnames, UUIDs, prompts, account keys, timestamps or instance IDs. The server/network operator can see the connection IP; hardware combinations can be distinctive. After approval, results become public and cannot be individually retracted through this UI.\n\n${preview.note}`)) return;
-    document.getElementById('sharing-voucher').value = '';
-    const result = await api('/api/benchmark-sharing/share', {entries: preview.entries, confirmed: true, destination: preview.destination, voucher});
+    if (!window.confirm(`Submit these benchmarks for review at ${preview.destination}?\n\n${payload}\n\nThese public fields are sent over HTTPS. No usernames, hostnames, UUIDs, prompts, account keys, timestamps or instance IDs. The server/network operator can see the connection IP; hardware combinations can be distinctive. After approval, results become public and cannot be individually retracted through this UI.\n\n${preview.note}`)) return;
+    const result = await api('/api/benchmark-sharing/share', {entries: preview.entries, confirmed: true, destination: preview.destination});
     if (epoch !== sessionEpoch || userBoard) return;
-    document.getElementById('sharing-feedback').textContent = `Submitted ${result.accepted} results for operator review; ${result.duplicates} duplicates ignored. Nothing affects recommendations until approved. Voucher consumed.`;
+    document.getElementById('sharing-feedback').textContent = `Submitted ${result.accepted} results for operator review; ${result.duplicates} duplicates ignored. Nothing affects recommendations until approved.`;
   }));
 });

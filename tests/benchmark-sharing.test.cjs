@@ -26,7 +26,6 @@ function harness(confirm = true, entries = [{model:'gemma3:270m', tokens_per_sec
     },
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/llameros/static/benchmark-sharing.js'), 'utf8'), context);
-  get('sharing-voucher').value = 'A'.repeat(43);
   return {get, context, calls};
 }
 
@@ -56,10 +55,7 @@ test('upload requires confirmation showing exact fields, destination and IP cave
   assert.match(calls[1].confirmation, /connection IP/);
   assert.equal(calls[2].payload.confirmed, true);
   assert.equal(calls[2].payload.destination, 'https://127.0.0.1:9443');
-  assert.equal(calls[2].payload.voucher, 'A'.repeat(43));
-  assert.equal(get('sharing-voucher').value, '');
   assert.equal(calls[1].confirmation.includes('A'.repeat(43)), false);
-  assert.match(calls[1].confirmation, /single-use upload voucher/);
   assert.deepEqual(calls[2].payload.entries, JSON.parse(get('sharing-preview').textContent).entries);
 });
 
@@ -78,13 +74,12 @@ test('reset clears private preview and recommendations', () => {
   vm.runInContext('BenchmarkSharing.reset()', context);
   assert.equal(get('sharing-preview').textContent, '');
   assert.equal(get('community-models').children.length, 0);
-  assert.equal(get('sharing-voucher').value, '');
 });
 
-test('missing voucher blocks even the preview request', async () => {
+test('upload needs no voucher', async () => {
   const {get, calls} = harness();
-  get('sharing-voucher').value = '';
   await get('share-benchmarks').click();
-  assert.equal(calls.length, 0);
-  assert.match(get('sharing-feedback').textContent, /voucher/);
+  const upload = calls.find(call => call.url?.endsWith('/share'));
+  assert.ok(upload);
+  assert.equal('voucher' in upload.payload, false);
 });

@@ -346,7 +346,7 @@ def create_app(
     @app.exception_handler(RequestValidationError)
     async def request_validation_error(request, exc):
         if request.url.path.startswith("/api/benchmark-sharing"):
-            # Pydantic input errors can otherwise echo the secret voucher.
+            # Pydantic input errors can otherwise echo submitted private values.
             return JSONResponse({"detail": "Invalid benchmark sharing request"}, status_code=422)
         return await request_validation_exception_handler(request, exc)
 
@@ -773,7 +773,7 @@ def create_app(
         return {
             "destination": sharing_policy.url,
             "entries": entries,
-            "note": "Up to 10 completed public-library results with six-case metrics. A single-use voucher is required. Results stay private and pending until server operator approval. Older or private models are excluded.",
+            "note": "Up to 10 completed public-library results with six-case metrics. Anyone can submit. Results stay private and pending until server operator approval. Older or private models are excluded.",
         }
 
     @app.post("/api/benchmark-sharing/share", dependencies=protected)
@@ -796,13 +796,12 @@ def create_app(
                 "/api/v1/benchmarks",
                 {
                     "entries": [entry.model_dump() for entry in body.entries],
-                    "voucher": body.voucher,
                 },
             )
         except (ValueError, httpx.HTTPError):
             raise HTTPException(
                 502,
-                "Statistics upload failed; check voucher validity/limit, server availability and certificate trust. A used voucher cannot be retried.",
+                "Statistics upload failed; check server availability and certificate trust. Exact duplicate reports are ignored.",
             ) from None
 
     @app.get("/api/benchmark-sharing/recommendations", dependencies=protected)
@@ -845,7 +844,7 @@ def create_app(
                 cfg.ollama_flash_attention,
                 cfg.ollama_kv_cache_type,
             ),
-            "note": "Operator-approved community medians for matching hardware/settings/artifact. Approval is not proof. Throughput is not model quality. Sample counts are not independent users; ranges show disagreement.",
+            "note": "Operator-approved community averages for matching hardware/settings/artifact. Approval is not proof. Throughput is not model quality. Sample counts are not independent users; ranges show disagreement.",
         }
 
     @app.post("/api/storage", dependencies=protected, status_code=202)

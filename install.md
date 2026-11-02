@@ -181,13 +181,13 @@ port and trusted public certificate. The feature is **disabled by default**.
 Enabling permits public result downloads for local hardware matching in model
 search; it does not upload anything automatically. Use **Share benchmarks** in
 the admin Benchmarks section to preview and explicitly confirm the exact public
-payload and destination. A single-use upload voucher from the server operator is
-required (up to 10 entries); submissions remain private until manually approved.
+payload and destination. Anyone can submit up to 10 entries per request without a voucher; submissions
+remain private until manually approved and then contribute to compatible averages.
 Only newly hardware-snapshotted, completed official-model
 benchmarks are eligible; re-run old benchmarks if necessary.
 
 The benchmark server also provides `/admin`, restricted to the Linux user running
-it via PAM, for monitoring, voucher issuance and approval/rejection of pushed
+it via PAM, for monitoring and approval/rejection of pushed
 results. The local moderation CLI remains available.
 
 The separate Python/SQLite service, self-signed TLS setup, shared field allowlist,
