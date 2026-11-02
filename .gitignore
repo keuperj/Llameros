@@ -12,3 +12,5 @@ config.toml
 state/
 statistics-state/
 backups/
+fullbenchmark/
+benchmark-vouchers.json

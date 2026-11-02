@@ -8,6 +8,10 @@ host account running the service and its PAM password.
 
 ## Setup
 
+For unattended six-case benchmarking across discoverable compatible Ollama models,
+see `docs/fullbenchmark.md` from the repository root and `RunFullbenchmark.py`.
+The runner skips stress tests and requires explicit voucher-authorized uploads.
+
 For the complete installation, **systemd user service configuration**, TLS verification,
 operations and **backup/restore** procedures, see `DEPLOYMENT.md` in this directory.
 A ready-to-copy systemd **user service** template is provided as
