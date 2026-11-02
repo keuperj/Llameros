@@ -194,7 +194,7 @@ results. The local moderation CLI remains available.
 
 The separate Python/SQLite service, self-signed TLS setup, shared field allowlist,
 privacy limitations and deployment instructions are documented in
-`statistics_server/README.md`. The production installation, systemd unit, and
+`statistics_server/README.md`. The production installation, systemd user unit, and
 backup/restore walkthrough is in
 `statistics_server/DEPLOYMENT.md`. No user/instance identifiers are stored, but the
 network operator necessarily sees connection IPs and hardware combinations may be

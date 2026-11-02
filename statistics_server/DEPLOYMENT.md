@@ -1,135 +1,67 @@
-# Benchmark statistics server: deployment, systemd and backups
+# Benchmark statistics server: systemd user service and backups
 
-This guide is for the **benchmark statistics server**, not an Ollama runtime or a
-separate backup service. It covers installation, unattended startup, owner-only
-administration, and backup/restore of its SQLite database and TLS identity.
-See `README.md` in this directory for the shared-data allowlist, privacy limits,
-voucher protocol and moderation rules.
+Run the benchmark statistics server as a **systemd user service under your normal
+Linux login account**, not as root. That account is also the `/admin` PAM
+administrator. This guide is not for an Ollama runtime or separate backup service.
+See `README.md` in this directory for privacy, vouchers and moderation.
 
-## 1. Requirements and deployment layout
+## 1. Requirements and installation
 
-- Linux with systemd, Python **3.11 or newer**, a working system PAM library and
-  the project dependencies listed in the repository's `pyproject.toml`.
-- A persistent, unprivileged Linux account. The examples use
-  `llameros-statistics`; it must not have sudo or Docker-group access.
-- A login-capable shell and usable PAM password if you want browser administration.
-  A locked/passwordless/`nologin` account can run the public service but may not
-  be able to sign in to `/admin`. Do not run the server as root to bypass PAM.
-- A reachable IP address, an unused TCP port (default **9443**), and a private
-  persistent state directory. No Docker daemon, GPU or Ollama installation is
-  needed on this host.
+Use Linux with systemd, Python **3.11+**, system PAM and the dependencies declared
+in `pyproject.toml`. The server needs no Docker, GPU or Ollama installation.
+Your unprivileged login account needs a usable PAM password and login shell for
+browser administration. Locked, passwordless or `nologin` accounts may fail the
+host PAM policy. Never run the server as root to bypass it.
 
-The system-service example uses:
-
-| Purpose | Absolute path |
-| --- | --- |
-| Installed virtual environment | `/opt/llameros-statistics/.venv` |
-| Persistent state | `/var/lib/llameros-statistics` |
-| systemd unit | `/etc/systemd/system/llameros-statistics.service` |
-| Example source checkout | `/home/keuper/Projekte/Llameros` |
-
-Replace the source checkout path with your actual checkout. Installation is a
-wheel/package installation, **not editable**: future source edits do not change
-the running installation until you reinstall it. Keep the Python installation
-used to create the virtual environment available after reboot.
-
-## 2. Install the service account and application
-
-Account/package commands vary by distribution. On Debian/Ubuntu, an administrator
-can install the prerequisites and create a dedicated normal account as follows:
+Run all application and service commands **as the account that should sign in to
+the UI**, from its SSH/desktop login session, not a root or switch-user shell.
+Only missing OS prerequisites and optional lingering authorization may need an
+administrator. On Debian/Ubuntu, prerequisites can be installed with:
 
 ```sh
 sudo apt-get update
 sudo apt-get install python3 python3-venv python3-pip libpam0g openssl
-sudo useradd --create-home --shell /bin/bash llameros-statistics
-sudo passwd llameros-statistics
 ```
 
-Use an existing account instead if appropriate; do not recreate it. Check that
-`python3 --version` is at least 3.11. Set a strong password interactively: never
-put a Linux password in a unit file, environment variable or command argument.
-Restrict SSH access to this account according to your host policy; the web PAM
-password does not require granting remote shell access.
-
-Install from a trusted source checkout:
+Check `python3 --version` is at least 3.11. Install **without sudo**, replacing the
+example checkout `/home/keuper/Projekte/Llameros` with your actual absolute path:
 
 ```sh
-sudo install -d -o root -g root -m 0755 /opt/llameros-statistics
-sudo python3 -m venv /opt/llameros-statistics/.venv
-sudo /opt/llameros-statistics/.venv/bin/python -m pip install /home/keuper/Projekte/Llameros
-sudo install -d -o llameros-statistics -g llameros-statistics -m 0700 /var/lib/llameros-statistics
-
-/opt/llameros-statistics/.venv/bin/python -m statistics_server --help
+install -d -m 0700 "$HOME/.local/share/llameros-statistics"
+python3 -m venv "$HOME/.local/share/llameros-statistics/venv"
+"$HOME/.local/share/llameros-statistics/venv/bin/python" -m pip install /home/keuper/Projekte/Llameros
+install -d -m 0700 "$HOME/.local/share/llameros-statistics/state"
+"$HOME/.local/share/llameros-statistics/venv/bin/python" -m statistics_server --help
 ```
 
-This installs the complete project package, including `statistics_server`, its
-website assets, and the PAM dependency. It does not start Llameros or Docker.
-Only administrators should be able to modify `/opt/llameros-statistics` and the
-service unit. The service account must own and be able to write its state, but
-must not be able to replace its installed program. Use the repository lockfile
-workflow or approved pinned deployment artifacts if your environment requires
-reproducible dependency versions; a plain pip install resolves the declared ranges.
+This installs the whole project package and assets, but does not start Llameros or
+Docker. It is not editable: reinstall after source updates. Keep the base Python
+installation available after reboot. Use approved pinned artifacts or the project
+lockfile workflow when reproducibility is required; pip resolves declared ranges.
+Other users must not be able to modify the installation, unit or private state.
+Never put Linux passwords in a unit, environment variable or command argument.
 
-## 3. Choose the bind address and TLS identity
+## 2. Install the user unit
 
-The supplied unit defaults to **127.0.0.1:9443**, deliberately limiting access to
-the host. Before enabling remote contributions, change `--host` to the actual
-reachable static IPv4/IPv6 address. That IP is included in the generated
-certificate's subject alternative names. Do not use an example/documentation IP
-as if it were your host address.
-
-- Binding to a specific reachable IP allows direct HTTPS without a reverse proxy.
-  Permit TCP 9443 only from intended networks in the host/provider firewall.
-- `--host 0.0.0.0` is a bind wildcard, not an address clients can validate. For
-  wildcard binding or a NAT/public address different from the bind address, supply
-  a certificate with the actual client-visible address in its SAN using
-  `--cert-file` and `--key-file`.
-- The Llameros integration accepts a literal server IP, not a hostname. Make sure
-  the certificate covers that IP, even if you also use a DNS name for the website.
-- Prefer a protected network/VPN for administration. The built-in global limits
-  are not a substitute for network-level abuse protection.
-
-Generated files in `/var/lib/llameros-statistics`:
-
-| File | Purpose |
-| --- | --- |
-| `benchmarks.sqlite3` | Benchmark payloads, moderation status, review flags and voucher hashes |
-| `cert.pem` | Public self-signed certificate |
-| `key.pem` | TLS private key; keep mode **0600**, never distribute |
-
-Certificate maintenance runs **at process startup**, not continuously. A generated
-certificate is renewed if near expiry or missing required names. Plan maintenance
-restarts and expiration monitoring. Changing the address, hostname or restoring
-on another host can cause regeneration; redistribute the public certificate to
-clients whenever the self-signed trust anchor changes.
-
-## 4. Install and enable the systemd system service
-
-The ready-to-copy template is `llameros-statistics.service` in this directory.
-From the source checkout:
+Stop any manually running server first. Copy the supplied template:
 
 ```sh
-sudo install -o root -g root -m 0644 /home/keuper/Projekte/Llameros/statistics_server/llameros-statistics.service /etc/systemd/system/llameros-statistics.service
-sudoedit /etc/systemd/system/llameros-statistics.service
+install -d -m 0700 "$HOME/.config/systemd/user"
+install -m 0600 /home/keuper/Projekte/Llameros/statistics_server/llameros-statistics.service "$HOME/.config/systemd/user/llameros-statistics.service"
 ```
 
-Review `User=`, `Group=`, the Python path and `--host` before starting. The template
-contains:
+The complete template is:
 
 ```ini
 [Unit]
 Description=Llameros benchmark statistics HTTPS server
-Wants=network-online.target
-After=network-online.target
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
 Type=simple
-User=llameros-statistics
-Group=llameros-statistics
-WorkingDirectory=/opt/llameros-statistics
-ExecStart=/opt/llameros-statistics/.venv/bin/python -m statistics_server --host 127.0.0.1 --port 9443 --state-dir /var/lib/llameros-statistics --pam-service login --max-entries 100000
+WorkingDirectory=%h/.local/share/llameros-statistics
+ExecStart=%h/.local/share/llameros-statistics/venv/bin/python -m statistics_server --host 127.0.0.1 --port 9443 --state-dir %h/.local/share/llameros-statistics/state --pam-service login --max-entries 100000
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
@@ -139,166 +71,167 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 LimitCORE=0
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
 
-Validate and enable it:
+`%h` expands to the user's home. There is deliberately **no `User=`/`Group=`**:
+the process inherits the user manager's account. Do not install this unit under
+`/etc/systemd/system`, manage it with `sudo systemctl`, or run it in root's user
+manager. The UI uses the process's effective owner, not `USER` or `SUDO_USER`.
+
+The template binds **127.0.0.1:9443** for local access. For remote access, change
+`--host` to a stable reachable IP and permit the port only from intended networks
+in host/provider firewalls. Prefer a protected network/VPN for administration.
 
 ```sh
-sudo systemd-analyze verify /etc/systemd/system/llameros-statistics.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now llameros-statistics.service
-sudo systemctl status llameros-statistics.service --no-pager
-sudo journalctl -u llameros-statistics.service -n 50 --no-pager
+systemd-analyze --user verify "$HOME/.config/systemd/user/llameros-statistics.service"
+systemctl --user daemon-reload
+systemctl --user enable --now llameros-statistics.service
+systemctl --user status llameros-statistics.service --no-pager
+journalctl --user -u llameros-statistics.service -n 50 --no-pager
 ```
 
-This is a **system service running as an unprivileged user**, not a root process.
-It starts at boot without a user login or lingering. `Type=simple` reports process
-startup, not application readiness: also perform the HTTPS checks below. If the
-chosen address is not available at boot, the service may need a network-specific
-wait-online configuration or a later restart; `network-online.target` alone does
-not configure your network.
+`Type=simple` reports process startup, not HTTPS readiness. Perform the checks below.
+The unit does not depend on the system manager's `network-online.target`: a user
+manager does not gain system network ordering through that dependency. If binding
+an IP unavailable at boot, arrange host-specific readiness; restart after it is
+available if the restart limit has been reached.
 
-The template intentionally does not add `NoNewPrivileges=`, `RestrictSUIDSGID=`,
-capability restrictions or aggressive filesystem namespaces. Depending on the
-host PAM stack, authentication may need a privileged password-check helper or
-specific filesystem access. Blindly applying such restrictions can break PAM.
-Add hardening only after testing the actual host policy; never loosen shadow-file
-permissions or run the web process as root to make login work. `LimitCORE=0`
-reduces accidental credential exposure through ordinary process core dumps;
-review host crash collectors and diagnostics separately.
+### Boot startup and running after logout
 
-Do not add `PAMName=` merely to enable website login: the application calls PAM
-itself with `--pam-service`. Under `User=llameros-statistics`, that account—and
-only that account—is the web administrator. It is **not** the administrator who
-ran `sudo systemctl start`.
-
-Useful lifecycle commands:
+Authorize lingering for **your login account**, if needed with administrator help:
 
 ```sh
-sudo systemctl restart llameros-statistics.service
-sudo systemctl stop llameros-statistics.service
-sudo systemctl disable --now llameros-statistics.service
+sudo loginctl enable-linger "$(id -un)"
+loginctl show-user "$(id -un)" --property=Linger
 ```
 
-After unit edits, run `daemon-reload` before restarting. Do not launch a second
-manual process on the same port or run multiple workers to bypass rate limits.
+Run from the intended user's session and check `Linger=yes`. An administrator in a
+root shell must substitute the actual account name instead of `$(id -un)`.
+Lingering keeps the user manager running; it grants no root privileges to the
+application. Test HTTPS after logout/reboot.
 
-### Alternative: systemd user service
-
-If running under an existing login account, install a unit in that account's
-`~/.config/systemd/user/llameros-statistics.service` instead. Use the same
-`[Service]` command with absolute paths writable/readable by that account, remove
-`User=` and `Group=`, and use `WantedBy=default.target`. Do not enable both the
-system and user variants. Manage it with `systemctl --user`; boot startup after
-logout requires an administrator to enable lingering for that account. The
-account running the user manager becomes the PAM administrator. The main
-instructions above use the system-service variant throughout.
-
-## 5. Verify HTTPS and connect Llameros
-
-Inspect the certificate through a trusted local/admin channel:
+Routine operations, always without sudo:
 
 ```sh
-sudo openssl x509 -in /var/lib/llameros-statistics/cert.pem -noout -dates -fingerprint -sha256
-sudo -u llameros-statistics /opt/llameros-statistics/.venv/bin/python - <<'PY'
-import json
-from pathlib import Path
-from llameros.benchmark_exchange import SharingSettings, exchange
-
-policy = SharingSettings(
-    enabled=True,
-    host="127.0.0.1",
-    port=9443,
-    ca_certificate=Path("/var/lib/llameros-statistics/cert.pem").read_text(),
-)
-print(json.dumps(exchange(policy, "GET", "/api/v1/benchmarks"), indent=2))
-PY
+systemctl --user restart llameros-statistics.service
+systemctl --user stop llameros-statistics.service
+systemctl --user disable --now llameros-statistics.service
 ```
 
-Change the check's IP/port to match the unit. This uses verified TLS rather than
-`curl -k` or disabling verification. An empty `entries` array is normal until a
-benchmark has been approved. Test connectivity from a remote client too if using
-a reachable network address.
+After unit edits, run `systemctl --user daemon-reload` before restarting. Do not
+run duplicate processes/multiple workers to bypass limits. Shell startup files
+are not sourced by the service, so it uses an explicit virtualenv interpreter.
 
-Open the server's HTTPS address in a browser, verify/trust its public certificate,
-then visit `/admin`. Sign in with the service account's Linux username/password.
-The default PAM service is `login`; change it only to a host policy configured by
-your system administrator. Do not create permissive PAM rules to bypass failures.
+Avoid adding `NoNewPrivileges=`, `RestrictSUIDSGID=` or aggressive sandboxing
+without testing host PAM helpers. Never expose shadow files or run as root to
+fix authentication. `PAMName=` is not needed: the application invokes PAM itself.
+`LimitCORE=0` reduces ordinary core dumps; review host crash collectors separately.
 
-On each Llameros instance, open **Configuration → Community benchmark server**:
-enter the reachable IP and port, paste the **public** PEM certificate received
-through a trusted channel, enable the integration and save. Never paste or
-transfer `key.pem`. Enabling allows downloads, not automatic uploads.
+### Migrating from the previous system service
 
-## 6. Daily administration
+Have an administrator stop/disable the old system unit first; never run both.
+Back up its state and preserve the TLS certificate/key together. With all writers
+stopped, arrange an authorized copy into your user state directory with ownership
+transferred to your login account, directory mode 0700 and database/key mode 0600.
+Do not mix database snapshots with old WAL/SHM/journal sidecars. Install/enable
+the user unit and repeat HTTPS/PAM checks before removing the old state. The UI
+administrator is now your login user, not the previous dedicated service account.
 
-At `/admin` you can:
+## 3. TLS and owner login checks
 
-1. Monitor queue counts, capacity and aggregate voucher usage.
-2. Authorize an upload request by issuing a bounded, expiring voucher; deliver it
-   privately. No public contact/request form or contributor account is created.
-3. Review pending payloads, six-case measurements and warning flags.
-4. Confirm **Approve / publish** or **Reject / unpublish**. Only approved entries
-   are public and eligible for recommendations. Approval is review, not proof.
+Startup creates `cert.pem`, `key.pem` and `benchmarks.sqlite3` under
+`$HOME/.local/share/llameros-statistics/state`. Keep the private key mode 0600;
+never distribute it. The database includes private moderation/voucher data.
 
-Voucher secrets cannot be retrieved later. The browser clears displayed secrets
-after five minutes or on logout. Do not retain recipient-to-voucher lists or
-record screens/terminal sessions containing secrets. Client recommendation caches
-may retain a previously approved result for up to ten minutes after rejection.
+Binding to a specific IP includes it in the generated certificate. For wildcard
+binding (`0.0.0.0`) or NAT, supply a certificate with the client-visible IP SAN
+using `--cert-file` and `--key-file` with absolute paths. Llameros connects to
+literal IPs, so a DNS-only certificate is insufficient for that connection.
+Certificate maintenance happens at startup, not continuously: monitor expiration
+and plan maintenance restarts. Renewal/name changes can regenerate the self-signed
+certificate; update clients' trust whenever its public certificate changes.
 
-The local CLI uses the **same installed interpreter and state directory**:
+Inspect the certificate through a trusted channel:
 
 ```sh
-sudo -u llameros-statistics /opt/llameros-statistics/.venv/bin/python -m statistics_server.manage --state-dir /var/lib/llameros-statistics review
-sudo -u llameros-statistics /opt/llameros-statistics/.venv/bin/python -m statistics_server.manage --state-dir /var/lib/llameros-statistics issue-voucher --max-entries 3 --hours 24
+openssl x509 -in "$HOME/.local/share/llameros-statistics/state/cert.pem" -noout -dates -fingerprint -sha256
+curl --cacert "$HOME/.local/share/llameros-statistics/state/cert.pem" https://127.0.0.1:9443/api/v1/benchmarks
 ```
 
-See `README.md` for approval/rejection CLI commands. CLI access does not require
-the web password, but does require authorized OS access to the state directory.
+Use the unit's actual IP/port, not necessarily loopback, for the HTTPS check; also
+test from a remote client if applicable. Install curl separately if unavailable.
+Never use `curl -k` to hide trust problems. An empty public table is normal until
+valid evidence is approved.
 
-## 7. Backup and restore
+Verify/trust the public certificate in your browser **before entering credentials**.
+Open `/admin` and use **your Linux login username and PAM password**, matching
+`id -un` in the session managing this user service. Root login is not required and
+there is no separate admin password. The default PAM service is `login`; choose
+`--pam-service SERVICE` only for an appropriate administrator-configured policy.
 
-### Consistent full backup (short maintenance window)
+In Llameros Configuration → Community benchmark server, set the reachable IP/port,
+paste the trusted **public** PEM certificate, enable and save. This enables
+downloads, not automatic uploads. Never transfer `key.pem`.
 
-Back up the SQLite database **and** the certificate/key pair, plus a copy of the
-unit and the deployed package/version information. The example below stops the
-service to make an ordinary file archive consistent. Also stop any CLI writes
-and do not run moderation/voucher commands during the backup. Never copy only a
-live SQLite main file while transactions may be in flight.
+## 4. Administration
+
+Use `/admin` to monitor capacity/queues, issue bounded single-use upload vouchers,
+and review six-case evidence/warning flags before approval or rejection. Approval
+means reviewed, not proven genuine. Only approved results are public/recommended;
+clients may cache a previously approved entry for ten minutes.
+
+Deliver vouchers privately without keeping recipient-to-voucher lists or recording
+screens/terminal sessions containing secrets. They cannot be retrieved later;
+the browser clears displayed secrets after five minutes or logout. The CLI runs
+as your login user, without sudo:
 
 ```sh
-sudo install -d -o root -g root -m 0700 /var/backups/llameros-statistics
-sudo systemctl stop llameros-statistics.service
-sudo sh -c 'umask 077; tar -C /var/lib -czf "/var/backups/llameros-statistics/state-$(date -u +%Y%m%dT%H%M%SZ).tar.gz" llameros-statistics'
-sudo systemctl start llameros-statistics.service
+"$HOME/.local/share/llameros-statistics/venv/bin/python" -m statistics_server.manage --state-dir "$HOME/.local/share/llameros-statistics/state" review
+"$HOME/.local/share/llameros-statistics/venv/bin/python" -m statistics_server.manage --state-dir "$HOME/.local/share/llameros-statistics/state" issue-voucher --max-entries 3 --hours 24
 ```
 
-Check that the archive command succeeded; inspect/list and test an archive before
-relying on it. Copy the service unit separately after any configuration change.
-Encrypt backups before transferring them off-host, restrict access and establish
-a retention schedule. Backups include the TLS private key and private moderation
-queue; do not publish them alongside the benchmark table. A backup only on the
-same disk is not disaster recovery.
+See `README.md` for decision commands. CLI authorization relies on OS access to
+the state directory rather than a web session.
 
-### Database-only online snapshot
+## 5. Backup and restore
 
-For an online database snapshot, use SQLite's backup API through Python rather
-than copying the live file. Example: create a unique private snapshot in an
-operator-created directory owned by `llameros-statistics`:
+### Full backup with a maintenance window
+
+Preserve state, the user unit and deployed package version/artifact. Stop the
+user service **and all CLI writes** before an ordinary file archive. Do not copy
+only an actively written SQLite main file.
 
 ```sh
-sudo install -d -o llameros-statistics -g llameros-statistics -m 0700 /var/backups/llameros-statistics-online
-sudo -u llameros-statistics /opt/llameros-statistics/.venv/bin/python - <<'PY'
+install -d -m 0700 "$HOME/.local/state/llameros-statistics-backups"
+systemctl --user stop llameros-statistics.service
+(umask 077; tar -C "$HOME/.local/share/llameros-statistics" -czf "$HOME/.local/state/llameros-statistics-backups/state-$(date -u +%Y%m%dT%H%M%SZ).tar.gz" state)
+systemctl --user start llameros-statistics.service
+```
+
+Check the archive succeeded and test restoration. Copy the user unit separately
+after configuration changes. Backups contain private keys and moderation data:
+encrypt off-host copies, restrict access and define retention. Same-disk copies
+alone are not disaster recovery.
+
+### Online database-only snapshot
+
+Use SQLite's backup API instead of copying a live file:
+
+```sh
+install -d -m 0700 "$HOME/.local/state/llameros-statistics-backups"
+"$HOME/.local/share/llameros-statistics/venv/bin/python" - <<'PY'
 import os
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 os.umask(0o077)
+home = Path.home()
+source_path = home / ".local/share/llameros-statistics/state/benchmarks.sqlite3"
 stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-destination = Path("/var/backups/llameros-statistics-online") / f"benchmarks-{stamp}.sqlite3"
-with sqlite3.connect("file:/var/lib/llameros-statistics/benchmarks.sqlite3?mode=ro", uri=True) as source:
+destination = home / ".local/state/llameros-statistics-backups" / f"benchmarks-{stamp}.sqlite3"
+with sqlite3.connect(source_path.as_uri() + "?mode=ro", uri=True) as source:
     with sqlite3.connect(destination) as backup:
         source.backup(backup)
         if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
@@ -307,81 +240,71 @@ print(destination)
 PY
 ```
 
-This snapshot is **not** a full TLS/config backup. Preserve the certificate/key
-pair separately during a stopped-service maintenance window, and after renewal.
-Automate the chosen procedure with your existing backup scheduler after testing
-it; this guide does not install a backup timer or select your retention policy.
+This does not back up TLS/configuration. Copy the certificate/key together during
+stopped-service maintenance, including after renewal. Automate backups with a
+tested scheduler; these instructions do not install a timer.
 
 ### Restore
 
-1. Stop the service and all CLI writes. Preserve the current state separately for
-   rollback before replacing anything.
-2. Verify/decrypt the archive in a private staging directory. Restore only a
-   trusted archive you control; do not extract arbitrary archives as root.
-3. Restore the full state directory into `/var/lib/llameros-statistics`. If using
-   a database-only snapshot, remove stale journal/WAL/SHM sidecars from the old
-   database as part of replacing the **old database set**, while all writers are
-   stopped. Do not combine sidecars from different snapshots.
-4. Set directory ownership to `llameros-statistics:llameros-statistics`, directory
-   mode 0700 and database/private-key mode 0600. Restore the matching public
-   certificate and private key together. Check the configured paths against the
-   restored unit before restarting.
-5. With the installed interpreter, open the restored database and run
-   `PRAGMA integrity_check`; require `ok` before returning it to service.
-6. **Invalidate restored upload vouchers** before starting. Restoring an older
-   database also restores old redemption flags; otherwise a voucher consumed
-   after the snapshot could be used again:
+1. Run `systemctl --user stop llameros-statistics.service` and stop CLI writes.
+   Preserve current state for rollback.
+2. Verify/decrypt a trusted archive in private staging. Restore its `state`
+   directory into `$HOME/.local/share/llameros-statistics`. For a database-only
+   restore, replace the database set while stopped; never mix an old WAL/SHM or
+   journal with a snapshot from another time.
+3. Ensure ownership belongs to your login user, directories are 0700 and
+   database/key are 0600. Restore the matching certificate/key pair together.
+4. Check integrity and **invalidate restored vouchers** before startup. Restoring
+   old redemption flags otherwise makes previously consumed vouchers usable again:
 
 ```sh
-sudo -u llameros-statistics /opt/llameros-statistics/.venv/bin/python - <<'PY'
+"$HOME/.local/share/llameros-statistics/venv/bin/python" - <<'PY'
 import sqlite3
-with sqlite3.connect("/var/lib/llameros-statistics/benchmarks.sqlite3") as db:
+from pathlib import Path
+
+database = Path.home() / ".local/share/llameros-statistics/state/benchmarks.sqlite3"
+with sqlite3.connect(database) as db:
     if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
         raise RuntimeError("Restored database integrity check failed")
     db.execute("DELETE FROM vouchers")
 PY
 ```
 
-7. Start the service and repeat the HTTPS/admin checks. Review restored approval
-   decisions: restoring an older snapshot can make a later-rejected record
-   approved again. Issue new vouchers as needed. Sessions are in memory only and
-   are invalidated by restart. On a new host/address, check for certificate
-   regeneration and update client trust if necessary.
+5. Run `systemctl --user start llameros-statistics.service`, then test HTTPS and
+   owner PAM login. Review restored approvals: later-rejected entries might be
+   approved in an older snapshot. Issue replacement vouchers. Sessions are
+   memory-only and restart invalidates them. A changed host/address may regenerate
+   the certificate; update client trust if needed.
 
-Do not restore a newer schema into older application code without a tested
-compatibility plan. Existing v1 databases migrate to pending; migration does not
-make legacy evidence approvable.
+Do not restore a newer schema into older code without a tested plan. Legacy v1
+records migrate to pending and still need valid evidence for approval.
 
-## 8. Updates, privacy and troubleshooting
+## 6. Updates, privacy and troubleshooting
 
-Before updating: back up state and the current deployment artifact, stop the
-service, install the tested new package into the virtual environment, then start
-and verify it. Installing packages while the process is serving traffic can mix
-code versions. Unit changes additionally require `systemctl daemon-reload`.
+Back up state and the package artifact, stop the user service, install tested code
+into its virtualenv without sudo, then start and verify. Do not replace code while
+serving requests. Unit edits also need `systemctl --user daemon-reload`.
 
-The launcher disables request access logs and suppresses Uvicorn error logging
-that could contain request context. systemd still reports process lifecycle and
-may capture startup failures; PAM, the OS, firewall, proxy or hosting provider may
-have separate logs. Review those facilities and crash collectors for identifying
-data. No password, session, voucher or request body should enter diagnostics.
-The server sees connection IPs at the network layer even though it does not store
-them in the benchmark database. Do not promise complete anonymity.
+The launcher suppresses access logs and request-context error logging. The user
+journal still records lifecycle/startup failures. PAM, OS, firewalls, proxies and
+hosting systems may retain security data; review them and crash collectors.
+Never log passwords, sessions, vouchers or bodies. Connection IPs remain visible
+at the network layer; do not promise complete anonymity.
 
 | Symptom | Check |
 | --- | --- |
-| Unit fails immediately | Interpreter path, installed package, account/group names, readable program and writable private state directory; inspect systemctl/journal output locally. |
-| `Address already in use` | Stop the duplicate/manual process or choose another port; do not launch additional workers. |
-| Cannot bind an address | Confirm the address exists on this host and is ready at service startup. |
-| Browser/client rejects TLS | Verify IP SAN, expiration and fingerprint; distribute the correct public certificate. Never disable verification to hide a mismatch. |
-| PAM sign-in fails | Sign in as the unit's `User=`, check login shell/account status and host PAM policy. The CLI remains available for authorized OS users. |
-| Login temporarily throttled | Wait at least one minute; limit is global and does not keep IP/user tracking records. |
-| No public benchmarks | Pending/rejected results are deliberately private; approve valid v2 evidence first. |
-| Database full | Capacity includes rejected/pending rows; review and plan a backed-up administrative cleanup or change `--max-entries`. |
-| Unit hit start limit | Fix the cause, then `sudo systemctl reset-failed llameros-statistics.service` and start again. |
+| Cannot connect to user bus | Log in directly via SSH/desktop as the intended account; do not use `sudo systemctl --user`. |
+| Stops after logout | Check lingering for the correct account and that its user unit is enabled. |
+| Unit fails immediately | Interpreter/package paths, private user-owned state, `systemctl --user status` and `journalctl --user`. |
+| Address already in use | Stop duplicate manual/old system-service processes or change port. |
+| Cannot bind at boot | Confirm the IP is ready, fix network readiness and restart. |
+| TLS rejected | Check IP SAN, expiration and fingerprint; distribute correct public PEM, never disable verification. |
+| PAM fails | Use the user manager's account; check shell, password/account status and host PAM policy. Authorized CLI access remains available. |
+| Login throttled | Wait at least one minute; the limit is global without IP/username tracking. |
+| No public entries | Approve valid v2 pending evidence first. |
+| Database full | Pending/rejected rows count too; back up before cleanup or adjust `--max-entries`. |
+| Start limit reached | Fix cause, then `systemctl --user reset-failed llameros-statistics.service` and start again. |
 
-### Reference manuals
-
-Consult the host's installed `systemd.service(5)` and `systemd.exec(5)` for unit
-semantics and PAM-related sandbox restrictions, and SQLite's **Online Backup API**
-documentation for consistent live snapshots. These are the upstream references
-used for this guide; host-specific PAM and systemd behavior still needs testing.
+Consult installed `systemd.service(5)`, `systemd.exec(5)` and `loginctl(1)` manuals.
+Test actual PAM and boot/logout behavior on the host; syntax verification alone
+cannot validate them.
