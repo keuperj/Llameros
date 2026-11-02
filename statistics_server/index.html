@@ -1,9 +1,32 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Llameros public benchmarks</title><link rel="stylesheet" href="/table.css"><script src="/table.js" defer></script></head>
-<body><main><h1>Llameros public benchmarks</h1>
-<p><a href="/admin">Server administration</a></p>
-<p>Voluntarily shared, unverified community measurements, not model quality scores. CPU/core/memory categories are coarse; equal categories do not imply identical machines. Chat output and embedding input throughput are not comparable. Request and generation timing are not comparable. No accounts, cookies, analytics or client IP database.</p>
-<p>Only operator-approved entries are public or used in recommendations. Approval means reviewed, not proven genuine. Six-case token counts and durations are checked and throughput is recomputed. Identical submissions are deduplicated; entries are not counts of independent users. Tags may change over time; artifact identity is shown when available. No claim of representative or tamper-proof results. Uploads require expiring single-use vouchers.</p>
-<button id="load" type="button">Load all entries / refresh</button><p id="status" role="status"></p>
-<div class="scroll"><table><caption>All shared entries · select a column heading to sort</caption><thead><tr id="headings"></tr></thead><tbody id="entries"></tbody></table></div>
-</main></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Llameros · Community benchmarks</title>
+  <link rel="icon" href="brand/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="brand/style.css"><link rel="stylesheet" href="table.css">
+  <script src="table.js" defer></script>
+</head>
+<body class="statistics-site">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header>
+    <div class="brand"><img class="brand-logo" src="brand/logo.svg" alt="Llameros llama and circuit saddle logo" width="72" height="72"><div><span class="eyebrow">YOUR LOCAL MODEL CARAVAN</span><h1>Llameros<span aria-hidden="true">●</span></h1></div></div>
+    <nav class="actions" aria-label="Benchmark server"><a class="nav-link" href="./" aria-current="page">Public benchmarks</a><a class="nav-link" href="admin" >Administration</a></nav>
+  </header>
+  <main id="main-content" tabindex="-1">
+    <section class="intro"><div><span class="eyebrow">COMMUNITY BENCHMARKS</span><h2>Local hardware.<br>Shared discoveries.</h2><p class="intro-copy">Explore operator-reviewed Ollama measurements from the community. Find a useful starting point for your hardware—not a model quality score.</p></div><div class="intro-note"><span class="status-pill">Privacy-conscious by design</span><p>No contributor accounts, analytics or client IP database.</p></div></section>
+    <div class="benchmark-principles" aria-label="How these results work">
+      <section class="card"><span class="eyebrow">01 · MEASURE</span><h3>Six consistent cases</h3><p>Token counts and durations are checked, and throughput is recomputed from the submitted evidence.</p></section>
+      <section class="card"><span class="eyebrow">02 · REVIEW</span><h3>Reviewed, not proven</h3><p>Only operator-approved results are published. Approval is not proof of genuine hardware or representative performance.</p></section>
+      <section class="card"><span class="eyebrow">03 · COMPARE</span><h3>Match the conditions</h3><p>Compare the same workload, timing method and settings. Chat output and embedding input throughput are not comparable.</p></section>
+    </div>
+    <section class="card results-card" aria-labelledby="results-heading">
+      <div class="section-head"><div><span class="eyebrow">PUBLIC RESULTS</span><h3 id="results-heading">Find your next model</h3></div><button id="load" class="primary" type="button">Refresh benchmarks</button></div>
+      <p id="status" class="status-line" role="status" aria-live="polite">Loading community measurements…</p>
+      <div class="scroll table-wrap" tabindex="0" role="region" aria-label="Public benchmark results"><table><caption>All approved shared entries · select a column heading to sort · scroll horizontally for hardware and settings</caption><thead><tr id="headings"></tr></thead><tbody id="entries"></tbody></table></div>
+    </section>
+    <details class="card methodology"><summary>Read the measurements responsibly</summary><p>These are voluntarily shared, unverified community measurements, not model quality scores. CPU/core/memory categories are coarse; equal categories do not imply identical machines. Request and generation timing are not comparable.</p><p>Identical submissions are deduplicated; entries are not counts of independent users. Tags may change over time; artifact identity is shown when available. There is no claim of representative or tamper-proof results. Uploads require expiring single-use vouchers, and pending or rejected submissions remain private.</p></details>
+  </main>
+  <footer><span>LLAMEROS · USER-SPACE CONTROL · LOCAL-FIRST</span><div class="footer-links"><a href="https://github.com/keuperj/Llameros" target="_blank" rel="noopener noreferrer">View on GitHub <span aria-hidden="true">↗</span></a><a href="https://www.llm-praxis.de/" target="_blank" rel="noopener noreferrer">maintained by LLM-Praxis</a></div><div class="footer-logos"><img src="brand/bmftr.png" alt="Federal Ministry of Research, Technology and Space" width="73" height="40"><img src="brand/forschung-an-haw.png" alt="Forschung an HAW" width="60" height="40"></div></footer>
+</body>
+</html>

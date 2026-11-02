@@ -1,2 +1,61 @@
-body{font:16px system-ui,sans-serif;margin:2rem;background:#121923;color:#e6edf3}main{max-width:1600px;margin:auto}button{font:inherit;padding:.5rem;cursor:pointer}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #526071;padding:.6rem;text-align:left;white-space:nowrap}.scroll{overflow:auto}caption{text-align:left;padding:1rem}p{max-width:100ch;line-height:1.5}
-a{color:#a9d7ff}label{display:block;margin:.75rem 0}input,select{font:inherit;padding:.5rem;margin-left:.5rem}pre{max-width:60ch;max-height:28rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}td{vertical-align:top}td button{display:block;margin:.4rem 0}button:disabled{cursor:default;opacity:.6}[hidden]{display:none!important}#feedback{min-height:1.5em}#voucher-secret{width:min(35rem,80vw)}
+/* Benchmark-specific layout, layered over the main dashboard's shared style. */
+.statistics-site{min-height:100vh;display:flex;flex-direction:column}
+.statistics-site>header,.statistics-site>main,.statistics-site>footer{width:100%}
+.statistics-site>main{flex:1;min-width:0}
+.statistics-site>header{flex-wrap:wrap}
+.statistics-site a{color:var(--green)}
+.statistics-site a:focus-visible,.statistics-site summary:focus-visible,.scroll:focus-visible{outline:2px solid var(--green);outline-offset:4px}
+.skip-link{position:absolute;left:16px;top:-100px;z-index:10;padding:12px 18px;background:var(--card);border:1px solid var(--green);border-radius:8px}
+.skip-link:focus{top:12px}
+.statistics-site .nav-link{padding:9px 13px;border:1px solid transparent;border-radius:8px;text-decoration:none;font-weight:600}
+.statistics-site .nav-link:hover,.statistics-site .nav-link[aria-current=page]{background:var(--card);border-color:var(--line)}
+.intro-copy{max-width:62ch;margin-bottom:0}
+.intro-note{max-width:260px;flex-shrink:0}
+.status-pill{display:inline-block;border:1px solid var(--line);background:var(--card);color:var(--green);border-radius:999px;padding:8px 13px;font-size:12px;font-weight:600}
+.benchmark-principles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin:12px 0 24px}
+.benchmark-principles .card{margin:0;padding:22px}
+.benchmark-principles h3{font-size:18px;margin:10px 0}
+.benchmark-principles p{margin-bottom:0;font-size:14px}
+.statistics-site .card{min-width:0}
+.statistics-site .section-head{flex-wrap:wrap}
+.statistics-site .section-head h3{margin-bottom:0}
+.statistics-site .status-line{min-height:1.6em;overflow-wrap:anywhere}
+.statistics-site #feedback:not(:empty){padding:12px 16px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--green)}
+.statistics-site .scroll{overflow:auto;max-height:70vh;scrollbar-gutter:stable;border:1px solid var(--line);border-radius:10px;margin:18px 0 0}
+.statistics-site table{width:100%;border-collapse:separate;border-spacing:0;margin:0;font-size:13px}
+.statistics-site caption{text-align:left;padding:14px 16px;color:var(--muted);font-size:12px;background:var(--bg)}
+.statistics-site th,.statistics-site td{padding:13px 16px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
+.statistics-site th{position:sticky;top:0;z-index:1;background:var(--card);color:var(--text)}
+.statistics-site th button{border-color:transparent;background:transparent;padding:5px 0;text-align:left;font-size:12px;color:var(--muted)}
+.statistics-site th button:hover,.statistics-site th[aria-sort=ascending] button,.statistics-site th[aria-sort=descending] button{color:var(--green)}
+.statistics-site th[aria-sort=ascending] button::after{content:' ↑'}
+.statistics-site th[aria-sort=descending] button::after{content:' ↓'}
+.statistics-site tbody tr:nth-child(even){background:#151d18}
+.statistics-site tbody tr:hover{background:#253128}
+.statistics-site tbody tr:last-child td{border-bottom:0}
+.statistics-site details>summary{cursor:pointer;color:var(--green);font-weight:600}
+.statistics-site .methodology>summary{font-size:17px}
+.statistics-site .admin-login{max-width:540px;margin:16px auto 28px}
+.statistics-site .admin-login:has(#login-form[hidden]){display:none}
+.statistics-site #login-form{display:block}
+.dashboard-toolbar{margin:10px 0 24px}
+.overview-summary{font-size:16px;line-height:1.9;margin-bottom:0}
+.statistics-site .voucher-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto;gap:16px;align-items:end}
+.voucher-form label{margin:10px 0 0}
+.secret-panel{padding:18px;border:1px solid var(--orange);border-radius:10px;margin-top:24px;background:#27251b}
+#voucher-secret{font-family:ui-monospace,monospace;letter-spacing:.04em}
+.status-filter{min-width:160px;margin:0}
+.moderation-card table{min-width:1250px;table-layout:fixed}
+.moderation-card th,.moderation-card td{white-space:normal;overflow-wrap:anywhere}
+.moderation-card th:nth-child(1){width:210px}
+.moderation-card th:nth-child(2){width:190px}
+.moderation-card th:nth-child(3){width:220px}
+.moderation-card th:nth-child(4){width:170px}
+.moderation-card th:nth-child(5){width:260px}
+.moderation-card th:nth-child(6){width:200px}
+.moderation-card td button{display:block;width:100%;white-space:normal;margin:0 0 10px}
+.moderation-card pre{max-height:28rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:var(--bg);border-radius:8px;font-size:12px}
+.pagination{margin-top:20px;justify-content:flex-end}
+.statistics-site>footer{gap:18px;flex-wrap:wrap}
+@media(max-width:800px){.benchmark-principles{grid-template-columns:1fr}.statistics-site .intro{align-items:flex-start;flex-direction:column}.intro-note{max-width:none}.statistics-site .voucher-form{grid-template-columns:repeat(2,minmax(0,1fr))}.voucher-form button{grid-column:1/-1}}
+@media(max-width:520px){.statistics-site>header,.statistics-site>main,.statistics-site>footer{padding:20px 16px}.statistics-site header nav{width:100%}.statistics-site .card{padding:20px 16px}.statistics-site .voucher-form{grid-template-columns:1fr}.statistics-site .nav-link{padding:8px 10px}.statistics-site .section-head>.primary{width:100%}.statistics-site .brand-logo{width:56px;height:56px}.statistics-site h1{font-size:28px}.statistics-site th,.statistics-site td{padding:10px 12px}}

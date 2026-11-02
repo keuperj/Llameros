@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
+import llameros
 from llameros.benchmark_exchange import VoucherUpload
 from llameros.body_limits import BodyLimits
 
@@ -61,7 +62,7 @@ def create_app(
             response = await call_next(request)
         response.headers.update(
             {
-                "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+                "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
                 "Referrer-Policy": "no-referrer",
                 "X-Content-Type-Options": "nosniff",
                 "Cache-Control": "no-store",
@@ -86,6 +87,21 @@ def create_app(
     @app.get("/table.css")
     def style():
         return FileResponse(Path(__file__).parent / "table.css", media_type="text/css")
+
+    @app.get("/brand/{name}")
+    def branding(name: str):
+        """Reuse packaged dashboard branding without exposing other application assets."""
+        assets = {
+            "style.css": "text/css",
+            "logo.svg": "image/svg+xml",
+            "bmftr.png": "image/png",
+            "forschung-an-haw.png": "image/png",
+        }
+        if name not in assets:
+            raise HTTPException(404, "Asset not found")
+        return FileResponse(
+            Path(llameros.__file__).parent / "static" / name, media_type=assets[name]
+        )
 
     @app.get("/api/v1/benchmarks")
     def entries(offset: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
