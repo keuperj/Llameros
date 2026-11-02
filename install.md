@@ -24,9 +24,8 @@ uv run llameros
 - To customize settings, copy the example without overwriting an existing config:
 
 ```bash
-mkdir -p "$HOME/.config/llameros"
-cp -n config.example.toml "$HOME/.config/llameros/config.toml"
-uv run llameros --config "$HOME/.config/llameros/config.toml"
+cp -n config.example.toml config.toml
+uv run llameros --config config.toml
 ```
 
 - CLI overrides: `--config`, `--host`, `--port`. Without `uv`, use
@@ -37,12 +36,13 @@ uv run llameros --config "$HOME/.config/llameros/config.toml"
 
 - Use a **user service** under the same account as Llameros and rootless Docker.
   Complete installation first and stop any manually started Llameros process.
-- This unit assumes `$HOME/Llameros`; replace both `%h/Llameros` paths if needed.
-  `%h` is the home directory; `%t` is the user runtime directory.
+- Place the checkout in `Llameros` relative to your login home. Run the commands
+  below from that checkout. Adjust the unit's home-relative `cd` target if needed.
+  `%t` is the user runtime directory for the Docker socket.
 
 ```bash
-mkdir -p "$HOME/.config/systemd/user"
-cat > "$HOME/.config/systemd/user/llameros.service" <<'EOF'
+mkdir -p ../.config/systemd/user
+cat > ../.config/systemd/user/llameros.service <<'EOF'
 [Unit]
 Description=Llameros HTTPS dashboard
 Wants=docker.service
@@ -50,9 +50,7 @@ After=docker.service
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Llameros
-ExecStart=%h/Llameros/.venv/bin/llameros
-Environment="PATH=%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=sh -c 'cd Llameros && exec .venv/bin/llameros --config config.toml'
 Environment=DOCKER_HOST=unix://%t/docker.sock
 UnsetEnvironment=DOCKER_CONTEXT
 Restart=on-failure
@@ -70,8 +68,9 @@ systemctl --user status llameros.service --no-pager
 journalctl --user -u llameros.service -n 50 --no-pager
 ```
 
-- The unit uses the installed virtual environment and normal per-user config.
-  Append `--config /absolute/path/to/config.toml` to `ExecStart` for another file.
+- The user service starts in the login home, changes to the checkout and uses
+  its virtual environment and `config.toml`. Copy the example config there first.
+  Change `--config config.toml` for another checkout-relative file.
 - Services do not read shell startup files: adjust `PATH`, `DOCKER_HOST`, and, if
   needed, `DOCKER_CONFIG` to match your installation.
 - **For boot startup and operation after logout**, enable lingering from the
@@ -353,11 +352,11 @@ Only administrators can read this panel or acknowledge failures.
 
 ### Application settings
 
-- Edit `$HOME/.config/llameros/config.toml`; see [all settings](config.example.toml).
-  Restart after changes. Leading `~` expands to the service user's home.
-- Main defaults:
+- Edit `config.toml` in the checkout; see [all settings](config.example.toml).
+  Restart after changes. Relative file paths use the process working directory.
+- Main settings (the example overrides the built-in per-user state location):
   - Listener: `host = "127.0.0.1"`, `port = 8443`.
-  - Private state/TLS/history: `state_dir = "~/.local/share/llameros"`.
+  - Private state/TLS/history in the example: `state_dir = "state"`.
   - PAM/session: `pam_service = "login"`, `session_seconds = 3600` (absolute lifetime).
   - Telemetry: `sample_seconds = 15`, `retention_days = 30`.
   - Models: `context_length = 4096`, `max_loaded_models = 2`, `ollama_num_parallel = 2`.

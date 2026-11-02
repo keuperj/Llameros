@@ -23,15 +23,21 @@ sudo apt-get update
 sudo apt-get install python3 python3-venv python3-pip libpam0g openssl
 ```
 
-Check `python3 --version` is at least 3.11. Install **without sudo**, replacing the
-example checkout `/home/keuper/Projekte/Llameros` with your actual absolute path:
+Check `python3 --version` is at least 3.11. Place the checkout in `Llameros`
+relative to your login home. All commands below run from that checkout:
 
 ```sh
-install -d -m 0700 "$HOME/.local/share/llameros-statistics"
-python3 -m venv "$HOME/.local/share/llameros-statistics/venv"
-"$HOME/.local/share/llameros-statistics/venv/bin/python" -m pip install /home/keuper/Projekte/Llameros
-install -d -m 0700 "$HOME/.local/share/llameros-statistics/state"
-"$HOME/.local/share/llameros-statistics/venv/bin/python" -m statistics_server --help
+cd
+cd Llameros
+```
+
+Install **without sudo**:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install .
+install -d -m 0700 statistics-state
+.venv/bin/python -m statistics_server --help
 ```
 
 This installs the whole project package and assets, but does not start Llameros or
@@ -46,8 +52,8 @@ Never put Linux passwords in a unit, environment variable or command argument.
 Stop any manually running server first. Copy the supplied template:
 
 ```sh
-install -d -m 0700 "$HOME/.config/systemd/user"
-install -m 0600 /home/keuper/Projekte/Llameros/statistics_server/llameros-statistics.service "$HOME/.config/systemd/user/llameros-statistics.service"
+install -d -m 0700 ../.config/systemd/user
+install -m 0600 statistics_server/llameros-statistics.service ../.config/systemd/user/llameros-statistics.service
 ```
 
 The complete template is:
@@ -60,8 +66,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-WorkingDirectory=%h/.local/share/llameros-statistics
-ExecStart=%h/.local/share/llameros-statistics/venv/bin/python -m statistics_server --host 127.0.0.1 --port 9443 --state-dir %h/.local/share/llameros-statistics/state --pam-service login --max-entries 100000
+ExecStart=sh -c 'cd Llameros && exec .venv/bin/python -m statistics_server --host 127.0.0.1 --port 9443 --state-dir statistics-state --pam-service login --max-entries 100000'
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
@@ -74,9 +79,12 @@ LimitCORE=0
 WantedBy=default.target
 ```
 
-`%h` expands to the user's home. There is deliberately **no `User=`/`Group=`**:
+The user manager starts in the login home; the shell changes to `Llameros`
+before executing the relative interpreter path. If you choose another checkout
+location, change that home-relative `cd` target. There is deliberately
+**no `User=`/`Group=`**:
 the process inherits the user manager's account. Do not install this unit under
-`/etc/systemd/system`, manage it with `sudo systemctl`, or run it in root's user
+the system manager's unit directory, manage it with `sudo systemctl`, or run it in root's user
 manager. The UI uses the process's effective owner, not `USER` or `SUDO_USER`.
 
 The template binds **127.0.0.1:9443** for local access. For remote access, change
@@ -84,7 +92,7 @@ The template binds **127.0.0.1:9443** for local access. For remote access, chang
 in host/provider firewalls. Prefer a protected network/VPN for administration.
 
 ```sh
-systemd-analyze --user verify "$HOME/.config/systemd/user/llameros-statistics.service"
+systemd-analyze --user verify ../.config/systemd/user/llameros-statistics.service
 systemctl --user daemon-reload
 systemctl --user enable --now llameros-statistics.service
 systemctl --user status llameros-statistics.service --no-pager
@@ -121,7 +129,7 @@ systemctl --user disable --now llameros-statistics.service
 
 After unit edits, run `systemctl --user daemon-reload` before restarting. Do not
 run duplicate processes/multiple workers to bypass limits. Shell startup files
-are not sourced by the service, so it uses an explicit virtualenv interpreter.
+are not sourced by the service, so it uses a checkout-relative virtualenv interpreter.
 
 Avoid adding `NoNewPrivileges=`, `RestrictSUIDSGID=` or aggressive sandboxing
 without testing host PAM helpers. Never expose shadow files or run as root to
@@ -141,12 +149,12 @@ administrator is now your login user, not the previous dedicated service account
 ## 3. TLS and owner login checks
 
 Startup creates `cert.pem`, `key.pem` and `benchmarks.sqlite3` under
-`$HOME/.local/share/llameros-statistics/state`. Keep the private key mode 0600;
+`statistics-state`. Keep the private key mode 0600;
 never distribute it. The database includes private moderation/voucher data.
 
 Binding to a specific IP includes it in the generated certificate. For wildcard
 binding (`0.0.0.0`) or NAT, supply a certificate with the client-visible IP SAN
-using `--cert-file` and `--key-file` with absolute paths. Llameros connects to
+using `--cert-file` and `--key-file` with checkout-relative paths. Llameros connects to
 literal IPs, so a DNS-only certificate is insufficient for that connection.
 Certificate maintenance happens at startup, not continuously: monitor expiration
 and plan maintenance restarts. Renewal/name changes can regenerate the self-signed
@@ -155,8 +163,8 @@ certificate; update clients' trust whenever its public certificate changes.
 Inspect the certificate through a trusted channel:
 
 ```sh
-openssl x509 -in "$HOME/.local/share/llameros-statistics/state/cert.pem" -noout -dates -fingerprint -sha256
-curl --cacert "$HOME/.local/share/llameros-statistics/state/cert.pem" https://127.0.0.1:9443/api/v1/benchmarks
+openssl x509 -in statistics-state/cert.pem -noout -dates -fingerprint -sha256
+curl --cacert statistics-state/cert.pem https://127.0.0.1:9443/api/v1/benchmarks
 ```
 
 Use the unit's actual IP/port, not necessarily loopback, for the HTTPS check; also
@@ -187,8 +195,8 @@ the browser clears displayed secrets after five minutes or logout. The CLI runs
 as your login user, without sudo:
 
 ```sh
-"$HOME/.local/share/llameros-statistics/venv/bin/python" -m statistics_server.manage --state-dir "$HOME/.local/share/llameros-statistics/state" review
-"$HOME/.local/share/llameros-statistics/venv/bin/python" -m statistics_server.manage --state-dir "$HOME/.local/share/llameros-statistics/state" issue-voucher --max-entries 3 --hours 24
+.venv/bin/python -m statistics_server.manage --state-dir statistics-state review
+.venv/bin/python -m statistics_server.manage --state-dir statistics-state issue-voucher --max-entries 3 --hours 24
 ```
 
 See `README.md` for decision commands. CLI authorization relies on OS access to
@@ -203,9 +211,9 @@ user service **and all CLI writes** before an ordinary file archive. Do not copy
 only an actively written SQLite main file.
 
 ```sh
-install -d -m 0700 "$HOME/.local/state/llameros-statistics-backups"
+install -d -m 0700 backups/statistics
 systemctl --user stop llameros-statistics.service
-(umask 077; tar -C "$HOME/.local/share/llameros-statistics" -czf "$HOME/.local/state/llameros-statistics-backups/state-$(date -u +%Y%m%dT%H%M%SZ).tar.gz" state)
+(umask 077; tar -czf "backups/statistics/state-$(date -u +%Y%m%dT%H%M%SZ).tar.gz" statistics-state)
 systemctl --user start llameros-statistics.service
 ```
 
@@ -219,19 +227,18 @@ alone are not disaster recovery.
 Use SQLite's backup API instead of copying a live file:
 
 ```sh
-install -d -m 0700 "$HOME/.local/state/llameros-statistics-backups"
-"$HOME/.local/share/llameros-statistics/venv/bin/python" - <<'PY'
+install -d -m 0700 backups/statistics
+.venv/bin/python - <<'PY'
 import os
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 os.umask(0o077)
-home = Path.home()
-source_path = home / ".local/share/llameros-statistics/state/benchmarks.sqlite3"
+source_path = Path("statistics-state/benchmarks.sqlite3")
 stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-destination = home / ".local/state/llameros-statistics-backups" / f"benchmarks-{stamp}.sqlite3"
-with sqlite3.connect(source_path.as_uri() + "?mode=ro", uri=True) as source:
+destination = Path("backups/statistics") / f"benchmarks-{stamp}.sqlite3"
+with sqlite3.connect("file:" + source_path.as_posix() + "?mode=ro", uri=True) as source:
     with sqlite3.connect(destination) as backup:
         source.backup(backup)
         if backup.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
@@ -248,8 +255,8 @@ tested scheduler; these instructions do not install a timer.
 
 1. Run `systemctl --user stop llameros-statistics.service` and stop CLI writes.
    Preserve current state for rollback.
-2. Verify/decrypt a trusted archive in private staging. Restore its `state`
-   directory into `$HOME/.local/share/llameros-statistics`. For a database-only
+2. Verify/decrypt a trusted archive in private staging. Restore its `statistics-state`
+   directory into the checkout. For a database-only
    restore, replace the database set while stopped; never mix an old WAL/SHM or
    journal with a snapshot from another time.
 3. Ensure ownership belongs to your login user, directories are 0700 and
@@ -258,11 +265,11 @@ tested scheduler; these instructions do not install a timer.
    old redemption flags otherwise makes previously consumed vouchers usable again:
 
 ```sh
-"$HOME/.local/share/llameros-statistics/venv/bin/python" - <<'PY'
+.venv/bin/python - <<'PY'
 import sqlite3
 from pathlib import Path
 
-database = Path.home() / ".local/share/llameros-statistics/state/benchmarks.sqlite3"
+database = Path("statistics-state/benchmarks.sqlite3")
 with sqlite3.connect(database) as db:
     if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
         raise RuntimeError("Restored database integrity check failed")

@@ -104,7 +104,7 @@ gateway (no model loads, container changes or insecure TLS bypass):
 ```bash
 export LLAMEROS_API_KEY='your-issued-key'
 uv run python scripts/check_api_compatibility.py \
-  --ca "$HOME/.local/share/llameros/cert.pem" \
+  --ca state/cert.pem \
   --model your-loaded-chat-model --embedding-model your-loaded-embedding-model \
   --vision-model your-loaded-vision-model --image path/to/image.png \
   --target cpu

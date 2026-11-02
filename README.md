@@ -72,7 +72,7 @@ set your key and verified server certificate or CA bundle in Bash:
 ```bash
 read -rsp 'Llameros API key: ' LLAMEROS_API_KEY; echo
 export LLAMEROS_API_KEY
-export LLAMEROS_CA_CERT="/absolute/path/to/verified-llameros-certificate.pem"
+export LLAMEROS_CA_CERT="certificates/verified-llameros-certificate.pem"
 ```
 
 Use the HTTPS address shown under **Access model** and adjust the model tag and

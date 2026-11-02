@@ -8,3 +8,7 @@ dist/
 .coverage
 *.sqlite3*
 *.pem
+config.toml
+state/
+statistics-state/
+backups/

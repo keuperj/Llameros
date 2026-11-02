@@ -221,7 +221,7 @@ must not count as passes.
 | Locked Python OSV lookup | 29 packages; no advisory IDs; exit 2, overall assurance incomplete |
 | Docker Scout | Unavailable; no image scan |
 
-Fresh evidence is retained locally under `/tmp/llameros-audit-*`: test logs,
+Fresh evidence is retained locally under local temporary `llameros-audit-*` directories: test logs,
 security JSON, probe scripts and JSON outputs. These are ephemeral, not durable
 release evidence; material observations are recorded here. Focused probes use
 fake authentication, temporary state and mock upstreams, not real credentials/models.

@@ -14,15 +14,16 @@ A ready-to-copy systemd **user service** template is provided as
 `llameros-statistics.service`; install it under your login user's user manager
 and review its paths and bind IP before use. That login user is the PAM UI owner.
 
-From the repository, install the project into a virtual environment and run:
+From the repository root, install the project into a virtual environment and run.
+All file paths below are relative to that root:
 
 ```sh
 python -m pip install .
-python -m statistics_server --host 192.0.2.10 --port 9443 --state-dir /srv/llameros-statistics
+python -m statistics_server --host 192.0.2.10 --port 9443 --state-dir statistics-state
 ```
 
 Replace the example IP with the server's actual reachable IP. The process must
-own its state directory. Run as an unprivileged dedicated service account, not
+own its state directory. Run as your unprivileged login account, not
 root. The bind IP and port are configurable (`--help` lists all options).
 Binding directly to the reachable IP ensures the generated certificate contains
 that IP. When binding to `0.0.0.0`, supply a certificate with the actual reachable
@@ -36,7 +37,7 @@ the key. Renewal of a self-signed certificate requires updating client trust.
 Obtain the **public** `cert.pem` via a trusted channel. Compare its fingerprint:
 
 ```sh
-openssl x509 -in /srv/llameros-statistics/cert.pem -noout -fingerprint -sha256
+openssl x509 -in statistics-state/cert.pem -noout -fingerprint -sha256
 ```
 
 Never distribute `key.pem`. On each Llameros instance, in admin Configuration →
@@ -182,8 +183,8 @@ as the running service. The CLI remains available for offline operations.
 Issue one voucher (default 10 entries, expires in 72 hours):
 
 ```sh
-python -m statistics_server.manage --state-dir /srv/llameros-statistics issue-voucher
-python -m statistics_server.manage --state-dir /srv/llameros-statistics issue-voucher --max-entries 3 --hours 24
+python -m statistics_server.manage --state-dir statistics-state issue-voucher
+python -m statistics_server.manage --state-dir statistics-state issue-voucher --max-entries 3 --hours 24
 ```
 
 The secret is printed once; deliver it through a private channel. Do not record
@@ -208,10 +209,10 @@ Review the private moderation queue (default first 100 records; up to 1,000 with
 `--limit`). The JSON includes the public-payload digest needed for moderation:
 
 ```sh
-python -m statistics_server.manage --state-dir /srv/llameros-statistics review
-python -m statistics_server.manage --state-dir /srv/llameros-statistics review --status approved --limit 1000
-python -m statistics_server.manage --state-dir /srv/llameros-statistics approve PAYLOAD_DIGEST
-python -m statistics_server.manage --state-dir /srv/llameros-statistics reject PAYLOAD_DIGEST
+python -m statistics_server.manage --state-dir statistics-state review
+python -m statistics_server.manage --state-dir statistics-state review --status approved --limit 1000
+python -m statistics_server.manage --state-dir statistics-state approve PAYLOAD_DIGEST
+python -m statistics_server.manage --state-dir statistics-state reject PAYLOAD_DIGEST
 ```
 
 Replace `PAYLOAD_DIGEST` with a digest from review output. Rejection also removes a

@@ -5,8 +5,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-WorkingDirectory=%h/.local/share/llameros-statistics
-ExecStart=%h/.local/share/llameros-statistics/venv/bin/python -m statistics_server --host 127.0.0.1 --port 9443 --state-dir %h/.local/share/llameros-statistics/state --pam-service login --max-entries 100000
+ExecStart=sh -c 'cd Llameros && exec .venv/bin/python -m statistics_server --host 127.0.0.1 --port 9443 --state-dir statistics-state --pam-service login --max-entries 100000'
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

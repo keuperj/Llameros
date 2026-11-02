@@ -1,8 +1,8 @@
-# Copy to ~/.config/llameros/config.toml and edit as needed.
+# Copy to config.toml in the checkout and pass --config config.toml.
 host = "127.0.0.1"
 port = 8443
-# The leading ~ is expanded to the current user's home directory.
-state_dir = "~/.local/share/llameros"
+# Relative paths are resolved from the process working directory.
+state_dir = "state"
 # Choose the model directory in the GUI's Model storage panel. Its preference
 # is persisted separately inside state_dir; empty GUI path uses a Docker volume.
 

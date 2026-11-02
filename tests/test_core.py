@@ -456,12 +456,12 @@ def test_config(tmp_path):
         Settings(port=80)
 
 
-def test_example_config_uses_current_home(tmp_path, monkeypatch):
-    """Verify example config uses current home."""
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_example_config_uses_working_directory(tmp_path, monkeypatch):
+    """Resolve the portable example's relative state path from the working directory."""
     example = Path(__file__).resolve().parents[1] / "config.example.toml"
+    monkeypatch.chdir(tmp_path)
     settings = load_settings(example)
-    assert settings.state_dir == tmp_path / ".local/share/llameros"
+    assert settings.state_dir == tmp_path / "state"
     assert not settings.allow_rootful_docker
 
 
