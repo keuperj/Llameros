@@ -8,6 +8,11 @@ host account running the service and its PAM password.
 
 ## Setup
 
+For the complete installation, **systemd service configuration**, TLS verification,
+operations and **backup/restore** procedures, see `DEPLOYMENT.md` in this directory.
+A ready-to-copy system service template is provided as
+`llameros-statistics.service`; review its paths/account and bind IP before use.
+
 From the repository, install the project into a virtual environment and run:
 
 ```sh

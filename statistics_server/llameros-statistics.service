@@ -1,0 +1,23 @@
+[Unit]
+Description=Llameros benchmark statistics HTTPS server
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=llameros-statistics
+Group=llameros-statistics
+WorkingDirectory=/opt/llameros-statistics
+ExecStart=/opt/llameros-statistics/.venv/bin/python -m statistics_server --host 127.0.0.1 --port 9443 --state-dir /var/lib/llameros-statistics --pam-service login --max-entries 100000
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+LimitCORE=0
+
+[Install]
+WantedBy=multi-user.target
