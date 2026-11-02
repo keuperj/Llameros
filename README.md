@@ -112,6 +112,11 @@ Use the API key, not your Linux password. Keep TLS verification enabled and keys
 private; unset `LLAMEROS_API_KEY` after use and revoke unwanted keys in the dashboard.
 See [API compatibility](api-compatibility.md) for other endpoints and streaming.
 
+## Share your Benchmarks
+Llameros collects the benchmarking results of Ollama models and uses them to give better model suggestions.
+
+[View public benchmark results on the default benchmark server](https://92.205.18.100:9443/).
+
 ## Documentation
 
 | Guide | Contents |
@@ -138,4 +143,4 @@ Supported by
   <img src="src/llameros/static/forschung-an-haw.png" alt="Forschung an HAW"  height="160">
 </p>
 
-[View public benchmark results on the default benchmark server](https://92.205.18.100:9443/).
+
