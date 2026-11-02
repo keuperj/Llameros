@@ -62,10 +62,14 @@ automatically save trust. Select **Save benchmark server settings**, with commun
 benchmarks enabled, then use **Share benchmarks** and confirm the payload separately.
 
 Alternatively, paste the verified public PEM directly into the certificate field.
-For `RunFullbenchmark.py`, save that same public PEM to a local file and pass
-`--ca-cert certificates/statistics-cert.pem`. Both upload paths support explicitly
-trusted self-signed certificates, including older generated certificates on newer
-Python versions. TLS signature, expiry and destination IP checks remain enabled;
+The `RunFullbenchmark.py` runner automatically retrieves and saves a first-use
+trust anchor in its run directory when `--ca-cert` is omitted, so no certificate
+download is required. This TOFU mode cannot independently authenticate the first
+connection; `--confirm-share` includes consent to that limitation. For verified
+trust from the first connection, save the public PEM locally and pass
+`--ca-cert certificates/statistics-cert.pem`. Saved trust is reused on resume, not
+silently refreshed. Both upload paths support trusted self-signed certificates,
+including older generated certificates on newer Python versions. TLS signature, expiry and destination IP checks remain enabled;
 there is no insecure-upload fallback. Expired or wrong-IP certificates must be
 fixed by the server operator. Reconfirm trust when the server certificate changes.
 

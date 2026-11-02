@@ -11,6 +11,7 @@ import httpx
 import pytest
 from test_users import multiuser as multiuser
 
+import RunFullbenchmark as runner
 from llameros.benchmark_exchange import (
     SharingSettings,
     exchange,
@@ -90,6 +91,36 @@ def test_unrelated_certificate_does_not_authorize_upload(https_server, tmp_path)
     with pytest.raises(httpx.ConnectError):
         exchange(trusted, "POST", "/api/v1/benchmarks", {"entries": []})
     assert requests == []
+
+
+def test_runner_first_use_self_signed_trust_is_saved_and_reused(
+    https_server, tmp_path, monkeypatch
+):
+    settings, cert, requests = https_server
+    trusted = runner.upload_policy(settings, tmp_path)
+    assert trusted.ca_certificate == cert.read_text()
+    assert requests == []
+    path = tmp_path / "server-trust.json"
+    assert path.stat().st_mode & 0o077 == 0
+    assert json.loads(path.read_text())[settings.url] == cert.read_text()
+
+    def forbidden(*args):
+        pytest.fail("Existing trust must not be silently refreshed")
+
+    monkeypatch.setattr(runner, "inspect_server_certificate", forbidden)
+    assert runner.upload_policy(settings, tmp_path) == trusted
+    assert exchange(trusted, "POST", "/api/v1/benchmarks", {"entries": []})["accepted"] == 1
+    assert requests == [{"entries": []}]
+
+
+def test_runner_explicit_certificate_does_not_use_first_use_trust(tmp_path, monkeypatch):
+    cert, _ = certificates(Settings(host="127.0.0.1", state_dir=tmp_path))
+    settings = SharingSettings(enabled=True, host="127.0.0.1", ca_certificate=cert.read_text())
+    monkeypatch.setattr(
+        runner, "inspect_server_certificate", lambda *args: pytest.fail("No discovery")
+    )
+    assert runner.upload_policy(settings, tmp_path) == settings
+    assert not (tmp_path / "server-trust.json").exists()
 
 
 def test_certificate_inspection_admin_only_and_does_not_save_trust(multiuser, monkeypatch):

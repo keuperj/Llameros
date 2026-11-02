@@ -219,6 +219,125 @@ def test_status_without_run(tmp_path, capsys):
     assert not json.loads(capsys.readouterr().out)["running"]
 
 
+def test_invalid_gpu_target_lists_supported_ids(monkeypatch, tmp_path):
+    args = options(tmp_path)
+    args.target = ["gpu0"]
+    monkeypatch.setattr(
+        runner,
+        "Runtimes",
+        lambda *a: SimpleNamespace(
+            targets={
+                "cpu": {"id": "cpu", "supported": True},
+                "gpu-example": {"id": "gpu-example", "supported": True},
+            }
+        ),
+    )
+    with pytest.raises(runner.RunnerConfigurationError, match="cpu, gpu-example"):
+        runner.run(args, tmp_path)
+
+
+def test_list_gpus_is_read_only_and_needs_no_consent(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(
+        runner,
+        "snapshot",
+        lambda: {
+            "gpus": [
+                {"id": "GPU-example", "vendor": "nvidia", "name": "Example GPU"},
+                {"id": "unsupported", "vendor": "other", "name": "Other GPU"},
+            ]
+        },
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Listing must not create runtime storage or contact Docker/network")
+
+    monkeypatch.setattr(runner.Runtimes, "__init__", forbidden)
+    monkeypatch.setattr(runner, "inspect_server_certificate", forbidden)
+    folder = tmp_path / "not-created"
+    assert runner.main(["--list-gpus", "--run-dir", str(folder)]) == 0
+    output = capsys.readouterr().out
+    assert "gpu-" in output and "Example GPU" in output
+    assert "supported" in output and "unsupported" in output
+    assert not folder.exists()
+
+
+def test_first_gpu_default_and_resume_selection():
+    targets = {
+        "cpu": {"id": "cpu", "supported": True},
+        "gpu-unsupported": {"id": "gpu-unsupported", "supported": False},
+        "gpu-first": {"id": "gpu-first", "supported": True},
+        "gpu-second": {"id": "gpu-second", "supported": True},
+    }
+    assert [t["id"] for t in runner.select_targets(targets, None, {})] == ["gpu-first"]
+    assert [t["id"] for t in runner.select_targets(targets, ["cpu"], {})] == ["cpu"]
+    state = {"selected_targets": ["gpu-second"]}
+    assert [t["id"] for t in runner.select_targets(targets, None, state)] == ["gpu-second"]
+    legacy = {"jobs": [{"target": "cpu"}, {"target": "gpu-second"}]}
+    assert [t["id"] for t in runner.select_targets(targets, None, legacy)] == ["cpu", "gpu-second"]
+    with pytest.raises(runner.RunnerConfigurationError, match="No CPU fallback"):
+        runner.select_targets({"cpu": targets["cpu"]}, None, {})
+    with pytest.raises(runner.RunnerConfigurationError):
+        runner.select_targets({"cpu": targets["cpu"]}, None, state)
+
+
+def test_upload_automatically_establishes_trust_before_sending(monkeypatch, tmp_path):
+    policy = runner.SharingSettings(enabled=True)
+    calls = []
+    monkeypatch.setattr(runner, "upload_policy", lambda p, f: calls.append("trust") or p)
+    state = {"results": [{"status": "completed", "entry": {}}]}
+    runner.upload(state, tmp_path, policy, send=lambda *args: calls.append("upload"))
+    assert calls == ["trust", "upload"]
+
+
+def test_trust_failure_does_not_mark_reports_uncertain(monkeypatch, tmp_path):
+    def fail(*args):
+        raise runner.RunnerConfigurationError("Certificate unavailable")
+
+    monkeypatch.setattr(runner, "upload_policy", fail)
+    state = {"results": [{"status": "completed", "entry": {}}]}
+    with pytest.raises(runner.RunnerConfigurationError):
+        runner.upload(state, tmp_path, runner.SharingSettings(enabled=True))
+    assert "upload" not in state["results"][0]
+
+
+def test_resume_mismatch_names_changed_options_without_altering_checkpoint(tmp_path):
+    args = options(tmp_path)
+    state = {
+        "configuration": {
+            "context": args.context,
+            "destination": "https://127.0.0.1:9443",
+            "families": args.family,
+            "targets": ["gpu-old"],
+            "rootful": args.allow_rootful_docker,
+        },
+        "results": [],
+    }
+    runner.write_json(tmp_path / "status.json", state)
+    with pytest.raises(runner.RunnerConfigurationError, match=r"differs \(targets\)"):
+        runner.run(args, tmp_path)
+    assert json.loads((tmp_path / "status.json").read_text()) == state
+
+
+def test_cli_displays_safe_configuration_reason(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(runner.os, "geteuid", lambda: 1000)
+
+    def invalid(*args):
+        raise runner.RunnerConfigurationError("Supported target IDs: cpu, gpu-example")
+
+    monkeypatch.setattr(runner, "run", invalid)
+    previous = runner.signal.getsignal(runner.signal.SIGTERM)
+    old_mask = runner.os.umask(0o077)
+    try:
+        assert (
+            runner.main(["start", "--foreground", "--confirm-share", "--run-dir", str(tmp_path)])
+            == 1
+        )
+    finally:
+        runner.signal.signal(runner.signal.SIGTERM, previous)
+        runner.os.umask(old_mask)
+    assert "Supported target IDs: cpu, gpu-example" in capsys.readouterr().err
+
+
 def test_worker_deadline_terminates_process():
     started = time.monotonic()
     assert not runner.bounded(time.sleep, (30,), 0.1)

@@ -22,24 +22,51 @@ with `--allow-rootful-docker`. Stop other inference jobs before benchmarking;
 competing workloads invalidate measurements and consume memory needed by models.
 
 The runner creates **separate containers and a separate model volume per run
-directory**, not the application's runtimes or model library. It benchmarks CPU
-and each supported isolated GPU sequentially by default. Internal target IDs are
-recorded locally in the progress/plan; only coarse hardware buckets leave the host.
-Use `--target cpu` for CPU only, or repeat `--target` with existing GPU target IDs.
+directory**, not the application's runtimes or model library. New runs benchmark
+**only the first supported GPU**, in hardware discovery order. CPU benchmarking
+requires explicit `--target cpu`; a machine without a supported GPU stops with an
+explanation instead of falling back to CPU.
+
+List GPU IDs, names and support status without starting Docker, creating runtime
+storage, accessing the statistics server, or requiring upload consent:
+
+```sh
+uv run --no-sync python RunFullbenchmark.py --list-gpus
+```
+
+Use `--target gpu-<hash>` to select a particular GPU, or repeat `--target` for
+multiple devices. These stable IDs are not `gpu0`/`gpu1`. Internal target IDs stay
+in the local plan; only coarse hardware buckets are uploaded. Automatic selection
+is saved in the checkpoint, so resume does not switch to a different GPU if device
+order changes. Older checkpoints preserve their original job targets, including
+CPU jobs. Keep the original command options when resuming; use another `--run-dir`
+for a deliberately different plan, preserving the old checkpoint for recovery.
 
 ### Configure uploads
 
 Uploads are open to anyone; no token or contributor account is required. Every
 submitted result stays private until an administrator confirms it.
 
-Obtain the server's public certificate through a trusted channel and save it as
-`certificates/statistics-cert.pem`. The file must contain no private key. TLS
-verification is mandatory; omit `--ca-cert` only for system-trusted certificates.
-Self-signed certificates are supported through this explicit trust file, including
-older generated certificates on newer Python versions. Compare the public PEM's
-SHA-256 fingerprint with the operator through a separate trusted channel before
-use. Expired certificates and certificates lacking the destination IP SAN are
-still rejected; the runner never falls back to unverified uploads.
+No manual certificate download is required, including for self-signed HTTPS
+servers. Without `--ca-cert`, the runner automatically retrieves and saves the
+server certificate on first upload in `server-trust.json` inside the private run
+directory. It prints the destination and SHA-256 fingerprint. This is **trust on
+first use (TOFU)**: the initial server identity is not independently authenticated
+and an attacker on that first connection could impersonate it. `--confirm-share`
+includes consent to this first-use trust behavior. No benchmark payload is sent
+during certificate discovery.
+
+Later uploads/resumes reuse the saved trust anchor and never silently replace it.
+The TLS chain, expiry and destination IP SAN are still verified. Certificate
+renewal/replacement may require deliberate trust updates; back up the trust file,
+verify the replacement fingerprint independently, and use `--ca-cert` to override
+with the verified public PEM. Do not delete trust state to bypass an unexplained
+certificate change. A new run directory establishes new first-use trust.
+
+For authenticated trust from the first connection, obtain a public PEM through a
+trusted channel and pass `--ca-cert certificates/statistics-cert.pem`. This takes
+precedence over TOFU. Never supply a private key. There is no fallback to unverified
+benchmark uploads, and expired or wrong-IP certificates are rejected.
 
 ## Start in the background
 
@@ -49,7 +76,6 @@ when using another statistics server:
 ```sh
 uv run --no-sync python RunFullbenchmark.py start \
   --server 92.205.18.100 --port 9443 \
-  --ca-cert certificates/statistics-cert.pem \
   --confirm-share
 ```
 
@@ -61,6 +87,10 @@ install or start a systemd service automatically.
 
 Options:
 
+- `--list-gpus`: show GPU IDs/names/support and exit, without starting a run.
+- `--target gpu-<hash>`: choose a GPU; default is the first supported GPU only.
+  Repeat for multiple targets, or use `--target cpu` for explicit CPU benchmarks.
+- `--ca-cert certificates/statistics-cert.pem`: verified trust instead of automatic TOFU.
 - `--family gemma3 --family embeddinggemma`: limit discovery to those families.
 - `--context 4096`: context size (default 4096); parallelism is fixed at one.
 - `--model-timeout 3600`: maximum seconds per download + load + evaluation.
@@ -90,6 +120,7 @@ total is still being built. No reliable completion ETA is promised. Files:
   cleanup outcomes, and upload states.
 - `fullbenchmark/progress.json`: latest worker/catalogue progress, with timestamp;
   it may describe the previous job when no new event has arrived.
+- `fullbenchmark/server-trust.json`: private per-destination first-use trust anchors.
 - `fullbenchmark/run.log`: per-model completion reports and safe failure messages.
 
 Send SIGTERM to the reported supervisor PID for a graceful stop. The active child

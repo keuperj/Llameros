@@ -32,8 +32,13 @@ class Runtimes:
 
     def refresh(self):
         """Rebuild supported hardware targets with stable hashed GPU IDs and validated device paths."""
+        self.targets = self.hardware_targets(self.hardware())
+
+    @staticmethod
+    def hardware_targets(hardware):
+        """Describe targets without opening storage, contacting Docker, or creating slots."""
         targets = [{"id": "cpu", "label": "CPU", "vendor": "cpu", "supported": True}]
-        for index, gpu in enumerate(self.hardware()["gpus"]):
+        for index, gpu in enumerate(hardware["gpus"]):
             identity = gpu.get("id", f"unidentified-{index}")
             vendor = gpu["vendor"]
             device = identity if vendor == "nvidia" else gpu.get("render_device", "")
@@ -52,7 +57,7 @@ class Runtimes:
                     "supported": supported,
                 }
             )
-        self.targets = {target["id"]: target for target in targets}
+        return {target["id"]: target for target in targets}
 
     def client(self, target_id="cpu", *, register=False):
         """Resolve a slot under the registry lock, optionally persisting its port assignment."""

@@ -16,13 +16,23 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from llameros.benchmark import measure
-from llameros.benchmark_exchange import SharingSettings, exchange, hardware_profile, shareable
+from llameros.benchmark_exchange import (
+    SharingSettings,
+    exchange,
+    hardware_profile,
+    inspect_server_certificate,
+    shareable,
+)
 from llameros.catalog import Catalog, validate_model
 from llameros.config import Settings
 from llameros.filesystem import trusted_directory
 from llameros.hardware import assess_fit, snapshot
 from llameros.model_storage import write_json
 from llameros.runtimes import Runtimes
+
+
+class RunnerConfigurationError(ValueError):
+    """Locally generated, safe-to-display configuration diagnostics."""
 
 
 @dataclass(frozen=True)
@@ -149,11 +159,58 @@ def bounded(function, args, seconds):
     return process.exitcode == 0
 
 
+def upload_policy(policy, folder):
+    """Trust on first use per destination/run; never silently replace a saved anchor."""
+    if policy.ca_certificate:
+        return policy
+    path = folder / "server-trust.json"
+    anchors = read_json(path, {})
+    if policy.url not in anchors:
+        try:
+            certificate = inspect_server_certificate(policy)
+        except (OSError, ValueError):
+            raise RunnerConfigurationError(
+                "Cannot establish server certificate trust. Check server reachability, "
+                "certificate expiry and destination IP SAN. No upload was attempted."
+            ) from None
+        anchors[policy.url] = certificate["ca_certificate"]
+        write_json(path, anchors)
+        print(
+            f"First-use TLS trust saved for {policy.url}; SHA-256 {certificate['sha256']}. "
+            "Initial trust was not independently authenticated. Use --ca-cert for verified trust.",
+            flush=True,
+        )
+    return SharingSettings(**{**policy.model_dump(), "ca_certificate": anchors[policy.url]})
+
+
+def select_targets(available, requested, state):
+    """Pin automatic selection in checkpoints; never silently resume on another GPU."""
+    supported = {key: target for key, target in available.items() if target["supported"]}
+    selected = requested
+    if not selected:
+        selected = state.get("selected_targets")
+        if not selected and state.get("jobs"):
+            # Preserve existing pre-GPU-default plans, including any CPU jobs.
+            selected = list(dict.fromkeys(job["target"] for job in state["jobs"]))
+        if not selected:
+            selected = [key for key in supported if key != "cpu"][:1]
+    if not selected or set(selected) - supported.keys():
+        raise RunnerConfigurationError(
+            "Requested/default GPU target is unavailable. Supported target IDs: "
+            f"{', '.join(supported) or 'none'}. Use --list-gpus to inspect hardware, "
+            "an exact --target gpu-<hash>, or --target cpu for explicit CPU benchmarking. "
+            "No CPU fallback is used by default."
+        )
+    return [supported[key] for key in dict.fromkeys(selected)]
+
+
 def upload(state, folder, policy, send=exchange, pause=time.sleep):
     """Persist upload intent before sending; leave uncertain submissions for manual review."""
     pending = [
         row for row in state["results"] if row["status"] == "completed" and "upload" not in row
     ]
+    if pending and policy is not None:
+        policy = upload_policy(policy, folder)
     for offset in range(0, len(pending), 10):
         if offset:
             # Stay below the statistics server's default 20 uploads/minute.
@@ -203,22 +260,27 @@ def run(args, folder):
     }
     state = read_json(folder / "status.json", {})
     if state and state["configuration"] != fingerprint:
-        raise ValueError("Resume configuration differs; use a separate run directory")
-    state = state or {"configuration": fingerprint, "results": [], "created": time.time()}
-    state.update(pid=os.getpid(), phase="discovery", updated=time.time())
-    write_json(folder / "status.json", state)
+        changed = ", ".join(
+            key for key, value in fingerprint.items() if state["configuration"].get(key) != value
+        )
+        raise RunnerConfigurationError(
+            f"Resume configuration differs ({changed}). Resume with the original options "
+            "or choose a separate --run-dir. Keep the existing checkpoint for recovery."
+        )
 
     def report(value):
         write_json(folder / "progress.json", {**value, "updated": time.time()})
 
     pool = Runtimes(settings, snapshot)
-    targets = [
-        target
-        for target in pool.targets.values()
-        if target["supported"] and (not args.target or target["id"] in args.target)
-    ]
-    if not targets or args.target and set(args.target) - {t["id"] for t in targets}:
-        raise ValueError("Requested hardware target is unavailable")
+    targets = select_targets(pool.targets, args.target, state)
+    state = state or {"configuration": fingerprint, "results": [], "created": time.time()}
+    state.update(
+        pid=os.getpid(),
+        phase="discovery",
+        updated=time.time(),
+        selected_targets=[target["id"] for target in targets],
+    )
+    write_json(folder / "status.json", state)
     if "jobs" not in state:
         jobs, errors, skipped = discover(
             Catalog(), snapshot(), targets, settings, report, args.family
@@ -276,20 +338,33 @@ def run(args, folder):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--list-gpus",
+        action="store_true",
+        help="List local GPU target IDs and support status, without Docker or benchmarks",
+    )
     parser.add_argument("command", choices=["start", "status"], nargs="?", default="start")
     parser.add_argument("--run-dir", type=Path, default=Path("fullbenchmark"))
     parser.add_argument("--server", default="92.205.18.100", help="Statistics server literal IP")
     parser.add_argument("--port", type=int, default=9443)
-    parser.add_argument("--ca-cert", type=Path)
+    parser.add_argument(
+        "--ca-cert",
+        type=Path,
+        help="Verified public PEM; otherwise trust and save the server certificate on first use",
+    )
     parser.add_argument(
         "--confirm-share",
         action="store_true",
-        help="Consent to upload hardware buckets and six-case metrics",
+        help="Consent to uploads and automatic first-use TLS trust unless --ca-cert is provided",
     )
     parser.add_argument(
         "--family", action="append", help="Optional official model family; repeatable"
     )
-    parser.add_argument("--target", action="append", help="Optional CPU/GPU target ID; repeatable")
+    parser.add_argument(
+        "--target",
+        action="append",
+        help="CPU/GPU target ID; repeatable. Default: first supported GPU only, no CPU fallback",
+    )
     parser.add_argument("--context", type=int, default=4096)
     parser.add_argument("--model-timeout", type=int, default=3600)
     parser.add_argument("--cleanup-timeout", type=int, default=300)
@@ -298,6 +373,18 @@ def main(argv=None):
         "--foreground", action="store_true", help="Stay attached instead of detaching"
     )
     args = parser.parse_args(argv)
+    if args.list_gpus:
+        gpus = [
+            target for key, target in Runtimes.hardware_targets(snapshot()).items() if key != "cpu"
+        ]
+        if not gpus:
+            print("No GPUs detected. CPU benchmarking requires --target cpu.")
+        for target in gpus:
+            print(
+                f"{target['id']} · {target['label']} · "
+                f"{'supported' if target['supported'] else 'unsupported'}"
+            )
+        return 0
     folder = args.run_dir
     if args.command == "status":
         state = read_json(folder / "status.json", {})
@@ -382,6 +469,9 @@ def main(argv=None):
         signal.signal(signal.SIGTERM, stop)
         try:
             return run(args, folder)
+        except RunnerConfigurationError as exc:
+            print(f"Run stopped: {exc}", file=sys.stderr)
+            return 1
         except (Exception, KeyboardInterrupt) as exc:
             print(
                 f"Run stopped ({type(exc).__name__}); inspect status and resume with the same arguments",
