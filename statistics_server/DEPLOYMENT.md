@@ -44,7 +44,8 @@ install -d -m 0700 statistics-state
 This creates `.venv` and installs the whole project package and assets using
 `uv.lock`, but does not start Llameros or Docker. `--locked` rejects stale lockfiles
 instead of updating them; `--no-editable` installs a non-editable project package.
-Repeat this sync command after source updates while the service is stopped.
+For source updates, follow section 6 and explicitly reinstall `llameros` while
+the service is stopped; a plain sync is not the update procedure.
 Keep the base Python installation available after reboot. The service invokes
 `.venv/bin/python` directly, so startup does not require uv on the service's PATH
 or synchronize dependencies while handling requests.
@@ -286,16 +287,76 @@ records migrate to pending and still need valid evidence for approval.
 
 ## 6. Updates, privacy and troubleshooting
 
-Back up state, the deployed source revision and `uv.lock`, then stop the user
-service before checking out tested code. From the checkout, update without sudo:
+### Update an existing installation
+
+Run as the service's login user, **without sudo**. Record the deployed source
+revision and preserve its `uv.lock`. Stop the service and any CLI writes, then
+back up the state using section 5 before replacing source files:
 
 ```sh
-uv sync --locked --no-editable
+systemctl --user stop llameros-statistics.service
+cd
+cd Llameros
+git status --short
+git rev-parse HEAD
 ```
 
-Start the user service and verify HTTPS/PAM again. Do not replace code or sync the
-environment while serving requests. Unit edits also need
-`systemctl --user daemon-reload`.
+Update the checkout to the intended tested revision using your normal source
+deployment procedure. Preserve local changes; do not blindly reset or overwrite
+them. From that same checkout, rebuild and reinstall the project:
+
+```sh
+uv sync --locked --no-editable --reinstall-package llameros
+```
+
+**Continue only if installation succeeds.** `--no-editable` installs a separate
+copy of the project in `.venv`. Updating the checkout alone can mix new
+`statistics_server` source with an older installed `llameros` package. Explicit
+`--reinstall-package llameros` prevents relying on automatic rebuild detection,
+including when the project version has not changed. `--locked` preserves the
+tested dependency resolution; do not regenerate the lockfile on the server to
+work around an update failure.
+
+Verify the imports with the same interpreter used by the service. This does not
+start a listener or initialize the database:
+
+```sh
+.venv/bin/python - <<'PY'
+import llameros.benchmark_exchange as exchange
+from statistics_server.app import create_app
+
+assert exchange.PublicUpload
+assert callable(create_app)
+print("Benchmark exchange loaded from:", exchange.__file__)
+print("PublicUpload and statistics server imports: OK")
+PY
+```
+
+If the import check fails, leave the service stopped and resolve the installation
+error first. If you intentionally changed the installed user unit, run
+`systemctl --user daemon-reload`; source-only updates do not require it. Do not
+overwrite a locally customized unit with the template during routine updates.
+
+Start the service, clearing any previous restart-limit failure, and inspect it:
+
+```sh
+systemctl --user reset-failed llameros-statistics.service
+systemctl --user start llameros-statistics.service
+systemctl --user status llameros-statistics.service --no-pager -l
+journalctl --user -u llameros-statistics.service -n 100 --no-pager -o cat
+```
+
+Verify HTTPS using the configured certificate trust and test the owner PAM login
+at `/admin`, the moderation queue, and the public averages table. Keep the existing
+state directory and certificate/key pair; do not delete them to fix import errors.
+If rollback is necessary, stop the service, restore the previous source and lockfile,
+and reinstall that revision explicitly. Restore database state only under a tested
+schema-compatible rollback plan (section 5).
+
+Do not replace code or sync the environment while serving requests. Restarting
+invalidates in-memory admin sessions, so administrators must sign in again.
+
+### Privacy and troubleshooting
 
 The launcher suppresses access logs and request-context error logging. The user
 journal still records lifecycle/startup failures. PAM, OS, firewalls, proxies and
@@ -308,6 +369,7 @@ at the network layer; do not promise complete anonymity.
 | Cannot connect to user bus | Log in directly via SSH/desktop as the intended account; do not use `sudo systemctl --user`. |
 | Stops after logout | Check lingering for the correct account and that its user unit is enabled. |
 | Unit fails immediately | Interpreter/package paths, private user-owned state, `systemctl --user status` and `journalctl --user`. |
+| `ImportError: cannot import name 'PublicUpload'` from `site-packages/llameros` | Checkout and installed package are out of sync. Stop the service, run `uv sync --locked --no-editable --reinstall-package llameros` from the updated checkout, verify imports, then reset the failed state and start as above. No database or bind-address change is needed for this error. |
 | Address already in use | Stop duplicate manual/old system-service processes or change port. |
 | Cannot bind at boot | Confirm the IP is ready, fix network readiness and restart. |
 | TLS rejected | Check IP SAN, expiration and fingerprint; distribute correct public PEM, never disable verification. |

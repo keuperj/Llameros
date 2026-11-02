@@ -137,3 +137,5 @@ Supported by
   <img src="src/llameros/static/bmftr.png" alt="Federal Ministry of Research, Technology and Space"  height="160">
   <img src="src/llameros/static/forschung-an-haw.png" alt="Forschung an HAW"  height="160">
 </p>
+
+[View public benchmark results on the default benchmark server](https://92.205.18.100:9443/).

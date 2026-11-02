@@ -51,6 +51,44 @@ certificate field uses the system trust store. Open the HTTPS server address in
 a browser to see its sortable, paginated-fetch public table. Trust the public
 certificate in the browser after verifying its fingerprint.
 
+## Updating an existing server
+
+Updating the checkout is not enough: deployment uses a **non-editable** installed
+`llameros` package. New `statistics_server` source can otherwise import stale code
+from `.venv/.../site-packages/llameros`, causing errors such as
+`ImportError: cannot import name 'PublicUpload'`.
+
+As the service's login user, without sudo:
+
+1. Stop the service and CLI writes, record the current source revision and lockfile,
+   and back up private state using `DEPLOYMENT.md`.
+2. Update the checkout to the intended tested revision, preserving local changes.
+3. From the repository root, explicitly reinstall and verify imports:
+
+   ```sh
+   uv sync --locked --no-editable --reinstall-package llameros
+   .venv/bin/python -c 'from llameros.benchmark_exchange import PublicUpload; from statistics_server.app import create_app; print("Statistics server imports: OK")'
+   ```
+
+   Run the import check only if installation succeeded. If either command fails,
+   leave the service stopped and resolve the error before continuing.
+4. Reload systemd only if you changed the installed unit, then start and inspect:
+
+   ```sh
+   systemctl --user reset-failed llameros-statistics.service
+   systemctl --user start llameros-statistics.service
+   systemctl --user status llameros-statistics.service --no-pager -l
+   journalctl --user -u llameros-statistics.service -n 100 --no-pager -o cat
+   ```
+
+For step 1, stop with `systemctl --user stop llameros-statistics.service`.
+For unit changes in step 4, run `systemctl --user daemon-reload` before starting.
+Verify HTTPS, `/admin` login, the moderation queue and public averages afterward.
+Keep the existing database and TLS files; an import mismatch does not require
+deleting state or changing the listening address. Do not update source or sync the
+environment while the service is running. See section 6 of `DEPLOYMENT.md` for the
+complete procedure, rollback precautions and troubleshooting.
+
 ## Sharing and recommendations
 
 The dashboard and full-benchmark runner default to `92.205.18.100:9443`.
