@@ -32,6 +32,7 @@ from .benchmark_exchange import (
     SharingSettings,
     exchange,
     hardware_profile,
+    inspect_server_certificate,
     rank_matches,
     shareable,
 )
@@ -752,6 +753,16 @@ def create_app(
             recommendation_cache.update(expires=0, entries=[])
         return body.model_dump()
 
+    @app.post("/api/benchmark-sharing/certificate", dependencies=protected)
+    def sharing_certificate(body: SharingSettings):
+        try:
+            return inspect_server_certificate(body)
+        except (OSError, ValueError):
+            raise HTTPException(
+                502,
+                "Cannot inspect server certificate. Check the address, port, certificate expiry and IP SAN.",
+            ) from None
+
     def share_preview():
         entries = []
         for row in store.benchmarks():
@@ -801,7 +812,7 @@ def create_app(
         except (ValueError, httpx.HTTPError):
             raise HTTPException(
                 502,
-                "Statistics upload failed; check server availability and certificate trust. Exact duplicate reports are ignored.",
+                "Statistics upload failed; check server availability and certificate trust. For self-signed servers, retrieve and confirm the public certificate in Community benchmark server settings, then save before sharing. Exact duplicate reports are ignored.",
             ) from None
 
     @app.get("/api/benchmark-sharing/recommendations", dependencies=protected)

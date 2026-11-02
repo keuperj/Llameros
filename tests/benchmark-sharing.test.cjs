@@ -20,6 +20,7 @@ function harness(confirm = true, entries = [{model:'gemma3:270m', tokens_per_sec
     window:{confirm(text) { calls.push({confirmation:text}); return confirm; }},
     api:async (url, payload) => {
       calls.push({url, payload});
+      if (url.endsWith('/certificate')) return {destination:`https://${payload.host}:${payload.port}`, ca_certificate:'public-pem', sha256:'AA:BB:CC'};
       if (url.endsWith('/preview')) return {destination:'https://127.0.0.1:9443', entries, note:'Public results'};
       if (url.endsWith('/share')) return {accepted:1, duplicates:0};
       return payload;
@@ -82,4 +83,26 @@ test('upload needs no voucher', async () => {
   const upload = calls.find(call => call.url?.endsWith('/share'));
   assert.ok(upload);
   assert.equal('voucher' in upload.payload, false);
+});
+
+test('self-signed trust requires fingerprint confirmation and separate save; never uploads', async () => {
+  const {get, calls} = harness();
+  get('sharing-host').value = '92.205.18.100'; get('sharing-port').value = '9443';
+  await get('sharing-fetch-certificate').click();
+  assert.equal(calls[0].url, '/api/benchmark-sharing/certificate');
+  assert.match(calls[1].confirmation, /AA:BB:CC/);
+  assert.match(calls[1].confirmation, /separate trusted channel/);
+  assert.equal(get('sharing-ca').value, 'public-pem');
+  assert.equal(calls.filter(call => call.url).length, 1);
+  await get('sharing-form').submit({preventDefault() {}});
+  assert.equal(calls[2].payload.ca_certificate, 'public-pem');
+  assert.equal(calls.some(call => call.url?.endsWith('/share')), false);
+});
+
+test('cancelling certificate trust preserves current certificate', async () => {
+  const {get} = harness(false);
+  get('sharing-host').value = '92.205.18.100'; get('sharing-port').value = '9443';
+  get('sharing-ca').value = 'previous';
+  await get('sharing-fetch-certificate').click();
+  assert.equal(get('sharing-ca').value, 'previous');
 });

@@ -35,6 +35,11 @@ submitted result stays private until an administrator confirms it.
 Obtain the server's public certificate through a trusted channel and save it as
 `certificates/statistics-cert.pem`. The file must contain no private key. TLS
 verification is mandatory; omit `--ca-cert` only for system-trusted certificates.
+Self-signed certificates are supported through this explicit trust file, including
+older generated certificates on newer Python versions. Compare the public PEM's
+SHA-256 fingerprint with the operator through a separate trusted channel before
+use. Expired certificates and certificates lacking the destination IP SAN are
+still rejected; the runner never falls back to unverified uploads.
 
 ## Start in the background
 

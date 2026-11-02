@@ -122,6 +122,7 @@ Llameros collects the benchmarking results of Ollama models and uses them to giv
 | Guide | Contents |
 |---|---|
 | [Installation & usage](install.md) | Setup, configuration, storage, model workflow, GPU runtimes, and client access |
+| [Benchmark All runner](docs/fullbenchmark.md) | RunFullbenchmark.py setup, background six-case benchmarks, hardware selection, progress, recovery, cleanup, and result uploads |
 | [API compatibility](api-compatibility.md) | Full API ducumentation
 | [Troubleshooting](trouble_shooting.md) | Unavailable CPU/GPU slots, container migration, login, downloads, and API issues |
 | [Development guide](development.md) | Contributor setup, architecture, documentation conventions, tests, acceptance checks, and security model |

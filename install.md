@@ -178,6 +178,11 @@ docker info --format '{{json .SecurityOptions}}'
 
 Admin Configuration → Community benchmark server configures the HTTPS server IP,
 port and trusted public certificate. The feature is **disabled by default**.
+Self-signed servers are supported: select **Retrieve self-signed server
+certificate**, compare its SHA-256 fingerprint with the server operator through
+a separate trusted channel, accept it, and save the settings before sharing.
+You can also paste a verified public PEM directly. Discovery never sends benchmark
+data or saves trust automatically; uploads still verify TLS, expiry and the IP SAN.
 Enabling permits public result downloads for local hardware matching in model
 search; it does not upload anything automatically. Use **Share benchmarks** in
 the admin Benchmarks section to preview and explicitly confirm the exact public

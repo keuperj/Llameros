@@ -51,6 +51,24 @@ certificate field uses the system trust store. Open the HTTPS server address in
 a browser to see its sortable, paginated-fetch public table. Trust the public
 certificate in the browser after verifying its fingerprint.
 
+### Sharing with a self-signed benchmark server
+
+In the Llameros admin dashboard, open **Configuration → Community benchmark
+server**, enter the destination IP/port and select **Retrieve self-signed server
+certificate**. Compare the displayed SHA-256 fingerprint with the operator's
+`openssl x509` output above through a separate trusted channel before accepting.
+Retrieval only inspects TLS; it sends no HTTP request or benchmarks and does not
+automatically save trust. Select **Save benchmark server settings**, with community
+benchmarks enabled, then use **Share benchmarks** and confirm the payload separately.
+
+Alternatively, paste the verified public PEM directly into the certificate field.
+For `RunFullbenchmark.py`, save that same public PEM to a local file and pass
+`--ca-cert certificates/statistics-cert.pem`. Both upload paths support explicitly
+trusted self-signed certificates, including older generated certificates on newer
+Python versions. TLS signature, expiry and destination IP checks remain enabled;
+there is no insecure-upload fallback. Expired or wrong-IP certificates must be
+fixed by the server operator. Reconfirm trust when the server certificate changes.
+
 ## Updating an existing server
 
 Updating the checkout is not enough: deployment uses a **non-editable** installed

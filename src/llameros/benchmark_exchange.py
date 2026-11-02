@@ -1,9 +1,11 @@
 """Privacy-reduced benchmark protocol; no raw runtime or hardware dictionaries cross it."""
 
+import hashlib
 import ipaddress
 import json
 import platform
 import re
+import socket
 import ssl
 import statistics
 from typing import Literal
@@ -237,11 +239,7 @@ def exchange(settings, method, path, payload=None):
     """Verified, bounded HTTPS without cookies, redirects, proxy env, or local auth headers."""
     if not settings.enabled:
         raise ValueError("Benchmark sharing is disabled")
-    context = ssl.create_default_context()
-    if settings.ca_certificate:
-        context.load_verify_locations(cadata=settings.ca_certificate)
-    # A self-signed leaf can be an explicit trust anchor without disabling name validation.
-    context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+    context = sharing_tls_context(settings)
     with httpx.Client(
         verify=context, trust_env=False, follow_redirects=False, timeout=15
     ) as client:
@@ -255,6 +253,44 @@ def exchange(settings, method, path, payload=None):
                 if len(raw) > 2 * 1024 * 1024:
                     raise ValueError("Statistics response too large")
     return json.loads(raw)
+
+
+def sharing_tls_context(settings):
+    context = ssl.create_default_context()
+    if settings.ca_certificate:
+        context.load_verify_locations(cadata=settings.ca_certificate)
+        # Explicitly trusted self-signed leaves (including older generated certs)
+        # need not be CA certificates. Still verify names, expiry and signatures.
+        context.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+        context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+    return context
+
+
+def inspect_server_certificate(settings):
+    """Explicit admin-only TLS discovery. Never send HTTP or benchmark data here.
+
+    The discovered certificate is NOT trusted automatically. The operator must
+    compare its fingerprint independently before saving it as a trust anchor.
+    """
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    with socket.create_connection((settings.host, settings.port), timeout=10) as raw:
+        with context.wrap_socket(raw, server_hostname=settings.host) as connection:
+            der = connection.getpeercert(binary_form=True)
+    if not der:
+        raise ValueError("Server supplied no certificate")
+    pem = ssl.DER_cert_to_PEM_cert(der)
+    # Validate IP SAN and expiry before offering the certificate for confirmation.
+    pinned = settings.model_copy(update={"ca_certificate": pem})
+    with socket.create_connection((settings.host, settings.port), timeout=10) as raw:
+        with sharing_tls_context(pinned).wrap_socket(raw, server_hostname=settings.host):
+            pass
+    return {
+        "destination": settings.url,
+        "ca_certificate": pem,
+        "sha256": ":".join(f"{byte:02X}" for byte in hashlib.sha256(der).digest()),
+    }
 
 
 def rank_matches(entries, profiles, context, parallel, flash_attention, kv_cache_type):
