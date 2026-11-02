@@ -28,9 +28,8 @@ cp -n config.example.toml config.toml
 uv run llameros --config config.toml
 ```
 
-- CLI overrides: `--config`, `--host`, `--port`. Without `uv`, use
-  `pip install -e .` in a virtual environment, then `llameros`; `uv.lock` records
-  the tested dependency set.
+- CLI overrides: `--config`, `--host`, `--port`. Use `uv sync --locked` to create
+  or update the project environment; `uv.lock` records the tested dependency set.
 
 ## Run automatically with systemd (`systemctl`)
 

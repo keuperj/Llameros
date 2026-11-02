@@ -7,8 +7,8 @@ See `README.md` in this directory for privacy, vouchers and moderation.
 
 ## 1. Requirements and installation
 
-Use Linux with systemd, Python **3.11+**, system PAM and the dependencies declared
-in `pyproject.toml`. The server needs no Docker, GPU or Ollama installation.
+Use Linux with systemd, Python **3.11+**, `uv`, system PAM and the dependencies
+locked in `uv.lock`. The server needs no Docker, GPU or Ollama installation.
 Your unprivileged login account needs a usable PAM password and login shell for
 browser administration. Locked, passwordless or `nologin` accounts may fail the
 host PAM policy. Never run the server as root to bypass it.
@@ -20,9 +20,11 @@ administrator. On Debian/Ubuntu, prerequisites can be installed with:
 
 ```sh
 sudo apt-get update
-sudo apt-get install python3 python3-venv python3-pip libpam0g openssl
+sudo apt-get install python3 libpam0g openssl
 ```
 
+Install `uv` using Astral's official installation instructions or your approved
+package manager, and verify `uv --version`. uv manages the project environment.
 Check `python3 --version` is at least 3.11. Place the checkout in `Llameros`
 relative to your login home. All commands below run from that checkout:
 
@@ -34,16 +36,18 @@ cd Llameros
 Install **without sudo**:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install .
+uv sync --locked --no-editable
 install -d -m 0700 statistics-state
 .venv/bin/python -m statistics_server --help
 ```
 
-This installs the whole project package and assets, but does not start Llameros or
-Docker. It is not editable: reinstall after source updates. Keep the base Python
-installation available after reboot. Use approved pinned artifacts or the project
-lockfile workflow when reproducibility is required; pip resolves declared ranges.
+This creates `.venv` and installs the whole project package and assets using
+`uv.lock`, but does not start Llameros or Docker. `--locked` rejects stale lockfiles
+instead of updating them; `--no-editable` installs a non-editable project package.
+Repeat this sync command after source updates while the service is stopped.
+Keep the base Python installation available after reboot. The service invokes
+`.venv/bin/python` directly, so startup does not require uv on the service's PATH
+or synchronize dependencies while handling requests.
 Other users must not be able to modify the installation, unit or private state.
 Never put Linux passwords in a unit, environment variable or command argument.
 
@@ -288,9 +292,16 @@ records migrate to pending and still need valid evidence for approval.
 
 ## 6. Updates, privacy and troubleshooting
 
-Back up state and the package artifact, stop the user service, install tested code
-into its virtualenv without sudo, then start and verify. Do not replace code while
-serving requests. Unit edits also need `systemctl --user daemon-reload`.
+Back up state, the deployed source revision and `uv.lock`, then stop the user
+service before checking out tested code. From the checkout, update without sudo:
+
+```sh
+uv sync --locked --no-editable
+```
+
+Start the user service and verify HTTPS/PAM again. Do not replace code or sync the
+environment while serving requests. Unit edits also need
+`systemctl --user daemon-reload`.
 
 The launcher suppresses access logs and request-context error logging. The user
 journal still records lifecycle/startup failures. PAM, OS, firewalls, proxies and

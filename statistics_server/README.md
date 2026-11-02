@@ -14,12 +14,12 @@ A ready-to-copy systemd **user service** template is provided as
 `llameros-statistics.service`; install it under your login user's user manager
 and review its paths and bind IP before use. That login user is the PAM UI owner.
 
-From the repository root, install the project into a virtual environment and run.
+From the repository root, use uv to install the locked environment and run.
 All file paths below are relative to that root:
 
 ```sh
-python -m pip install .
-python -m statistics_server --host 192.0.2.10 --port 9443 --state-dir statistics-state
+uv sync --locked --no-editable
+uv run --no-sync python -m statistics_server --host 192.0.2.10 --port 9443 --state-dir statistics-state
 ```
 
 Replace the example IP with the server's actual reachable IP. The process must
