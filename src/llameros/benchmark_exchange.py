@@ -23,7 +23,7 @@ class StrictModel(BaseModel):
 
 class SharingSettings(StrictModel):
     enabled: bool = False
-    host: str = Field(default="127.0.0.1", max_length=45)
+    host: str = Field(default="92.205.18.100", max_length=45)
     port: int = Field(default=9443, ge=1, le=65535)
     ca_certificate: str = Field(default="", max_length=16384)
 

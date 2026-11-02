@@ -278,7 +278,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["start", "status"], nargs="?", default="start")
     parser.add_argument("--run-dir", type=Path, default=Path("fullbenchmark"))
-    parser.add_argument("--server", default="127.0.0.1", help="Statistics server literal IP")
+    parser.add_argument("--server", default="92.205.18.100", help="Statistics server literal IP")
     parser.add_argument("--port", type=int, default=9443)
     parser.add_argument("--ca-cert", type=Path)
     parser.add_argument(

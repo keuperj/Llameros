@@ -20,6 +20,16 @@ from statistics_server.app import create_app
 from statistics_server.database import moderate, review_entries
 
 
+def test_default_benchmark_destination_remains_opt_in():
+    settings = SharingSettings()
+    assert settings.host == "92.205.18.100"
+    assert settings.port == 9443
+    assert settings.url == "https://92.205.18.100:9443"
+    assert settings.enabled is False
+    assert settings.ca_certificate == ""
+    assert SharingSettings(host="127.0.0.1", port=9444).url == "https://127.0.0.1:9444"
+
+
 def local_result():
     return {
         "model": "gemma3:270m",

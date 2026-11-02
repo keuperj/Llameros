@@ -38,11 +38,12 @@ verification is mandatory; omit `--ca-cert` only for system-trusted certificates
 
 ## Start in the background
 
-Replace the example IP with the statistics server's literal IP:
+The default destination is `92.205.18.100:9443`; override `--server` and `--port`
+when using another statistics server:
 
 ```sh
 uv run --no-sync python RunFullbenchmark.py start \
-  --server 192.0.2.10 --port 9443 \
+  --server 92.205.18.100 --port 9443 \
   --ca-cert certificates/statistics-cert.pem \
   --confirm-share
 ```

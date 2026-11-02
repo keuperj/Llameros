@@ -53,6 +53,10 @@ certificate in the browser after verifying its fingerprint.
 
 ## Sharing and recommendations
 
+The dashboard and full-benchmark runner default to `92.205.18.100:9443`.
+Existing saved destinations are preserved; sharing remains disabled by default.
+This client destination does not change the service's local bind address.
+
 The integration defaults **off**; no statistics requests occur while disabled.
 Enabling allows public benchmark downloads during model search. Matching is
 performed locally against coarse hardware, context, parallelism, Flash Attention
