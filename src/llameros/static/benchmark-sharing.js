@@ -22,7 +22,11 @@ const BenchmarkSharing = {
       for (const timing of ['generation', 'request', 'mixed']) {
         const rows = data.models.filter(row => row.kind === kind && row.timing === timing).slice(0, 6);
         if (!rows.length) continue;
-        for (const row of rows) panel.append(element('p', `${row.model} · ${kind} · ${row.tokens_per_second.toFixed(1)} ${kind === 'chat' ? 'output' : 'input'} tokens/s (${timing}) · range ${row.minimum}–${row.maximum} · ${row.samples} measurements · ${row.hardware.accelerator}`));
+        for (const row of rows) {
+          const suggestion = element('p', row.model);
+          suggestion.title = `${kind} · ${row.tokens_per_second.toFixed(1)} ${kind === 'chat' ? 'output' : 'input'} tokens/s (${timing}) · range ${row.minimum}–${row.maximum} · ${row.samples} measurements · ${row.hardware.accelerator}`;
+          panel.append(suggestion);
+        }
       }
     }
   },

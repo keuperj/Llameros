@@ -40,7 +40,8 @@ test('catalogue community suggestions have compact rows without repeated explana
   const rows = get('community-models').children;
   assert.equal(rows.length, 1);
   assert.equal(rows[0].tag, 'p');
-  assert.match(rows[0].textContent, /embed:latest · embedding · 42.0 input tokens\/s \(request\)/);
+  assert.equal(rows[0].textContent, 'embed:latest');
+  assert.match(rows[0].title, /embedding · 42.0 input tokens\/s \(request\)/);
   assert.doesNotMatch(rows[0].textContent, /Search this tag|Long explanatory|artifact/);
   context.api = async () => ({note:'Community benchmarks disabled', models:[]});
   await vm.runInContext('BenchmarkSharing.recommendations(false)', context);

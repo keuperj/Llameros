@@ -52,6 +52,8 @@ def test_catalogue_has_one_suggestion_tooltip_without_explanatory_sections():
         "</details>", 1
     )[0]
     assert catalogue.count('role="tooltip"') == 1
+    assert catalogue.count("<h4>Suggestions</h4>") == 1
+    assert '<h4>Suggestions</h4><div id="community-models">' in catalogue
     assert 'aria-describedby="catalogue-suggestions-help"' in catalogue
     for removed in (
         "Estimated fit; not guaranteed",
