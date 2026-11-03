@@ -3,7 +3,7 @@
   <img src="assets/images/logo.svg" alt="Llameros — a llama carrying a circuit-patterned saddle against Andean peaks" width="160" height="160">
 </p>
 
-# Llameros
+# Llameros: Manage locally. Share securely
 
 **Light weight Ollama manger: setup and securely share your local Ollama models.** 
 
