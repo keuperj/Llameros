@@ -28,8 +28,8 @@ function configureBoard(data, asUser = data.role !== 'admin') {
   document.getElementById('user-intro').hidden = !asUser;
   for (const id of ['events', 'events-heading']) document.getElementById(id).hidden = asUser;
   document.getElementById('usage-description').textContent = asUser
-    ? 'Host CPU, RAM and GPU utilization history and overall usage by model across all users. User Activity shows only your own usage or aggregated totals for all users, never individual other users. Usage by key shows only your own keys, including deleted keys. Requests sent directly to Ollama are not included in token totals.'
-    : 'Host CPU, RAM and GPU utilization samples, plus per-model inference totals. Requests sent directly to Ollama are not included in token totals.';
+    ? 'Host metrics, model totals, and your key usage.'
+    : 'Host metrics and model usage.';
   document.getElementById('api-key-owner-label').hidden = asUser;
   clearKeySecret();
   document.getElementById('api-key-user').value = data.username;

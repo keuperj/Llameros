@@ -4,6 +4,47 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 
+def test_compact_help_is_accessible_and_preserves_guidance():
+    class HelpParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.triggers = []
+            self.tooltips = {}
+            self.ids = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if "id" in attrs:
+                self.ids.append(attrs["id"])
+            if "help-trigger" in attrs.get("class", "").split():
+                assert tag == "button" and attrs["type"] == "button"
+                assert attrs["aria-label"].endswith(" help")
+                assert attrs["aria-expanded"] == "false"
+                self.triggers.append(attrs["aria-describedby"])
+            if attrs.get("role") == "tooltip":
+                self.tooltips[attrs["id"]] = attrs
+
+    static = Path(__file__).resolve().parents[1] / "src/llameros/static"
+    html = (static / "index.html").read_text()
+    parser = HelpParser()
+    parser.feed(html)
+    assert len(parser.triggers) >= 20
+    assert len(parser.ids) == len(set(parser.ids))
+    assert set(parser.triggers) == set(parser.tooltips)
+    assert all("hidden" in attrs for attrs in parser.tooltips.values())
+    assert html.index("/static/tooltips.js") < html.index("/static/app.js")
+    for guidance in (
+        "Never paste a private key",
+        "Unblocking does not restore keys",
+        "Requests sent directly to Ollama",
+        "Estimates are not guarantees",
+        "first failure while scaling up",
+        "including queueing",
+    ):
+        assert guidance in html
+    assert ".help-content[hidden]{display:none}" in (static / "style.css").read_text()
+
+
 def test_downloaded_models_match_catalogue_and_contain_overflow():
     static = Path(__file__).resolve().parents[1] / "src/llameros/static"
     css = (static / "style.css").read_text()
