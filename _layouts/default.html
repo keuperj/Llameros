@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{% if page.title %}{{ page.title | escape }} · {% endif %}{{ site.title | escape }}</title>
+  <meta name="description" content="{{ page.description | default: site.description | escape }}">
+  <link rel="icon" href="{{ '/assets/images/logo.svg' | relative_url }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ '/assets/css/documentation.css' | relative_url }}">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to documentation</a>
+  <header class="site-header">
+    <a class="brand" href="{{ '/' | relative_url }}" aria-label="Llameros documentation home">
+      <img src="{{ '/assets/images/logo.svg' | relative_url }}" alt="" width="72" height="72">
+      <span><span class="eyebrow">YOUR LOCAL MODEL CARAVAN</span><span class="brand-name">Llameros<span class="brand-dot" aria-hidden="true">●</span></span></span>
+    </a>
+    <a class="button" href="https://github.com/{{ site.repository }}">View on GitHub ↗</a>
+  </header>
+  <div class="site-shell">
+    <nav class="docs-nav card" aria-label="Documentation">
+      <span class="eyebrow">DOCUMENTATION</span>
+      <a href="{{ '/' | relative_url }}">Overview</a>
+      <a href="{{ '/install.html' | relative_url }}">Installation &amp; usage</a>
+      <a href="{{ '/docs/fullbenchmark.html' | relative_url }}">Benchmark runner</a>
+      <a href="{{ '/api-compatibility.html' | relative_url }}">API compatibility</a>
+      <a href="{{ '/trouble_shooting.html' | relative_url }}">Troubleshooting</a>
+      <a href="{{ '/development.html' | relative_url }}">Development</a>
+      <a href="{{ '/Security_Audit.html' | relative_url }}">Security audit</a>
+      <a href="{{ '/statistics_server/' | relative_url }}">Statistics server</a>
+      <a href="{{ '/statistics_server/DEPLOYMENT.html' | relative_url }}">Server deployment</a>
+    </nav>
+    <main id="main-content" class="card documentation" tabindex="-1">
+      {{ content }}
+    </main>
+  </div>
+  <footer class="site-footer">
+    <span>Llameros · Manage locally. Share securely.</span>
+    <a href="https://github.com/{{ site.repository }}/blob/HEAD/LICENSE">MIT licensed</a>
+  </footer>
+</body>
+</html>

@@ -25,7 +25,34 @@ uv run llameros --help
 - PAM, Docker, and GPU drivers are needed for corresponding live checks, not mocked
   tests. Never run with sudo or weaken PAM/TLS to make a test pass.
 
-## Architecture
+## GitHub Pages documentation styling
+
+The documentation site uses the admin board's dark palette, rounded cards, and
+lime accents. Its standalone stylesheet is `assets/css/documentation.css`;
+the shared page shell is `_layouts/default.html`, configured in `_config.yml`.
+No dashboard JavaScript, authentication, or runtime service is used by this site.
+
+To publish, open the repository's **Settings → Pages**, select **Deploy from a
+branch**, and select your publishing branch with **/(root)** as the folder.
+The built-in GitHub Pages Jekyll builder renders the root README as the homepage
+and the linked Markdown guides with the same layout. Relative Markdown links are
+rewritten to their HTML pages. Original Markdown files remain downloadable too.
+`baseurl` is `/Llameros`; update `url`, `baseurl`, and `repository` in `_config.yml`
+if deploying under a different repository or custom domain.
+
+Images used by the README live in `assets/images/` so the application source can
+be excluded from publication. Dashboard screenshots remain in `docs/screenshots/`.
+Keep documentation links relative so they work both on GitHub and on the site.
+The site does not load external fonts, JavaScript, or analytics. Do not add runtime
+state, credentials, or private files to its published source.
+
+For an optional local preview, use the `github-pages` Ruby gem in an isolated
+Ruby environment, then run `ruby -rgithub-pages -e 'Jekyll::Commands::Serve.process({"baseurl" => "/Llameros"})'`
+from the repository root. Loading `github-pages` enables the same safe-mode
+plugins as the hosted builder. Open `/Llameros/` on the local server. This documentation-only tooling is
+not a Python/application dependency; generated `_site/` files are ignored.
+
+## Application architecture
 
 - Backend modules under `src/llameros/`:
   - `cli.py`, `config.py`, `tls.py`: startup, validated settings, HTTPS.

@@ -14,3 +14,7 @@ statistics-state/
 backups/
 fullbenchmark/
 benchmark-vouchers.json
+_site/
+.jekyll-cache/
+.jekyll-metadata
+.sass-cache/

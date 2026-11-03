@@ -210,7 +210,10 @@ def test_logo_is_public_svg_and_shared_with_readme(client):
     assert logo.attrib["viewBox"] == "0 0 160 160"
     assert logo.find("{http://www.w3.org/2000/svg}title").text == "Llameros logo"
     readme = (Path(__file__).resolve().parents[1] / "README.md").read_text()
-    assert 'src="src/llameros/static/logo.svg"' in readme.split("# Llameros", 1)[0]
+    assert 'src="assets/images/logo.svg"' in readme.split("# Llameros", 1)[0]
+    assert (
+        Path(__file__).resolve().parents[1] / "assets/images/logo.svg"
+    ).read_bytes() == response.content
 
 
 def test_authentication_and_cookie_flags(client):

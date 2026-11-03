@@ -1,0 +1,60 @@
+# GitHub Pages: publish the repository root using the built-in Jekyll builder.
+title: Llameros
+description: Manage locally. Share securely. A hardware-aware Ollama dashboard for Linux.
+url: "https://keuperj.github.io"
+baseurl: "/Llameros"
+repository: keuperj/Llameros
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-readme-index
+  - jekyll-relative-links
+whitelist:
+  - jekyll-optional-front-matter
+  - jekyll-readme-index
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: false
+readme_index:
+  enabled: true
+  remove_originals: false
+defaults:
+  - scope:
+      path: ""
+      type: pages
+    values:
+      layout: default
+# This is a documentation site, not a copy of the application or local state.
+exclude:
+  - src
+  - tests
+  - scripts
+  - .venv
+  - .pytest_cache
+  - .ruff_cache
+  - __pycache__
+  - statistics_server/*.py
+  - statistics_server/__pycache__
+  - statistics_server/*.html
+  - statistics_server/*.js
+  - statistics_server/*.css
+  - statistics_server/*.service
+  - state
+  - statistics-state
+  - backups
+  - fullbenchmark
+  - config.toml
+  - "*.sqlite3*"
+  - "*.pem"
+  - "*.log"
+  - RunFullbenchmark.py
+  - pyproject.toml
+  - uv.lock
+  - dist
+  - Gemfile
+  - Gemfile.lock
+  - vendor

@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="src/llameros/static/logo.svg" alt="Llameros — a llama carrying a circuit-patterned saddle against Andean peaks" width="160" height="160">
+  <img src="assets/images/logo.svg" alt="Llameros — a llama carrying a circuit-patterned saddle against Andean peaks" width="160" height="160">
 </p>
 
 # Llameros
@@ -165,8 +165,8 @@ MIT licensed. Llameros: the people who manage llama caravans through the Andes.
 </p>
 <p align="right">
 Supported by
-  <img src="src/llameros/static/bmftr.png" alt="Federal Ministry of Research, Technology and Space"  height="160">
-  <img src="src/llameros/static/forschung-an-haw.png" alt="Forschung an HAW"  height="160">
+  <img src="assets/images/bmftr.png" alt="Federal Ministry of Research, Technology and Space"  height="160">
+  <img src="assets/images/forschung-an-haw.png" alt="Forschung an HAW"  height="160">
 </p>
 
 
