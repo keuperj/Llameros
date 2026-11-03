@@ -7,7 +7,7 @@ import os
 import pwd
 import re
 import tomllib
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 
@@ -49,11 +49,44 @@ class Settings:
     image_max_bytes: int = 8 * 1024 * 1024
     image_max_count: int = 8
     image_max_pixels: int = 40_000_000
+    queue_size: int = 16
+    queue_timeout: int = 120
+    queue_users: int = 0
+    model_directory: str = ""
+    benchmark_sharing: dict = field(default_factory=dict)
+    token_limits: dict = field(default_factory=dict)
+    user_policies: dict = field(default_factory=dict)
 
     def __post_init__(self):
         """Normalize the state path and reject inconsistent or out-of-range settings."""
+        from .benchmark_exchange import SharingSettings
+        from .limits import LimitConfig
         from .ollama_settings import OllamaSettings
+        from .scheduling import SchedulerSettings
+        from .users import UserUpdate
 
+        SchedulerSettings(
+            **{
+                name: getattr(self, name)
+                for name in ("queue_size", "queue_timeout", "queue_users", "ollama_num_parallel")
+            }
+        )
+        SharingSettings.model_validate(self.benchmark_sharing)
+        if type(self.model_directory) is not str or len(self.model_directory) > 4096:
+            raise ValueError("model_directory must be a string of at most 4096 characters")
+        if set(self.token_limits) - {"user-default", "user", "model", "key"}:
+            raise ValueError("Unknown token_limits scope")
+        for scope, policies in self.token_limits.items():
+            if type(policies) is not dict:
+                raise ValueError(f"token_limits.{scope} must be a table")
+            for subject, policy in policies.items():
+                if not subject or (scope == "user-default" and subject != "*"):
+                    raise ValueError("Default user limits require subject '*'")
+                LimitConfig.model_validate(policy)
+        for username, policy in self.user_policies.items():
+            if not username or len(username) > 256:
+                raise ValueError("Invalid user_policies account name")
+            UserUpdate.model_validate(policy)
         OllamaSettings(
             **{
                 name: getattr(self, name)

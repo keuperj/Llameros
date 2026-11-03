@@ -51,7 +51,7 @@ def login_accounts():
 class Users:
     """Persist role overrides and blocks while defaulting other login accounts to users."""
 
-    def __init__(self, store):
+    def __init__(self, store, defaults=None):
         """Create the role table and seed the process account as admin only when absent."""
         self.store = store
         self.owner = current_user()
@@ -76,6 +76,22 @@ class Users:
             }.items():
                 if name not in columns:
                     db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
+            # Seed only absent accounts: existing dashboard policy, including deny
+            # tombstones and the bootstrap administrator, must never be overwritten.
+            for username, policy in (defaults or {}).items():
+                body = UserUpdate.model_validate(policy)
+                db.execute(
+                    "INSERT OR IGNORE INTO users(username,role,blocked,models,targets,grant_expires) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (
+                        username,
+                        body.role,
+                        body.blocked,
+                        json.dumps(body.models or []),
+                        json.dumps(body.targets or []),
+                        time.time() + body.grant_days * 86400 if body.grant_days else 0,
+                    ),
+                )
 
     def get(self, username):
         """Return persisted account policy or an unblocked user default for an unknown name."""

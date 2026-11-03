@@ -3,8 +3,11 @@ host = "127.0.0.1"
 port = 8443
 # Relative paths are resolved from the process working directory.
 state_dir = "state"
-# Choose the model directory in the GUI's Model storage panel. Its preference
-# is persisted separately inside state_dir; empty GUI path uses a Docker volume.
+# File values are startup defaults. Saved dashboard changes take precedence,
+# including after restart; editing this file does not overwrite saved changes.
+# Dedicated absolute path (or ~/path); empty uses a Docker-managed volume.
+# Existing saved Model storage preferences take precedence. No models are moved.
+model_directory = ""
 
 # Leave both empty to generate a self-signed certificate.
 cert_file = ""
@@ -20,11 +23,19 @@ ollama_port = 11435
 ollama_image = "ollama/ollama@sha256:dea72d1e22270fe095b68fdf756d2b489d615643c5a2eaebbc5f569181e322d8"
 ollama_rocm_image = "ollama/ollama@sha256:c57155dfdd87acadac039c2679482db7f761960dfe0419b3072e1cfd52cb5167"
 context_length = 4096
-# Resident models per device (1–16), subject to available RAM/VRAM.
+# Resident models per GPU / CPU target (1–16), subject to available RAM/VRAM.
+# Editable in Admin board → Configuration → Scheduler; saved UI values override
+# this default. Stop runtimes and confirm container recreation when changing it.
 max_loaded_models = 2
 # Parallel requests per device (1–16); passed to Ollama as OLLAMA_NUM_PARALLEL.
 # Higher values increase the model-fit memory allowance. Recreate runtime containers after changes.
 ollama_num_parallel = 2
+ollama_keep_alive = "-1"
+ollama_flash_attention = true
+ollama_kv_cache_type = "q4_0" # f16, q8_0, or q4_0
+queue_size = 16          # Waiting requests per hardware target, 0–10000
+queue_timeout = 120      # Seconds, 1–86400
+queue_users = 0          # Distinct waiting users, 0 = unlimited, maximum 10000
 
 # API-only attachments; playground remains text-only. Hard upper bounds apply.
 inference_body_bytes = 16777216 # 16 MiB JSON (text-only requests still 128 KiB)
@@ -42,3 +53,39 @@ gpu = "cpu"
 # Prefer rootless Docker. Setting true explicitly accepts root-equivalent
 # access to a rootful Docker daemon. This is not a privilege boundary.
 allow_rootful_docker = false
+
+[benchmark_sharing]
+enabled = false # Explicit opt-in; uploads contain reduced hardware/benchmark data
+host = "92.205.18.100" # Destination IPv4/IPv6 address, not a URL or hostname
+port = 9443
+# Optional public PEM certificate/chain as a TOML multiline string. Never a key.
+ca_certificate = ""
+
+# Token allowances are integer thousands of tokens; omitted caps are unlimited.
+# Period: day, week, month, never. Persisted dashboard policies override each
+# configured scope/subject as a whole, including explicit unlimited policies.
+[token_limits.user-default."*"]
+period = "never"
+# input_k = 100
+# output_k = 50
+
+# Optional per-user, per-model (per user), and per-key ID allowances:
+# [token_limits.user.alice]
+# input_k = 100
+# period = "day"
+# [token_limits.model."gemma3:270m"]
+# output_k = 50
+# period = "month"
+# [token_limits.key."existing-key-id"]
+# output_k = 10
+# period = "week"
+
+# Initial policies for existing Linux accounts; passwords always remain in PAM.
+# Only absent policy records are seeded. Existing roles/blocks/grants win,
+# including the bootstrap admin. grant_days starts once, not on every restart.
+# [user_policies.alice]
+# role = "user" # user or admin
+# blocked = false
+# models = ["gemma3:270m"]
+# targets = ["cpu"]
+# grant_days = 30 # 1–90; omit to grant no timed inference access

@@ -61,6 +61,7 @@ def install_gateway(
     bearer keys, bounded admission, and per-device scheduling.
     """
     keys = ApiKeys(store)
+    keys.limits.defaults = cfg.token_limits
     app.state.api_keys = keys
 
     def limit_subject(scope, subject, request, session):

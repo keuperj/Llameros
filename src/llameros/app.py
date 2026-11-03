@@ -195,14 +195,42 @@ def create_app(
     cfg.prepare()
     scheduler_path = cfg.state_dir / "scheduler.json"
     scheduler_policy = (
-        SchedulerSettings.model_validate(json.loads(scheduler_path.read_text()))
+        SchedulerSettings.model_validate(
+            {
+                **{
+                    name: getattr(cfg, name)
+                    for name in SchedulerSettings.model_fields
+                    if name != "confirmed"
+                },
+                **json.loads(scheduler_path.read_text()),
+            }
+        )
         if scheduler_path.exists()
-        else SchedulerSettings(ollama_num_parallel=cfg.ollama_num_parallel)
+        else SchedulerSettings(
+            **{
+                name: getattr(cfg, name)
+                for name in SchedulerSettings.model_fields
+                if name != "confirmed"
+            }
+        )
     )
-    cfg = replace(cfg, ollama_num_parallel=scheduler_policy.ollama_num_parallel)
+    cfg = replace(
+        cfg,
+        ollama_num_parallel=scheduler_policy.ollama_num_parallel,
+        max_loaded_models=scheduler_policy.max_loaded_models,
+    )
     ollama_path = cfg.state_dir / "ollama.json"
     ollama_policy = (
-        OllamaSettings.model_validate(json.loads(ollama_path.read_text()))
+        OllamaSettings.model_validate(
+            {
+                **{
+                    name: getattr(cfg, name)
+                    for name in OllamaSettings.model_fields
+                    if name != "confirmed"
+                },
+                **json.loads(ollama_path.read_text()),
+            }
+        )
         if ollama_path.exists()
         else OllamaSettings(
             **{
@@ -214,9 +242,11 @@ def create_app(
     cfg = replace(cfg, **ollama_policy.model_dump())
     sharing_path = cfg.state_dir / "benchmark-sharing.json"
     sharing_policy = (
-        SharingSettings.model_validate(json.loads(sharing_path.read_text()))
+        SharingSettings.model_validate(
+            {**cfg.benchmark_sharing, **json.loads(sharing_path.read_text())}
+        )
         if sharing_path.exists()
-        else SharingSettings()
+        else SharingSettings.model_validate(cfg.benchmark_sharing)
     )
     recommendation_cache = {"expires": 0, "entries": []}
     store = Store(cfg.state_dir / "history.sqlite3")
@@ -224,7 +254,7 @@ def create_app(
     store.account_check = account_checker or (
         lambda username: account_available(username, cfg.pam_service)
     )
-    users = Users(store)
+    users = Users(store, cfg.user_policies)
     supplied_docker = docker
     catalog = catalog or Catalog()
     authenticate = authenticator or verify_password
@@ -662,8 +692,11 @@ def create_app(
     def configure_scheduler(body: SchedulerSettings):
         nonlocal cfg, scheduler_policy
         with jobs.lock:
-            parallel_changed = body.ollama_num_parallel != cfg.ollama_num_parallel
-            if parallel_changed:
+            runtime_changed = (
+                body.ollama_num_parallel != cfg.ollama_num_parallel
+                or body.max_loaded_models != cfg.max_loaded_models
+            )
+            if runtime_changed:
                 if jobs.scheduler.conflicts() or jobs.job.get("state") == "running":
                     raise HTTPException(
                         409, "Wait for all inference and lifecycle operations to finish"
@@ -671,7 +704,9 @@ def create_app(
                 if not body.confirmed:
                     raise HTTPException(400, "Confirm recreation of stopped Ollama containers")
                 if runtime_status()["running"]:
-                    raise HTTPException(409, "Stop all Ollama runtimes before changing parallelism")
+                    raise HTTPException(
+                        409, "Stop all Ollama runtimes before changing parallelism or model limits"
+                    )
                 # Existing, explicitly confirmed storage operation safely removes stopped owned
                 # containers without deleting model files, ready for the new environment.
                 if runtimes:
@@ -679,12 +714,18 @@ def create_app(
                 else:
                     docker.configure_storage(docker.storage_info()["directory"], True)
             write_json(scheduler_path, body.model_dump())
-            cfg = replace(cfg, ollama_num_parallel=body.ollama_num_parallel)
+            cfg = replace(
+                cfg,
+                ollama_num_parallel=body.ollama_num_parallel,
+                max_loaded_models=body.max_loaded_models,
+            )
             if runtimes:
                 runtimes.settings = cfg
             if hasattr(docker, "settings"):
                 docker.settings = replace(
-                    docker.settings, ollama_num_parallel=body.ollama_num_parallel
+                    docker.settings,
+                    ollama_num_parallel=body.ollama_num_parallel,
+                    max_loaded_models=body.max_loaded_models,
                 )
             scheduler_policy = body
             jobs.scheduler.capacity = body.queue_size

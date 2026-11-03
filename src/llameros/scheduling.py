@@ -18,6 +18,7 @@ class SchedulerSettings(BaseModel):
     queue_size: int = Field(default=16, ge=0, le=10000, strict=True)
     queue_timeout: int = Field(default=120, ge=1, le=86400, strict=True)
     ollama_num_parallel: int = Field(default=2, ge=1, le=16, strict=True)
+    max_loaded_models: int = Field(default=2, ge=1, le=16, strict=True)
     queue_users: int = Field(default=0, ge=0, le=10000, strict=True)
     confirmed: bool = Field(default=False, strict=True, exclude=True)
 

@@ -37,12 +37,16 @@ class Limits:
 
     def __init__(self, store):
         self.store = store
+        self.defaults = {}
         with store.connect() as db:
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS token_limits (
                     scope TEXT NOT NULL, subject TEXT NOT NULL,
                     input_k INTEGER, output_k INTEGER, period TEXT NOT NULL,
                     PRIMARY KEY(scope,subject)
+                );
+                CREATE TABLE IF NOT EXISTS token_limit_inheritance (
+                    subject TEXT PRIMARY KEY
                 );
                 CREATE TABLE IF NOT EXISTS token_counters (
                     scope TEXT NOT NULL, subject TEXT NOT NULL, period TEXT NOT NULL,
@@ -71,15 +75,29 @@ class Limits:
         row = db.execute(
             "SELECT * FROM token_limits WHERE scope=? AND subject=?", (policy_scope, policy_subject)
         ).fetchone()
-        inherited = scope == "user" and row is None
+        inherited = (
+            scope == "user"
+            and row is None
+            and (
+                subject not in self.defaults.get("user", {})
+                or db.execute(
+                    "SELECT 1 FROM token_limit_inheritance WHERE subject=?", (subject,)
+                ).fetchone()
+                is not None
+            )
+        )
         if inherited:
             row = db.execute(
                 "SELECT * FROM token_limits WHERE scope='user-default' AND subject='*'"
             ).fetchone()
+        fallback_scope = "user-default" if inherited else policy_scope
+        fallback_subject = "*" if inherited else policy_subject
         config = (
             {key: row[key] for key in ("input_k", "output_k", "period")}
             if row
-            else LimitConfig().model_dump()
+            else LimitConfig.model_validate(
+                self.defaults.get(fallback_scope, {}).get(fallback_subject, {})
+            ).model_dump()
         )
         bucket, reset = window(config["period"], now)
         counter = db.execute(
@@ -119,6 +137,7 @@ class Limits:
         """Remove only the user policy override; preserve all accumulated counters."""
         with self.store.connect() as db:
             db.execute("DELETE FROM token_limits WHERE scope='user' AND subject=?", (subject,))
+            db.execute("INSERT OR IGNORE INTO token_limit_inheritance VALUES(?)", (subject,))
             self.store.security_event(actor, "limits.update", "user:inherit:" + subject, db=db)
         return self.snapshot("user", subject)
 

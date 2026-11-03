@@ -141,9 +141,11 @@ class ModelStorage:
         self.settings = settings
         self.preference_file = settings.state_dir / "model-storage.json"
         self.cache_file = settings.state_dir / "model-inventory.json"
-        self.directory = ""
+        self.directory = settings.model_directory
         if self.preference_file.exists():
             self.directory = json.loads(self.preference_file.read_text())["directory"]
+        if self.directory:
+            self.directory = str(validate_directory(self.directory, settings.state_dir, create=True))
 
     @property
     def identity(self) -> str:

@@ -22,6 +22,31 @@
 * modern API support (streaming, responses  ...)
 
 
+## Configuration file and dashboard overrides
+
+Use `llameros --config /absolute/path/config.toml` to select a TOML configuration
+file (default: `~/.config/llameros/config.toml`). The annotated
+`config.example.toml` includes persistent admin-board settings: Ollama environment,
+scheduler queues/parallelism, model storage, benchmark sharing/certificate trust,
+user roles/access grants, and default-user, per-user, per-model, and per-key-ID
+token allowances.
+
+Precedence is **saved dashboard settings → TOML values → built-in defaults**.
+Dashboard saves take effect during runtime and remain authoritative after restart;
+they do not rewrite the TOML file. TOML edits are read at the next service start,
+not hot-reloaded. Existing saved settings are preserved, including explicit false,
+empty-path, and unlimited choices. Token policies override a whole scope/subject;
+dashboard user-limit inheritance also overrides file-defined per-user policies.
+File user policies seed only accounts without existing policy records, so restart
+cannot reset grant expiry, undo blocks, or overwrite the bootstrap administrator.
+Passwords stay in PAM; API-key secrets are generated securely, not configured.
+
+Model storage paths undergo the same ownership/path checks as dashboard choices.
+File changes do not move models or automatically recreate runtime containers.
+Stop/recreate containers explicitly when changing storage or Ollama environment.
+Confirmation checkboxes and lifecycle actions remain interactive safety controls,
+not configuration-file switches.
+
 ## Dashboard previews
 
 Screenshots of the actual dashboard rendered with synthetic demo data, not a live
