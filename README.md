@@ -131,7 +131,7 @@ Llameros collects the benchmarking results of Ollama models and uses them to giv
 
 ---
 
-MIT licensed. Llameros: the people who manage llama caravans through the Andes.
+MIT licensed. 
 
 <p>
   <a href="https://github.com/keuperj/Llameros" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a>
