@@ -131,14 +131,13 @@ Llameros collects the benchmarking results of Ollama models and uses them to giv
 
 ---
 
-MIT licensed. 
 
 <p>
   <a href="https://github.com/keuperj/Llameros" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a>
-  · <a href="https://www.llm-praxis.de/" target="_blank" rel="noopener noreferrer">maintained by LLM-Praxis</a>
-  · <a href="https://www.keuper-labs.org/" target="_blank" rel="noopener noreferrer">developed by Keuper-Labs</a>
+  · <a href="https://www.llm-praxis.de/" target="_blank" rel="noopener noreferrer">Part of the LLM-Praxis Research Project ↗</a>
+  · <a href="https://www.keuper-labs.org/" target="_blank" rel="noopener noreferrer">Developed by Keuper-Labs ↗</a>
 </p>
-<p align="right">
+<p align="center">
 Supported by
   <img src="assets/images/bmftr.png" alt="Federal Ministry of Research, Technology and Space"  height="160">
   <img src="assets/images/forschung-an-haw.png" alt="Forschung an HAW"  height="160">
