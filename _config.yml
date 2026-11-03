@@ -1,8 +1,9 @@
 # GitHub Pages: publish the repository root using the built-in Jekyll builder.
 title: Llameros
 description: Manage locally. Share securely. A hardware-aware Ollama dashboard for Linux.
-url: "https://keuperj.github.io"
-baseurl: "/Llameros"
+url: "https://www.llameros.org"
+# Custom domains serve this site at /, not at the GitHub project /Llameros/ path.
+baseurl: ""
 repository: keuperj/Llameros
 markdown: kramdown
 kramdown:

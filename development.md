@@ -37,8 +37,12 @@ branch**, and select your publishing branch with **/(root)** as the folder.
 The built-in GitHub Pages Jekyll builder renders the root README as the homepage
 and the linked Markdown guides with the same layout. Relative Markdown links are
 rewritten to their HTML pages. Original Markdown files remain downloadable too.
-`baseurl` is `/Llameros`; update `url`, `baseurl`, and `repository` in `_config.yml`
-if deploying under a different repository or custom domain.
+The custom domain is `www.llameros.org`, recorded in `CNAME` and in the Pages
+settings. `_config.yml` uses `url: "https://www.llameros.org"` and `baseurl: ""`
+because this site is served at the domain root. Do not set `baseurl` to
+`/Llameros` on the custom domain: that would break stylesheets, images, and links.
+For a GitHub project-domain deployment without a custom domain, change `url` to
+`https://keuperj.github.io`, set `baseurl: "/Llameros"`, and remove `CNAME`.
 
 Images used by the README live in `assets/images/` so the application source can
 be excluded from publication. Dashboard screenshots remain in `docs/screenshots/`.
@@ -47,9 +51,9 @@ The site does not load external fonts, JavaScript, or analytics. Do not add runt
 state, credentials, or private files to its published source.
 
 For an optional local preview, use the `github-pages` Ruby gem in an isolated
-Ruby environment, then run `ruby -rgithub-pages -e 'Jekyll::Commands::Serve.process({"baseurl" => "/Llameros"})'`
+Ruby environment, then run `ruby -rgithub-pages -e 'Jekyll::Commands::Serve.process({"baseurl" => ""})'`
 from the repository root. Loading `github-pages` enables the same safe-mode
-plugins as the hosted builder. Open `/Llameros/` on the local server. This documentation-only tooling is
+plugins as the hosted builder. Open `/` on the local server. This documentation-only tooling is
 not a Python/application dependency; generated `_site/` files are ignored.
 
 ## Application architecture

@@ -45,7 +45,9 @@ def test_pages_configuration_renders_existing_markdown_and_excludes_runtime_data
     for plugin in ("jekyll-optional-front-matter", "jekyll-readme-index", "jekyll-relative-links"):
         assert plugin in config
     assert "layout: default" in config
-    assert 'baseurl: "/Llameros"' in config
+    assert 'url: "https://www.llameros.org"' in config
+    assert 'baseurl: ""' in config
+    assert (ROOT / "CNAME").read_text().strip() == "www.llameros.org"
     for private_path in ("state", "statistics-state", "backups", "config.toml", ".venv"):
         assert f"  - {private_path}\n" in config
     assert "  - statistics_server\n" not in config
