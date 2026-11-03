@@ -45,6 +45,59 @@ def login(client):
     return result
 
 
+def test_approve_all_entire_queue_validates_evidence_and_updates_averages(dashboard, tmp_path):
+    app, client, calls, available = dashboard
+    entry = shareable(local_result()).model_dump()
+    # More than one admin page; flagged reports must remain explicitly included.
+    entries = [{**entry, "model": f"qwen3:{index}b"} for index in range(30)]
+    assert client.post("/api/v1/benchmarks", json={"entries": entries[:10]}).status_code == 200
+    assert client.post("/api/v1/benchmarks", json={"entries": entries[10:20]}).status_code == 200
+    assert client.post("/api/v1/benchmarks", json={"entries": entries[20:]}).status_code == 200
+    with sqlite3.connect(initialize(tmp_path)) as db:
+        db.execute("INSERT INTO entries VALUES ('legacy', '{}', 'pending', '[]')")
+    url = "/admin/api/benchmarks/approve-all"
+    assert (
+        client.post(url, json={"confirmed": True, "expected_revision": "a" * 64}).status_code == 401
+    )
+    login(client)
+    queue = client.get("/admin/api/benchmarks?limit=1").json()
+    assert queue["total"] == 31 and len(queue["entries"]) == 1
+    body = {"confirmed": True, "expected_revision": queue["pending_revision"]}
+    csrf = client.headers.pop("X-CSRF-Token")
+    assert client.post(url, json=body).status_code == 403
+    client.headers["X-CSRF-Token"] = csrf
+    assert (
+        client.post(url, json=body, headers={"Origin": "https://evil.example"}).status_code == 403
+    )
+    assert client.post(url, json={**body, "confirmed": False}).status_code == 400
+    assert client.post(url, json={**body, "expected_revision": "invalid"}).status_code == 422
+    result = client.post(url, json=body)
+    assert result.status_code == 200
+    assert result.json() == {"approved": 30, "skipped": 1}
+    assert client.get("/api/v1/averages").json()["total"] == 30
+    assert review_entries(tmp_path)[0]["digest"] == "legacy"
+    assert client.post(url, json=body).status_code == 409
+
+
+def test_approve_all_rejects_changed_queue_without_partial_approval(dashboard, tmp_path):
+    app, client, calls, available = dashboard
+    entry = shareable(local_result()).model_dump()
+    client.post("/api/v1/benchmarks", json={"entries": [entry]})
+    login(client)
+    revision = client.get("/admin/api/benchmarks").json()["pending_revision"]
+    client.post("/api/v1/benchmarks", json={"entries": [{**entry, "model": "qwen3:8b"}]})
+    response = client.post(
+        "/admin/api/benchmarks/approve-all",
+        json={
+            "confirmed": True,
+            "expected_revision": revision,
+        },
+    )
+    assert response.status_code == 409
+    assert len(review_entries(tmp_path)) == 2
+    assert client.get("/api/v1/averages").json()["total"] == 0
+
+
 def test_admin_requires_process_owner_not_environment_or_other_pam_users(dashboard, monkeypatch):
     app, client, calls, available = dashboard
     monkeypatch.setenv("USER", "other-account")

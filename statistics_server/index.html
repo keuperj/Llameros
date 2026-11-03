@@ -23,6 +23,17 @@
     <section class="card results-card" aria-labelledby="results-heading">
       <div class="section-head"><div><span class="eyebrow">PUBLIC RESULTS</span><h3 id="results-heading">Find your next model</h3></div><button id="load" class="primary" type="button">Refresh benchmarks</button></div>
       <p id="status" class="status-line" role="status" aria-live="polite">Loading community measurements…</p>
+      <form id="result-filters" class="result-filters" role="search" aria-label="Filter public benchmark results">
+        <label class="result-search">Search results<input id="result-search" type="search" maxlength="256" placeholder="Model, hardware, artifact or settings" autocomplete="off"></label>
+        <label>Workload<select id="filter-kind"><option value="">All workloads</option></select></label>
+        <label>Accelerator<select id="filter-accelerator"><option value="">All accelerators</option></select></label>
+        <label>Architecture<select id="filter-architecture"><option value="">All architectures</option></select></label>
+        <label>Timing<select id="filter-timing"><option value="">All timing methods</option></select></label>
+        <label>Context<select id="filter-context"><option value="">All context sizes</option></select></label>
+        <label>KV cache<select id="filter-cache"><option value="">All cache types</option></select></label>
+        <button id="clear-filters" type="button">Clear search and filters</button>
+      </form>
+      <p id="filter-summary" class="status-line" role="status" aria-live="polite"></p>
       <div class="scroll table-wrap" tabindex="0" role="region" aria-label="Public benchmark results"><table><caption>All approved shared entries · select a column heading to sort · scroll horizontally for hardware and settings</caption><thead><tr id="headings"></tr></thead><tbody id="entries"></tbody></table></div>
     </section>
     <details class="card methodology"><summary>Read the measurements responsibly</summary><p>These are voluntarily shared, unverified community measurements, not model quality scores. CPU/core/memory categories are coarse; equal categories do not imply identical machines. Request and generation timing are not comparable.</p><p>Identical submissions are deduplicated; entries are not counts of independent users. Tags may change over time; artifact identity is shown when available. There is no claim of representative or tamper-proof results. Anyone can upload results; pending or rejected submissions remain private.</p></details>

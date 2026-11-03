@@ -279,6 +279,32 @@ best-effort from local runtime inventory and is still a client claim.
 
 ## API
 
+### Public search and admin bulk approval
+
+The public averages table supports case-insensitive, multi-word search across its
+displayed fields, plus combined workload, accelerator, architecture, timing,
+context-size and KV-cache filters. Sorting applies to matching results. The page
+shows matching/loaded counts and a clear-filters button; refresh preserves filters
+whose values still exist. Search/filtering runs locally in the browser after
+approved averages are downloaded: no search terms or filter selections are sent
+to the server or saved in browser storage.
+
+In `/admin`, **Approve all pending entries** applies to the entire pending queue
+across all pages, not just the visible page. The confirmation explicitly includes
+flagged entries; review warnings and evidence before proceeding. The operation
+requires the existing owner session, same-origin HTTPS and CSRF token. A queue
+snapshot prevents approving newly arrived or changed pending entries without a
+fresh confirmation. Valid v2 reports are approved in one transaction; invalid or
+legacy reports remain pending and the UI reports approved/skipped counts. Approved
+averages are recalculated from the original reports as usual. This is an explicit
+bulk moderation decision, not automatic approval or proof of genuine hardware.
+
+The protected `POST /admin/api/benchmarks/approve-all` accepts `confirmed: true`
+and `expected_revision` from the pending queue response's `pending_revision`.
+If that queue has changed, it returns HTTP 409 without approving any reports.
+
+### Public endpoints
+
 - `POST /api/v1/benchmarks`: `{ "entries": [ ... ] }`; returns counts of new and
   duplicate records and `status: "pending"`. Unknown fields are rejected.
 - `GET /api/v1/benchmarks?offset=0&limit=200`: approved public entries and total count;

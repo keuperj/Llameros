@@ -57,3 +57,6 @@
 @media(max-width:800px){.benchmark-principles{grid-template-columns:1fr}.statistics-site .intro{align-items:flex-start;flex-direction:column}.intro-note{max-width:none}}
 @media(max-width:520px){.statistics-site>header,.statistics-site>main,.statistics-site>footer{padding:20px 16px}.statistics-site header nav{width:100%}.statistics-site .card{padding:20px 16px}.statistics-site .nav-link{padding:8px 10px}.statistics-site .section-head>.primary{width:100%}.statistics-site .brand-logo{width:56px;height:56px}.statistics-site h1{font-size:28px}.statistics-site th,.statistics-site td{padding:10px 12px}}
 .statistics-site .result-disagreement td{background:rgba(255,180,0,.12);border-bottom-color:#d7a400}
+.statistics-site .result-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end;margin:20px 0}
+.statistics-site .result-filters label{margin:0;min-width:0}
+.statistics-site .result-search{grid-column:1/-1}

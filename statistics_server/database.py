@@ -1,5 +1,6 @@
 """Private original reports, moderation, and approved like-for-like averages."""
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -102,6 +103,38 @@ def moderate(state_dir, digest, status, *, expected_status=None):
             # Legacy v1 reports lack evidence; cannot approve until resubmitted as v2.
             SharedBenchmark.model_validate(json.loads(row[0]))
         db.execute("UPDATE entries SET status=? WHERE digest=?", (status, digest))
+
+
+def pending_revision(db):
+    """Snapshot identity for the entire pending queue, independent of pagination."""
+    return hashlib.sha256(
+        "\n".join(
+            row[0]
+            for row in db.execute(
+                "SELECT digest FROM entries WHERE status='pending' ORDER BY digest"
+            )
+        ).encode()
+    ).hexdigest()
+
+
+def approve_pending(state_dir, expected_revision):
+    """Approve one unchanged queue atomically; invalid evidence stays pending."""
+    with sqlite3.connect(initialize(Path(state_dir))) as db:
+        db.execute("BEGIN IMMEDIATE")
+        if pending_revision(db) != expected_revision:
+            raise ValueError("Pending queue changed")
+        valid, skipped = [], 0
+        for digest, data in db.execute("SELECT digest,data FROM entries WHERE status='pending'"):
+            try:
+                SharedBenchmark.model_validate(json.loads(data))
+            except (ValueError, TypeError):
+                skipped += 1
+                continue
+            valid.append((digest,))
+        db.executemany(
+            "UPDATE entries SET status='approved' WHERE digest=? AND status='pending'", valid
+        )
+    return {"approved": len(valid), "skipped": skipped}
 
 
 def flags_for(entry, db, exclude_digest=None):

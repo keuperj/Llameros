@@ -3,9 +3,11 @@
 const $ = id => document.getElementById(id);
 let csrf = '', offset = 0, total = 0, epoch = 0, loading = false, refreshQueued = false;
 const pageSize = 25;
+let pendingRevision = null, approvingAll = false;
 function node(tag, text = '') { const item = document.createElement(tag); item.textContent = text; return item; }
 function signedOut() {
   epoch++; csrf = ''; offset = 0; total = 0;
+  pendingRevision = null; $('approve-all').hidden = true; $('approve-all').disabled = true;
   $('password').value = ''; $('username').value = ''; $('dashboard').hidden = true; $('login-form').hidden = false;
   $('entries').replaceChildren(); $('overview').textContent = ''; $('page-info').textContent = '';
 }
@@ -68,6 +70,9 @@ async function refresh() {
     if (version !== epoch || !csrf || status !== $('status').value || currentOffset !== offset) return;
     $('overview').textContent = `${summary.entries.pending} pending · ${summary.entries.approved} approved · ${summary.entries.rejected} rejected · capacity ${summary.used}/${summary.capacity}. No independent-user counts.`;
     total = page.total;
+    pendingRevision = status === 'pending' ? page.pending_revision : null;
+    $('approve-all').hidden = status !== 'pending';
+    $('approve-all').disabled = approvingAll || !pendingRevision || total === 0;
     if (offset && offset >= total) { offset = Math.max(0, Math.floor((total - 1) / pageSize) * pageSize); }
     else renderRows(page.entries);
     $('page-info').textContent = `${status}: ${total} entries · page ${Math.floor(offset / pageSize) + 1}`;
@@ -90,7 +95,22 @@ $('logout').addEventListener('click', safe(async () => {
   try { await api('logout', {}); } finally { signedOut(); }
 }));
 $('refresh').addEventListener('click', safe(refresh));
-$('status').addEventListener('change', safe(async () => { offset = 0; await refresh(); }));
+$('approve-all').addEventListener('click', safe(async () => {
+  if (!csrf || approvingAll || !pendingRevision || $('status').value !== 'pending' || total === 0) return;
+  const revision = pendingRevision, version = epoch;
+  if (!window.confirm(`Approve all ${total} pending entries across ALL pages?\n\nThis includes entries with disagreement and other warning flags. Valid reports will become public and affect averages/recommendations. Entries without valid v2 evidence stay pending. Approval is not proof of genuine hardware. Review the queue before proceeding.`)) return;
+  approvingAll = true; $('approve-all').disabled = true;
+  try {
+    const result = await api('benchmarks/approve-all', {expected_revision:revision, confirmed:true});
+    if (version !== epoch || !csrf) return;
+    $('feedback').textContent = `Approved ${result.approved} pending entries; ${result.skipped} invalid/legacy entries left pending.`;
+    offset = 0;
+  } finally {
+    approvingAll = false;
+    if (csrf && version === epoch) await refresh();
+  }
+}));
+$('status').addEventListener('change', safe(async () => { offset = 0; pendingRevision = null; $('approve-all').hidden = $('status').value !== 'pending'; $('approve-all').disabled = true; await refresh(); }));
 $('previous').addEventListener('click', safe(async () => { offset = Math.max(0, offset - pageSize); await refresh(); }));
 $('next').addEventListener('click', safe(async () => { if (offset + pageSize < total) offset += pageSize; await refresh(); }));
 window.addEventListener('pagehide', signedOut);

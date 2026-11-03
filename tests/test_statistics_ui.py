@@ -86,6 +86,7 @@ def test_admin_page_keeps_all_javascript_control_ids(tmp_path):
             "logout",
             "refresh",
             "overview",
+            "approve-all",
             "status",
             "page-info",
             "entries",
@@ -95,3 +96,25 @@ def test_admin_page_keeps_all_javascript_control_ids(tmp_path):
         assert expected <= ids.keys()
         assert "hidden" in ids["dashboard"]
         assert ids["password"]["type"] == "password"
+
+
+def test_public_search_and_filter_controls_are_labelled(tmp_path):
+    with TestClient(create_app(tmp_path), base_url="https://statistics") as client:
+        page = Page()
+        page.feed(client.get("/").text)
+        ids = {attrs["id"]: attrs for _, attrs in page.elements if "id" in attrs}
+        assert {
+            "result-filters",
+            "result-search",
+            "filter-kind",
+            "filter-accelerator",
+            "filter-architecture",
+            "filter-timing",
+            "filter-context",
+            "filter-cache",
+            "clear-filters",
+            "filter-summary",
+        } <= ids.keys()
+        assert ids["result-search"]["type"] == "search"
+        assert ids["result-filters"]["role"] == "search"
+        assert ids["filter-summary"]["aria-live"] == "polite"

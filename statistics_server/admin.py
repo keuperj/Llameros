@@ -15,7 +15,7 @@ from pydantic import Field
 from llameros.auth import Sessions, account_available, verify_password
 from llameros.benchmark_exchange import StrictModel
 
-from .database import moderate, review_entries
+from .database import approve_pending, moderate, pending_revision, review_entries
 
 COOKIE = "__Host-llameros-statistics-admin"
 
@@ -28,6 +28,11 @@ class Login(StrictModel):
 class ModerationRequest(StrictModel):
     status: Literal["approved", "rejected"]
     expected_status: Literal["pending", "approved", "rejected"]
+    confirmed: bool = False
+
+
+class BulkApprovalRequest(StrictModel):
+    expected_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
     confirmed: bool = False
 
 
@@ -160,10 +165,25 @@ def install_admin(
         limit: int = Query(25, ge=1, le=100),
     ):
         with sqlite3.connect(database) as db:
+            db.execute("BEGIN")
             total = db.execute("SELECT count(*) FROM entries WHERE status=?", (status,)).fetchone()[
                 0
             ]
-        return {"entries": review_entries(state_dir, status, limit, offset), "total": total}
+            revision = pending_revision(db) if status == "pending" else None
+        return {
+            "entries": review_entries(state_dir, status, limit, offset),
+            "total": total,
+            "pending_revision": revision,
+        }
+
+    @app.post("/admin/api/benchmarks/approve-all", dependencies=protected)
+    def approve_all(body: BulkApprovalRequest):
+        if not body.confirmed:
+            raise HTTPException(400, "Confirm approval of the entire pending queue")
+        try:
+            return approve_pending(state_dir, body.expected_revision)
+        except ValueError:
+            raise HTTPException(409, "Pending queue changed; refresh and confirm again") from None
 
     @app.post("/admin/api/benchmarks/{digest}", dependencies=protected)
     def review(digest: str, body: ModerationRequest):

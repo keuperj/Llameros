@@ -27,7 +27,8 @@ async function harness({confirm = true, authenticated = false, entries = []} = {
       if (url.endsWith('/session')) { status = authenticated ? 200 : 401; data = {csrf:'session-csrf'}; }
       else if (url.endsWith('/login')) { authenticated = true; data = {csrf:'new-csrf'}; }
       else if (url.endsWith('/overview')) data = {entries:{pending:entries.length, approved:0, rejected:0}, capacity:100, used:entries.length};
-      else if (url.includes('/benchmarks?')) data = {entries, total:entries.length};
+      else if (url.includes('/benchmarks?')) data = {entries, total:entries.length, pending_revision:'a'.repeat(64)};
+      else if (url.endsWith('/benchmarks/approve-all')) data = {approved:entries.length, skipped:0};
       else if (url.endsWith('/logout')) authenticated = false;
       return {ok:status === 200, status, json:async () => data};
     },
@@ -78,4 +79,27 @@ test('large differences are visually marked for admin review', async () => {
   const row = get('entries').children[0];
   assert.equal(row.className, 'result-disagreement');
   assert.match(row.children[3].textContent, /disagrees-with-approved-results/);
+});
+
+test('approve all confirms entire queue with warnings and sends snapshot revision', async () => {
+  const entries = [{digest:'one', status:'pending', flags:['disagrees-with-approved-results'], entry:{hardware:{}}}];
+  const {get, calls, confirmations} = await harness({authenticated:true, entries});
+  assert.equal(get('approve-all').disabled, false);
+  await get('approve-all').listeners.click();
+  const call = calls.find(call => call.url.endsWith('/benchmarks/approve-all'));
+  assert.equal(call.payload.expected_revision, 'a'.repeat(64));
+  assert.equal(call.payload.confirmed, true);
+  assert.match(confirmations[0], /ALL pages/);
+  assert.match(confirmations[0], /warning flags/);
+  assert.match(get('feedback').textContent, /Approved 1/);
+  get('status').value = 'approved'; await get('status').listeners.change();
+  assert.equal(get('approve-all').hidden, true);
+});
+
+test('approve all cancellation or empty queue never posts approval', async () => {
+  for (const options of [{confirm:false, entries:[{digest:'one', status:'pending', flags:[], entry:{hardware:{}}}]}, {entries:[]}]) {
+    const {get, calls} = await harness({authenticated:true, ...options});
+    await get('approve-all').listeners.click();
+    assert.equal(calls.some(call => call.url.endsWith('/benchmarks/approve-all')), false);
+  }
 });
