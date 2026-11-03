@@ -45,6 +45,35 @@ def test_compact_help_is_accessible_and_preserves_guidance():
     assert ".help-content[hidden]{display:none}" in (static / "style.css").read_text()
 
 
+def test_catalogue_has_one_suggestion_tooltip_without_explanatory_sections():
+    static = Path(__file__).resolve().parents[1] / "src/llameros/static"
+    html = (static / "index.html").read_text()
+    catalogue = html.split("<summary>Model catalogue / download</summary>", 1)[1].split(
+        "</details>", 1
+    )[0]
+    assert catalogue.count('role="tooltip"') == 1
+    assert 'aria-describedby="catalogue-suggestions-help"' in catalogue
+    for removed in (
+        "Estimated fit; not guaranteed",
+        "Recommended for this host",
+        "Community performance suggestions",
+        "board-help-19",
+        "board-help-20",
+        "cpu-only-help",
+    ):
+        assert removed not in catalogue
+    for explanation in (
+        "Ollama popularity order",
+        "arithmetic mean",
+        "not independent users",
+        "throughput does not measure model quality",
+        "RAM and VRAM are not added",
+    ):
+        assert explanation in catalogue
+    for control in ('id="community-models"', 'id="recommended"', 'id="families"', 'id="tags"'):
+        assert control in catalogue
+
+
 def test_downloaded_models_match_catalogue_and_contain_overflow():
     static = Path(__file__).resolve().parents[1] / "src/llameros/static"
     css = (static / "style.css").read_text()

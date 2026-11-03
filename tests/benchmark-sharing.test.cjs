@@ -30,6 +30,23 @@ function harness(confirm = true, entries = [{model:'gemma3:270m', tokens_per_sec
   return {get, context, calls};
 }
 
+test('catalogue community suggestions have compact rows without repeated explanatory headings', async () => {
+  const {get, context} = harness();
+  context.api = async () => ({note:'Long explanatory methodology', models:[
+    {kind:'embedding', timing:'request', model:'embed:latest', tokens_per_second:42,
+      minimum:40, maximum:44, samples:2, hardware:{accelerator:'cpu'}, model_digest:'sha256:abc'},
+  ]});
+  await vm.runInContext('BenchmarkSharing.recommendations(false)', context);
+  const rows = get('community-models').children;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].tag, 'p');
+  assert.match(rows[0].textContent, /embed:latest · embedding · 42.0 input tokens\/s \(request\)/);
+  assert.doesNotMatch(rows[0].textContent, /Search this tag|Long explanatory|artifact/);
+  context.api = async () => ({note:'Community benchmarks disabled', models:[]});
+  await vm.runInContext('BenchmarkSharing.recommendations(false)', context);
+  assert.equal(get('community-models').children[0].textContent, 'Community benchmarks disabled');
+});
+
 test('sharing is never automatic; settings render preserves edits and uses typed values', async () => {
   const {get, context, calls} = harness();
   assert.equal(calls.length, 0);

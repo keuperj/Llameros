@@ -16,13 +16,13 @@ const BenchmarkSharing = {
     const epoch = sessionEpoch;
     const data = await api('/api/benchmark-sharing/recommendations?cpu_only=' + cpuOnly);
     if (epoch !== sessionEpoch || userBoard) return;
-    panel.replaceChildren(element('p', data.note));
+    panel.replaceChildren();
+    if (!data.models.length) panel.append(element('p', data.note));
     for (const kind of ['chat', 'embedding']) {
       for (const timing of ['generation', 'request', 'mixed']) {
         const rows = data.models.filter(row => row.kind === kind && row.timing === timing).slice(0, 6);
         if (!rows.length) continue;
-        panel.append(element('h4', (kind === 'chat' ? 'Chat · output tokens/s' : 'Embedding · input tokens/s') + ' · ' + timing + ' timing'));
-        for (const row of rows) panel.append(element('p', `${row.model} · ${row.tokens_per_second.toFixed(1)} tokens/s · range ${row.minimum}–${row.maximum} · ${row.samples} distinct approved measurements (not independent users) · ${row.hardware.accelerator} · artifact ${row.model_digest || 'unknown'}. Search this tag and check local fit before downloading.`));
+        for (const row of rows) panel.append(element('p', `${row.model} · ${kind} · ${row.tokens_per_second.toFixed(1)} ${kind === 'chat' ? 'output' : 'input'} tokens/s (${timing}) · range ${row.minimum}–${row.maximum} · ${row.samples} measurements · ${row.hardware.accelerator}`));
       }
     }
   },
