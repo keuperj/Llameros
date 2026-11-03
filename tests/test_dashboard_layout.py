@@ -4,6 +4,33 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 
+def test_login_form_identifies_credentials_for_password_managers():
+    class FormParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.nodes = {}
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if attrs.get("id") in {"login-form", "username", "password"}:
+                self.nodes[attrs["id"]] = (tag, attrs)
+
+    static = Path(__file__).resolve().parents[1] / "src/llameros/static"
+    parser = FormParser()
+    parser.feed((static / "index.html").read_text())
+    form = parser.nodes["login-form"][1]
+    assert form["method"] == "post" and form["action"] == "/api/login"
+    assert form["autocomplete"] == "on"
+    for name, kind, autocomplete in (
+        ("username", "text", "username"),
+        ("password", "password", "current-password"),
+    ):
+        tag, attrs = parser.nodes[name]
+        assert tag == "input" and attrs["name"] == name
+        assert attrs["type"] == kind and attrs["autocomplete"] == autocomplete
+        assert "required" in attrs
+
+
 def test_compact_help_is_accessible_and_preserves_guidance():
     class HelpParser(HTMLParser):
         def __init__(self):
@@ -53,7 +80,9 @@ def test_catalogue_has_one_suggestion_tooltip_without_explanatory_sections():
     )[0]
     assert catalogue.count('role="tooltip"') == 1
     assert catalogue.count("<h4>Suggestions</h4>") == 1
-    assert '<h4>Suggestions</h4><div id="community-models">' in catalogue
+    assert 'aria-label="Suggestion sources"' in catalogue
+    assert 'class="suggestion-popularity">● Popularity' in catalogue
+    assert 'class="suggestion-community">● Community benchmarks' in catalogue
     assert 'aria-describedby="catalogue-suggestions-help"' in catalogue
     for removed in (
         "Estimated fit; not guaranteed",

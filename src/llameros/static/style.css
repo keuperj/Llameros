@@ -1,3 +1,7 @@
+.suggestion-popularity .suggestion-marker,.suggestion-legend .suggestion-popularity{color:var(--green)}
+.suggestion-community .suggestion-marker,.suggestion-legend .suggestion-community{color:#83bfff}
+.suggestion-popularity button{border-color:var(--green)}.suggestion-community button{border-color:#83bfff}
+.suggestion-legend{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;margin:8px 0}
 /* Compact help stays outside scrolling/table clipping; JS positions it in the viewport. */
 .help-tip{display:inline-block;vertical-align:middle;line-height:1.4}
 .help-trigger{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;margin-left:5px;border-radius:50%;font-size:12px;color:var(--green);cursor:help}

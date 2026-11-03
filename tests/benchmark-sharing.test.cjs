@@ -16,7 +16,14 @@ function harness(confirm = true, entries = [{model:'gemma3:270m', tokens_per_sec
   const context = vm.createContext({
     sessionEpoch: 1, userBoard:false,
     document:{getElementById:get, addEventListener(type, fn) { fn(); }}, safe:fn => fn,
-    element:(tag, textContent) => ({tag, textContent}),
+    element:(tag, textContent, className) => ({tag, textContent, className, children:[], handlers:{},
+      append(...nodes) { this.children.push(...nodes); },
+      setAttribute(name, value) { this[name] = value; },
+      addEventListener(type, fn) { this.handlers[type] = fn; }}),
+    actionFeedback:{bind() {}, restore() {}},
+    catalogue:async () => { calls.push('catalogue'); },
+    renderFamilies:() => { calls.push('families'); },
+    selectFamily:async model => { calls.push({selected:model}); },
     window:{confirm(text) { calls.push({confirmation:text}); return confirm; }},
     api:async (url, payload) => {
       calls.push({url, payload});
@@ -26,12 +33,14 @@ function harness(confirm = true, entries = [{model:'gemma3:270m', tokens_per_sec
       return payload;
     },
   });
+  const appSource = fs.readFileSync(path.join(__dirname, '../src/llameros/static/app.js'), 'utf8');
+  vm.runInContext(appSource.slice(appSource.indexOf('function suggestionRow('), appSource.indexOf('function renderRecommendations(')), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/llameros/static/benchmark-sharing.js'), 'utf8'), context);
   return {get, context, calls};
 }
 
 test('catalogue community suggestions have compact rows without repeated explanatory headings', async () => {
-  const {get, context} = harness();
+  const {get, context, calls} = harness();
   context.api = async () => ({note:'Long explanatory methodology', models:[
     {kind:'embedding', timing:'request', model:'embed:latest', tokens_per_second:42,
       minimum:40, maximum:44, samples:2, hardware:{accelerator:'cpu'}, model_digest:'sha256:abc'},
@@ -39,13 +48,33 @@ test('catalogue community suggestions have compact rows without repeated explana
   await vm.runInContext('BenchmarkSharing.recommendations(false)', context);
   const rows = get('community-models').children;
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].tag, 'p');
-  assert.equal(rows[0].textContent, 'embed:latest');
-  assert.match(rows[0].title, /embedding · 42.0 input tokens\/s \(request\)/);
-  assert.doesNotMatch(rows[0].textContent, /Search this tag|Long explanatory|artifact/);
+  assert.equal(rows[0].tag, 'div');
+  assert.equal(rows[0].className, 'recommendation suggestion-community');
+  const button = rows[0].children[1];
+  assert.equal(button.tag, 'button');
+  assert.equal(button.textContent, 'embed:latest');
+  assert.equal(button['aria-label'], 'embed:latest · Community suggestion');
+  assert.match(button.title, /embedding · 42.0 input tokens\/s \(request\)/);
+  await button.handlers.click();
+  assert.equal(get('search').value, 'embed:latest');
+  assert.equal(get('families').value, 'embed');
+  assert.deepEqual(calls.slice(-3), ['catalogue', 'families', {selected:'embed:latest'}]);
   context.api = async () => ({note:'Community benchmarks disabled', models:[]});
   await vm.runInContext('BenchmarkSharing.recommendations(false)', context);
   assert.equal(get('community-models').children[0].textContent, 'Community benchmarks disabled');
+});
+
+test('popularity and community rows share controls but have distinct source styles and labels', () => {
+  const {context} = harness();
+  for (const [source, label] of [['popularity', 'Popularity'], ['community', 'Community']]) {
+    context.source = source;
+    const row = vm.runInContext('suggestionRow("gemma3:270m", source, "Short detail", async () => {})', context);
+    assert.equal(row.className, 'recommendation suggestion-' + source);
+    assert.equal(row.children[0].className, 'suggestion-marker');
+    assert.equal(row.children[1].type, 'button');
+    assert.equal(row.children[1]['aria-label'], `gemma3:270m · ${label} suggestion`);
+    assert.equal(row.children[2].textContent, 'Short detail');
+  }
 });
 
 test('sharing is never automatic; settings render preserves edits and uses typed values', async () => {

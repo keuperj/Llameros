@@ -23,12 +23,20 @@ const BenchmarkSharing = {
         const rows = data.models.filter(row => row.kind === kind && row.timing === timing).slice(0, 6);
         if (!rows.length) continue;
         for (const row of rows) {
-          const suggestion = element('p', row.model);
-          suggestion.title = `${kind} · ${row.tokens_per_second.toFixed(1)} ${kind === 'chat' ? 'output' : 'input'} tokens/s (${timing}) · range ${row.minimum}–${row.maximum} · ${row.samples} measurements · ${row.hardware.accelerator}`;
+          const detail = `${kind} · ${row.tokens_per_second.toFixed(1)} ${kind === 'chat' ? 'output' : 'input'} tokens/s (${timing})`;
+          const suggestion = suggestionRow(row.model, 'community', detail, async () => {
+            document.getElementById('search').value = row.model;
+            await catalogue();
+            if (epoch !== sessionEpoch || userBoard) return;
+            renderFamilies();
+            document.getElementById('families').value = row.model.split(':')[0];
+            await selectFamily(row.model);
+          });
           panel.append(suggestion);
         }
       }
     }
+    actionFeedback.restore();
   },
 };
 document.addEventListener('DOMContentLoaded', () => {

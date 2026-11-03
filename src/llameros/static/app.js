@@ -616,18 +616,25 @@ function renderFamilies() {
 /**
  * Render at most six fitting recommendations and their selection actions.
  */
+function suggestionRow(model, source, detail, select) {
+  const row = element('div', '', 'recommendation suggestion-' + source);
+  const bullet = element('span', '●', 'suggestion-marker'); bullet.setAttribute('aria-hidden', 'true');
+  const button = element('button', model); button.type = 'button';
+  const label = source === 'community' ? 'Community' : 'Popularity';
+  button.setAttribute('aria-label', `${model} · ${label} suggestion`);
+  button.title = detail;
+  actionFeedback.bind(button, 'recommendation:' + source + ':' + model);
+  button.addEventListener('click', safe(select));
+  row.append(bullet, button, element('small', detail));
+  return row;
+}
 function renderRecommendations() {
   $('recommended').replaceChildren();
   for (const entry of Catalogue.recommendations(Catalogue.visible(catalogueEntries, loadedCatalogueQuery, cpuOnly()))) {
-    const row = element('div', '', 'recommendation');
-    const bullet = element('span', '●', 'fit-bullet'); bullet.setAttribute('aria-hidden', 'true');
-    const button = element('button', entry.variant.name);
-    actionFeedback.bind(button, 'recommendation:' + entry.variant.name);
-    button.addEventListener('click', safe(async () => {
+    const row = suggestionRow(entry.variant.name, 'popularity', `~${bytes(entry.variant.download_bytes)} · popularity rank ${entry.rank + 1}`, async () => {
       renderFamilies(); $('families').value = entry.family;
       await selectFamily(entry.variant.name);
-    }));
-    row.append(bullet, button, element('small', `~${bytes(entry.variant.download_bytes)} · popularity rank ${entry.rank + 1}`));
+    });
     $('recommended').append(row);
   }
   actionFeedback.restore();
