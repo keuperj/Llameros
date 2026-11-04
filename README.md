@@ -114,7 +114,7 @@ private; unset `LLAMEROS_API_KEY` after use and revoke unwanted keys in the dash
 See [API compatibility](api-compatibility.md) for other endpoints and streaming.
 
 ## Share your Benchmarks
-Llameros collects the benchmarking results of Ollama models and uses them to give better model suggestions.
+Users can donate their own benchmarking results of Ollama models on their hardware. LLameros uses them to give better model suggestions for all users.
 
 [View public benchmark results on the default benchmark server](https://92.205.18.100:9443/).
 
