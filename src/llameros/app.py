@@ -167,9 +167,12 @@ class Jobs:
                     )
             except Exception as exc:
                 log.warning("Job %s failed [%s]", action, type(exc).__name__)
+                error = diagnostic(exc)
+                # Keep the job reserved until its terminal event is committed,
+                # just as on success: observers must not see a failure without its log.
+                self.store.event(f"{action}:failed", model, error)
                 with self.lock:
-                    self.job.update(state="failed", error=diagnostic(exc), finished=time.time())
-                self.store.event(f"{action}:failed", model, diagnostic(exc))
+                    self.job.update(state="failed", error=error, finished=time.time())
 
         self.pool.submit(work)
         return {"accepted": True, "job_id": job_id}

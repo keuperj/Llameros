@@ -1,7 +1,56 @@
 """Offline action errors regression tests for Llameros behavior and integration boundaries."""
 
+import threading
+
+import pytest
+from fastapi import HTTPException
 from test_core import client as client  # noqa: F401
 from test_core import sign_in, wait_job
+
+from llameros.app import Jobs
+from llameros.docker import DockerError
+from llameros.storage import Store
+
+
+def test_failed_job_waits_for_terminal_event_commit(tmp_path, monkeypatch):
+    """Hold the failure log write to deterministically expose premature status publication."""
+    store = Store(tmp_path / "history.sqlite3")
+    jobs = Jobs(store)
+    entered, release = threading.Event(), threading.Event()
+    record = store.event
+
+    def delayed_event(kind, model="", detail=""):
+        if kind == "load:failed":
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("Test did not release the failure event write")
+        record(kind, model, detail)
+
+    def fail(progress):
+        raise DockerError("Runtime is stopped")
+
+    monkeypatch.setattr(store, "event", delayed_event)
+    try:
+        accepted = jobs.submit("load", "gemma3:270m", fail)
+        assert entered.wait(5)
+        snapshot = jobs.status()
+        assert snapshot["job_id"] == accepted["job_id"]
+        assert snapshot["state"] == "running"
+        with store.connect() as db:
+            assert db.execute("SELECT 1 FROM events WHERE kind='load:failed'").fetchone() is None
+        with pytest.raises(HTTPException) as conflict:
+            jobs.submit("load", "other:latest", fail)
+        assert conflict.value.status_code == 409
+    finally:
+        release.set()
+        jobs.pool.shutdown(wait=True)
+    snapshot = jobs.status()
+    assert snapshot["state"] == "failed"
+    assert snapshot["job_id"] == accepted["job_id"]
+    with store.connect() as db:
+        event = db.execute("SELECT * FROM events WHERE kind='load:failed'").fetchone()
+    assert event["model"] == "gemma3:270m"
+    assert event["detail"] == snapshot["error"]
 
 
 def test_action_errors_require_session_csrf_and_persist_bounded_text(client):
