@@ -9,7 +9,31 @@
   NVIDIA/AMD drivers and Docker GPU support; CPU execution does not.
 - Run as a normal Linux login account, **never with sudo**. Keep Llameros on
   localhost or a VPN-protected network; public-Internet hosting is unsupported.
-- From your checkout, install the locked dependencies and start:
+- On Ubuntu, run the system preflight **from the checkout** before installing:
+
+```bash
+./CheckSystem.sh
+```
+
+  The script checks Python 3.11+, `uv`, PAM, and access to the selected Docker
+  daemon, including whether it is rootless. It prints hints for missing or
+  misconfigured components. Use `./CheckSystem.sh --gpu nvidia` or `--gpu amd`
+  to make the corresponding GPU checks required, or `--gpu cpu` to skip GPU
+  checks. GPU findings in the default `auto` mode are advisory. If you have
+  deliberately configured a [rootful Docker installation](#using-an-existing-rootful-docker-daemon),
+  add `--allow-rootful` to the check; this does not change Llameros settings.
+
+  The checker does not install packages, pull images, start containers, or
+  restart services. A nonzero exit status signals blockers (1) or invalid
+  arguments (2). Host GPU checks do not prove container GPU access; on NVIDIA,
+  follow the [container startup check](#verify-nvidia-gpus-with-rootless-docker).
+
+  Setup references: [uv](https://docs.astral.sh/uv/getting-started/installation/),
+  [Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/),
+  [rootless Docker](https://docs.docker.com/engine/security/rootless/), and the
+  [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
+
+- Once the preflight has no blockers, install the locked dependencies and start:
 
 ```bash
 uv sync --locked

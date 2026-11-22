@@ -47,6 +47,7 @@ host drivers and container support. Run as your normal user, never sudo.
 
 ```bash
 # Run from the repository root.
+./CheckSystem.sh  # Ubuntu: check prerequisites and get setup hints
 uv sync --locked
 uv run llameros
 ```
