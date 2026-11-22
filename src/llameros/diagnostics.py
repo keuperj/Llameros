@@ -34,6 +34,16 @@ def diagnostic(exc: Exception) -> str:
         text = str(exc).lower()
         reasons = (
             (
+                ("docker restart requires the standard rootless user socket",),
+                "docker-restart-unsupported",
+                "The dashboard can only restart standard rootless Docker (the local docker.service user service).",
+            ),
+            (
+                ("docker user-service restart could not be confirmed",),
+                "docker-restart",
+                "Docker restart could not be confirmed. Check the docker.service user journal before retrying.",
+            ),
+            (
                 ("ollama environment differs",),
                 "container-environment",
                 "Ollama environment settings changed. Stop all runtimes, save Ollama settings with container recreation confirmed, then Start Ollama. Model files are retained.",

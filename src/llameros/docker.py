@@ -191,6 +191,31 @@ class Docker:
                 "Rootful Docker refused. Configure rootless Docker, or explicitly set allow_rootful_docker = true after accepting the root-equivalent daemon access risk."
             )
 
+    def restart_daemon(self):
+        """Restart only the local rootless Docker user service used by Llameros."""
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        endpoint = None if os.environ.get("DOCKER_CONTEXT") else os.environ.get("DOCKER_HOST")
+        if not endpoint:
+            endpoint = self.command("context", "inspect", "--format", "{{.Endpoints.docker.Host}}")
+        if not runtime or endpoint != f"unix://{Path(runtime) / 'docker.sock'}":
+            raise DockerError("Docker restart requires the standard rootless user socket")
+        options = json.loads(self.command("info", "--format", "{{json .SecurityOptions}}"))
+        if "name=rootless" not in (options or []):
+            raise DockerError("Docker restart requires the standard rootless user socket")
+        try:
+            subprocess.run(
+                ["systemctl", "--user", "--no-ask-password", "restart", "docker.service"],
+                capture_output=True,
+                timeout=180,
+                check=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise DockerError("Docker user-service restart could not be confirmed") from exc
+        try:
+            self.check_daemon()
+        except DockerError as exc:
+            raise DockerError("Docker user-service restart could not be confirmed") from exc
+
     def inspect(self) -> dict | None:
         # Listing first distinguishes a missing container from daemon/permission failures.
         """Return container metadata only after checking UID ownership and optional target labels."""

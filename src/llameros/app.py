@@ -94,6 +94,10 @@ class ActionError(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
 
 
+class DockerRestartRequest(BaseModel):
+    confirmed: bool = Field(default=False, strict=True)
+
+
 class Jobs:
     """Single-worker lifecycle execution coordinated with per-device inference reservations."""
 
@@ -782,6 +786,19 @@ def create_app(
             detail="Ollama environment settings updated; start Ollama to apply",
         )
         return body.model_dump()
+
+    @app.post("/api/docker/restart", dependencies=protected, status_code=202)
+    def restart_docker(body: DockerRestartRequest):
+        if not body.confirmed:
+            raise HTTPException(
+                400, "Confirm that restarting Docker will interrupt running containers"
+            )
+
+        def work(progress):
+            progress({"status": "Restarting the rootless Docker daemon"})
+            docker.restart_daemon()
+
+        return jobs.submit("docker-restart", "", work)
 
     @app.get("/api/benchmark-sharing", dependencies=protected)
     def sharing_info():

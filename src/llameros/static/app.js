@@ -13,6 +13,7 @@ let busy = false, jobTimer = null, pollingJob = false;
 let runtimeState = null, infoVersion = 0;
 let accessConfig = null, accessContext = 4096;
 let sessionEpoch = 0;
+let dockerRestartSubmitting = false;
 /** Invalidate all outstanding account/board requests and erase private presentation. */
 function clearSessionView() {
   if (typeof SchedulerConfig !== 'undefined') SchedulerConfig.reset();
@@ -25,6 +26,9 @@ function clearSessionView() {
   lastResult = ''; selectedFit = null; catalogueEntries = []; loadedCatalogueQuery = '';
   runtimeState = null; accessConfig = null; storageInitialized = false;
   busy = false; refreshing = false; pollingJob = false;
+  dockerRestartSubmitting = false;
+  $('docker-restart').disabled = false;
+  $('docker-restart-feedback').textContent = '';
   catalogueVersion++; familyVersion++; fitVersion++; infoVersion++;
   localActionEvents.length = 0; serverEvents = []; modelBoxes.clear();
   actionFeedback.reset(); clearKeySecret();
@@ -294,6 +298,11 @@ function progressBar(label, value) {
 function renderJob(job) {
   actionFeedback.job(job);
   busy = job.state === 'running';
+  $('docker-restart').disabled = busy || dockerRestartSubmitting;
+  if (job.action === 'docker-restart') {
+    $('docker-restart-feedback').textContent = busy ? 'Restarting Docker…' :
+      job.state === 'completed' ? 'Docker daemon restarted.' : job.error || 'Docker restart failed.';
+  }
   $('job').replaceChildren();
   if (job.state !== 'idle') {
     const p = job.progress || {}, value = job.state === 'completed' ? 100 : JobProgress.percent(p);
@@ -540,6 +549,23 @@ $('storage-form').addEventListener('submit', safe(async (event, control) => {
   await refresh();
 }));
 for (const action of ['start', 'stop']) $('container-' + action).addEventListener('click', safe(async (event, control) => { await submitAction(control, '/api/container/' + action, {}); await refresh(); }));
+$('docker-restart').addEventListener('click', safe(async (event, control) => {
+  if (busy || dockerRestartSubmitting) return;
+  if (!window.confirm('Restart the Docker daemon? This will stop or interrupt all running containers on this daemon, including containers not managed by Llameros. Some containers may not restart automatically. Continue?')) return;
+  const epoch = sessionEpoch;
+  dockerRestartSubmitting = true;
+  control.disabled = true;
+  $('docker-restart-feedback').textContent = '';
+  try {
+    await submitAction(control, '/api/docker/restart', {confirmed: true});
+    await pollJob();
+  } finally {
+    if (epoch === sessionEpoch) {
+      dockerRestartSubmitting = false;
+      control.disabled = busy;
+    }
+  }
+}));
 /**
  * Search families and progressively check compatibility with bounded request concurrency.
  * Version counters ignore stale responses after a new search, selection, or logout.

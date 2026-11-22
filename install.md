@@ -172,6 +172,14 @@ docker info --format '{{json .SecurityOptions}}'
   [troubleshooting](https://docs.docker.com/engine/security/rootless/troubleshoot/),
   [volume backups](https://docs.docker.com/engine/storage/volumes/#back-up-restore-or-migrate-data-volumes).
 
+## Restart rootless Docker from the admin dashboard
+
+For maintenance, **Admin → Configuration → Docker daemon** can restart the
+standard local rootless `docker.service` after confirmation. This affects all
+containers on that daemon, including those not managed by Llameros. It does not
+use `sudo` or restart a rootful or remote Docker service. Wait for active
+Llameros jobs to finish, and coordinate downtime with other users first.
+
 ## Verify NVIDIA GPUs with rootless Docker
 
 On a new **NVIDIA + rootless Docker** installation, run this before loading a

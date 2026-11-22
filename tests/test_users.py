@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from test_core import HARDWARE, FakeDocker
+from test_core import HARDWARE, FakeDocker, wait_job
 
 from llameros.api_keys import ApiKeys, KeyRequest
 from llameros.app import create_app
@@ -61,6 +61,29 @@ def login(client, username):
     assert response.status_code == 200, response.text
     client.headers["X-CSRF-Token"] = response.json()["csrf"]
     return response.json()
+
+
+def test_docker_restart_requires_admin_csrf_and_explicit_confirmation(multiuser, monkeypatch):
+    _, admin, user = multiuser
+    calls = []
+    monkeypatch.setattr(
+        FakeDocker, "restart_daemon", lambda self: calls.append("restart"), raising=False
+    )
+    endpoint = "/api/docker/restart"
+    confirmed = {"confirmed": True}
+    assert user.post(endpoint, json=confirmed).status_code == 403
+    assert (
+        admin.post(endpoint, json=confirmed, headers={"X-CSRF-Token": "wrong"}).status_code == 403
+    )
+    assert admin.post(endpoint, json={}).status_code == 400
+    assert admin.post(endpoint, json={"confirmed": "true"}).status_code == 422
+    assert not calls
+    result = admin.post(endpoint, json=confirmed)
+    assert result.status_code == 202
+    job = wait_job(admin)
+    assert job["action"] == "docker-restart" and job["state"] == "completed"
+    assert job["job_id"] == result.json()["job_id"]
+    assert calls == ["restart"]
 
 
 def issue(client, **kwargs):
