@@ -7,7 +7,9 @@ from scripts import rootless_nvidia as setup
 
 def test_check_requests_each_uuid_and_rejects_extra_gpu(tmp_path, monkeypatch):
     monkeypatch.setattr(setup, "rootless_info", Mock())
-    monkeypatch.setattr(setup, "run", Mock(return_value="GPU 0 (UUID: GPU-123)\nGPU 1 (UUID: GPU-456)"))
+    monkeypatch.setattr(
+        setup, "run", Mock(return_value="GPU 0 (UUID: GPU-123)\nGPU 1 (UUID: GPU-456)")
+    )
     docker = Mock(side_effect=["GPU 0 (UUID: GPU-123)", "GPU 0 (UUID: GPU-456)"])
     monkeypatch.setattr(setup, "docker", docker)
 
@@ -43,7 +45,9 @@ def test_mirror_waits_for_spec_and_updates_without_rewriting_identical_copy(tmp_
 def test_installer_writes_units_without_restarting_docker(tmp_path, monkeypatch):
     runtime = tmp_path / "run"
     config = tmp_path / "config"
-    monkeypatch.setattr(setup, "rootless_info", Mock(return_value={"CDISpecDirs": [str(runtime / "cdi")]}))
+    monkeypatch.setattr(
+        setup, "rootless_info", Mock(return_value={"CDISpecDirs": [str(runtime / "cdi")]})
+    )
     monkeypatch.setattr(setup, "read_host_spec", Mock(return_value=b"spec"))
     run = Mock(return_value="active\n")
     monkeypatch.setattr(setup, "run", run)

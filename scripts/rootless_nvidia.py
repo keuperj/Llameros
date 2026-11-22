@@ -60,12 +60,25 @@ def check(runtime, image, gpu):
     for device in devices:
         print(f"Testing --gpus device={device} with {image}", flush=True)
         visible = docker(
-            runtime, "run", "--rm", "--pull=never", "--network=none", "--cap-drop=ALL",
-            "--security-opt=no-new-privileges:true", "--gpus", f"device={device}",
-            "--entrypoint=nvidia-smi", "--", image, "-L", capture=True,
+            runtime,
+            "run",
+            "--rm",
+            "--pull=never",
+            "--network=none",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges:true",
+            "--gpus",
+            f"device={device}",
+            "--entrypoint=nvidia-smi",
+            "--",
+            image,
+            "-L",
+            capture=True,
         )
         if set(GPU_UUID.findall(visible)) != {device}:
-            raise ValueError(f"Container did not expose exactly the requested GPU {device}: {visible}")
+            raise ValueError(
+                f"Container did not expose exactly the requested GPU {device}: {visible}"
+            )
         print(visible.strip())
 
 
@@ -76,9 +89,15 @@ def read_host_spec():
         parent = SOURCE.parent.lstat()
         if parent.st_uid != 0 or parent.st_mode & 0o022 or not stat.S_ISDIR(parent.st_mode):
             raise ValueError(f"Untrusted CDI directory: {SOURCE.parent}")
-        with os.fdopen(os.open(SOURCE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:
+        with os.fdopen(
+            os.open(SOURCE, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb"
+        ) as stream:
             metadata = os.fstat(stream.fileno())
-            if metadata.st_uid != 0 or metadata.st_mode & 0o022 or not stat.S_ISREG(metadata.st_mode):
+            if (
+                metadata.st_uid != 0
+                or metadata.st_mode & 0o022
+                or not stat.S_ISREG(metadata.st_mode)
+            ):
                 raise ValueError(f"Untrusted CDI spec: {SOURCE}")
             content = stream.read()
     except FileNotFoundError:
@@ -100,7 +119,9 @@ def mirror(runtime):
     dest = directory / SOURCE.name
     if not dest.is_symlink() and dest.is_file() and dest.read_bytes() == content:
         return
-    with tempfile.NamedTemporaryFile(dir=directory, prefix=".llameros-nvidia-", delete=False) as file:
+    with tempfile.NamedTemporaryFile(
+        dir=directory, prefix=".llameros-nvidia-", delete=False
+    ) as file:
         temporary = Path(file.name)
         try:
             file.write(content)
@@ -112,7 +133,9 @@ def mirror(runtime):
 
 def install(runtime, config):
     if str(runtime / "cdi") not in (rootless_info(runtime).get("CDISpecDirs") or []):
-        raise ValueError("Docker does not list the runtime user CDI directory; this workaround does not apply.")
+        raise ValueError(
+            "Docker does not list the runtime user CDI directory; this workaround does not apply."
+        )
     if run("systemctl", "--user", "is-active", "docker.service", capture=True).strip() != "active":
         raise ValueError("The standard rootless docker.service must be active.")
     if read_host_spec() is None:
@@ -138,7 +161,9 @@ def install(runtime, config):
         ).encode(),
     }
     for path, content in files.items():
-        if path.is_symlink() or (path.exists() and (not path.is_file() or path.read_bytes() != content)):
+        if path.is_symlink() or (
+            path.exists() and (not path.is_file() or path.read_bytes() != content)
+        ):
             raise ValueError(f"Refusing to overwrite {path}.")
     dest = runtime / "cdi" / SOURCE.name
     if dest.is_symlink() or (dest.exists() and not (units / SERVICE).is_file()):
@@ -159,13 +184,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     probe = sub.add_parser("check", help="Run a disposable GPU container (no image pull)")
-    probe.add_argument("--image", default="ubuntu:24.04", help="Trusted image already present locally")
+    probe.add_argument(
+        "--image", default="ubuntu:24.04", help="Trusted image already present locally"
+    )
     probe.add_argument("--gpu", help="Check only this GPU UUID instead of each host GPU")
     sub.add_parser("install", help="Enable the opt-in CDI mirror without restarting Docker")
     if (sys.argv[1:] if argv is None else argv)[:1] == ["_sync"]:
         worker = argparse.ArgumentParser()
         worker.add_argument("runtime", type=Path)
-        args = worker.parse_args((sys.argv[2:] if argv is None else argv[1:]))
+        args = worker.parse_args(sys.argv[2:] if argv is None else argv[1:])
         mirror(args.runtime)
         return
     args = parser.parse_args(argv)
