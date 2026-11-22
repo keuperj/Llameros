@@ -31,6 +31,30 @@ and the selected GPU's free VRAM. Other applications can consume these resources
 after a fit check. A load with no reported GPU VRAM use is unloaded and reported
 as a CPU fallback rather than shown as successful GPU execution.
 
+### Rootless Docker cannot resolve an NVIDIA CDI device
+
+Run these checks as the account that runs Llameros and rootless Docker:
+
+```sh
+nvidia-smi -L
+docker info --format '{{json .CDISpecDirs}}'
+journalctl --user -u docker -n 100 --no-pager
+```
+
+If the host sees the GPU and Docker logs `unresolvable CDI devices` followed by
+an NVIDIA legacy hook `BPF_CGROUP_DEVICE` permission error, check whether the
+Toolkit's generated `/run/cdi/nvidia.yaml` is accessible to the **daemon**, not
+just to the shell. RootlessKit's private `/run` can miss a CDI directory created
+after Docker starts. If Docker lists a user CDI directory, an administrator can
+mirror the host-generated spec there atomically, before the user daemon starts
+and whenever the host spec changes. Keep the mirror in sync after driver or
+Toolkit updates; do not edit it by hand. Retry the existing container and check
+`nvidia-smi -L` inside it. No container recreation is needed if the existing
+GPU request resolves successfully. See the
+[installation guide](install.md#verify-nvidia-gpus-with-rootless-docker) for
+the container startup check and opt-in installer. A passing check does not
+diagnose why a previously running container exited.
+
 ## Docker or Ollama is unavailable
 
 Check the error shown in the runtime panel. The Docker CLI must reach a local

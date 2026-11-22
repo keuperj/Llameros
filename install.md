@@ -172,6 +172,58 @@ docker info --format '{{json .SecurityOptions}}'
   [troubleshooting](https://docs.docker.com/engine/security/rootless/troubleshoot/),
   [volume backups](https://docs.docker.com/engine/storage/volumes/#back-up-restore-or-migrate-data-volumes).
 
+## Verify NVIDIA GPUs with rootless Docker
+
+On a new **NVIDIA + rootless Docker** installation, run this before loading a
+model. Use the same Linux account as Llameros, without `sudo`, with the standard
+user `docker.service` and its `$XDG_RUNTIME_DIR/docker.sock` running. Skip this
+step for CPU or AMD setups.
+
+```sh
+docker --host "unix://$XDG_RUNTIME_DIR/docker.sock" pull ubuntu:24.04
+python3 scripts/rootless_nvidia.py check
+```
+
+If your shell sets `DOCKER_CONTEXT`, unset it first. The check uses a disposable
+container and the same `--gpus device=<UUID>` request as Llameros. It verifies
+that each tested GPU is visible inside the container. It does not pull images
+itself or touch existing containers. Use `--image` to select a trusted local
+image that can run NVIDIA's injected `nvidia-smi`, or `--gpu` to test one UUID.
+
+**If the check passes, stop here.** If Docker logs `unresolvable CDI devices`
+and falls back to the NVIDIA legacy hook, see the
+[NVIDIA CDI troubleshooting steps](trouble_shooting.md#rootless-docker-cannot-resolve-an-nvidia-cdi-device).
+If the host Toolkit has generated `/run/cdi/nvidia.yaml` but rootless Docker
+cannot see it, opt in to the user-level workaround:
+
+```sh
+python3 scripts/rootless_nvidia.py install
+python3 scripts/rootless_nvidia.py check
+```
+
+The installer requires Docker to list `$XDG_RUNTIME_DIR/cdi` in `CDISpecDirs`.
+It watches the host spec and copies it to that directory before Docker starts
+and when the source changes. It does not restart Docker or change system-wide
+Docker or NVIDIA settings. Do not enable a second mirror if one is already
+configured. If the recheck still fails, inspect
+`journalctl --user -u llameros-nvidia-cdi.service -u docker.service -n 100 --no-pager`
+before considering a Docker restart, which can interrupt other containers.
+
+To undo this workaround, run the following with the same user and XDG
+environment. Do not remove a CDI spec managed by another tool:
+
+```sh
+systemctl --user disable --now llameros-nvidia-cdi.path
+systemctl --user stop llameros-nvidia-cdi.service
+config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+rm -f -- "$config_home/systemd/user/llameros-nvidia-cdi.path" \
+    "$config_home/systemd/user/llameros-nvidia-cdi.service" \
+    "$config_home/systemd/user/docker.service.d/40-llameros-nvidia-cdi.conf" \
+    "$config_home/llameros/llameros-nvidia-cdi.py" \
+    "$XDG_RUNTIME_DIR/cdi/nvidia.yaml"
+systemctl --user daemon-reload
+```
+
 ## First model and daily workflow
 
 ### Optional external benchmark database
