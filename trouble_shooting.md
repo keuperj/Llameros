@@ -37,9 +37,35 @@ Run these checks as the account that runs Llameros and rootless Docker:
 
 ```sh
 nvidia-smi -L
+nvidia-ctk cdi list
+docker version --format '{{.Server.Version}}'
 docker info --format '{{json .CDISpecDirs}}'
 journalctl --user -u docker -n 100 --no-pager
 ```
+
+If `nvidia-smi` sees GPUs but Docker reports `BPF_CGROUP_DEVICE` and the NVIDIA
+legacy hook, check both the Engine version and whether a CDI spec exists. Docker
+Engine **29.2.0** added CDI resolution for NVIDIA `--gpus` requests such as the
+ones Llameros sends. Older engines can still reach the legacy hook even when
+explicit `--device nvidia.com/gpu=…` requests work. Upgrade during a maintenance
+window if you want to use CDI with Llameros on an older engine.
+
+If the Toolkit lists zero CDI devices, ask the host administrator to check
+`systemctl status nvidia-cdi-refresh.service`. If the service stopped at its
+`ExecCondition`, compare that condition with the installed module name in
+`/lib/modules/$(uname -r)/modules.dep`; a check for `nvidia.ko:` does not match
+`nvidia.ko.zst:`. An administrator can generate a spec manually, for example:
+
+```sh
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+nvidia-ctk cdi list
+```
+
+Use `/etc/cdi` only if it is in the daemon's search list and no other NVIDIA
+spec is already managed there or in `/run/cdi`. A manually generated spec must
+be refreshed after driver or device changes, or replaced by working automatic
+refresh. If the daemon still cannot see a valid spec, coordinate a user-daemon
+restart: this can interrupt all of its running containers.
 
 If the host sees the GPU and Docker logs `unresolvable CDI devices` followed by
 an NVIDIA legacy hook `BPF_CGROUP_DEVICE` permission error, check whether the

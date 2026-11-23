@@ -12,6 +12,14 @@ from llameros.docker import DockerError
         ("Runtime parallelism differs from configuration", "container-parallelism"),
         ("could not select device driver with capabilities: [[gpu]]", "gpu-runtime"),
         ("nvidia-container-cli: initialization error", "gpu-runtime"),
+        (
+            "nvidia-container-cli: failed to add device rules: bpf_prog_query(BPF_CGROUP_DEVICE) failed: operation not permitted",
+            "gpu-cgroup",
+        ),
+        (
+            "CDI device injection failed: unresolvable CDI devices nvidia.com/gpu=GPU-1234",
+            "gpu-cdi",
+        ),
         ("Legacy or differently assigned container found", "container-isolation"),
         ("Runtime image differs from configured digest", "container-image"),
         ("Rootful Docker refused", "docker-policy"),

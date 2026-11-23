@@ -60,6 +60,16 @@ def diagnostic(exc: Exception) -> str:
                 "Container parallelism differs from scheduler settings. Stop all runtimes and reapply model storage to recreate containers; model files are retained.",
             ),
             (
+                ("bpf_prog_query(bpf_cgroup_device)",),
+                "gpu-cgroup",
+                "The NVIDIA legacy hook could not query cgroup device rules. For rootless Docker, check that the Engine supports NVIDIA CDI via --gpus and can resolve the GPU UUIDs. See the NVIDIA CDI troubleshooting guide.",
+            ),
+            (
+                ("unresolvable cdi devices", "cdi device injection failed"),
+                "gpu-cdi",
+                "Docker could not inject the requested CDI devices. Check the NVIDIA CDI spec and the daemon's CDI search directories.",
+            ),
+            (
                 (
                     "could not select device driver",
                     "nvidia-container",
