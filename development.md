@@ -75,10 +75,11 @@ not a Python/application dependency; generated `_site/` files are ignored.
 - Tests: `tests/test_*.py` and `tests/*.test.cjs`. Opt-in live tools:
   `scripts/test_api_access.py`, `scripts/check_api_compatibility.py`,
   `scripts/benchmark_rag.py`.
-- Lifecycle jobs use one worker. Inference has a FIFO queue per target with
+- Lifecycle jobs use one worker. Inference has a FIFO queue per runtime with
   `ollama_num_parallel` active requests (default 2), 16 waiting, and a 120-second
   queue timeout. CPU/distinct GPUs execute independently; models on one target share capacity.
-- Targeted lifecycle jobs reserve that device; global/ambiguous jobs reserve all.
+- Targeted lifecycle jobs reserve the affected devices and runtime slots;
+  global/ambiguous jobs reserve all.
   Queued work prevents conflicting lifecycle admission. Benchmarks require idle
   queues and reserve the gateway globally. External retrieval holds no execution permit.
 
@@ -96,6 +97,51 @@ not a Python/application dependency; generated `_site/` files are ignored.
 - Consult [API compatibility](api-compatibility.md) and `tests/ollama-compatibility.json`
   before changing fields or terminal stream events. Client-example SDKs are not
   automatically application dependencies.
+
+### Multi-GPU deployments
+
+See the [user workflow](install.md#run-a-model-on-multiple-gpus) for dashboard
+steps and placement requirements. Keep the logical deployment target distinct
+from the runtime IDs that own queue permits and private sockets.
+
+- **Lifecycle API (`app.py`):** The admin-only `POST /api/models/load` accepts
+  `targets` (distinct physical GPU IDs from `/api/status`) instead of the legacy
+  single `target` field. A one-element list uses the single-device path; CPU
+  cannot be combined with GPUs. The route returns a job ID. For a multi-GPU load,
+  the completed job's result contains `target`, `placement`, and `devices`.
+  Stop with `POST /api/models/unload` and the model name and logical `target`,
+  not the original `targets` list.
+- **Placement (`runtimes.py`, `docker.py`):** `Runtimes.load_many` verifies that
+  all devices are free of resident models and uses shared inventory and a fresh
+  hardware snapshot for the estimate. It replicates only if each selected GPU
+  can fit the model, subject to shared RAM headroom for unified-memory replicas.
+  Otherwise, it requires enough combined dedicated VRAM from a single vendor
+  and creates one runtime with only the selected GPU UUIDs or render nodes and
+  `OLLAMA_SCHED_SPREAD=1`. The runtimes share one model store; the API gateway
+  never connects to a published Ollama port.
+- **State and cleanup (`runtimes.py`):** The `multi-…` target is derived from the
+  sorted physical IDs. `gpu-deployments.json` in the state directory records
+  deployment membership and readiness; `runtime-slots.json` records runtime
+  assignments. The deployment is not routable until all workers pass warmup
+  with full GPU residency reported by `/api/ps`. A failed start attempts to stop
+  all attempted workers. If cleanup fails, the deployment stays reserved and
+  unroutable until stopped. Group unload reserves the logical target, devices,
+  and workers, and clears the deployment only after its workers are stopped.
+- **Routing (`gateway.py`, `scheduling.py`):** Discovery publishes one entry per
+  deployment with at least one available worker. The scheduler selects the
+  least busy eligible replica, preferring immediate admission and rotating
+  ties, under the same lock used for lifecycle reservations. The request keeps
+  that runtime's FIFO ticket and stays with the selected worker; there is no
+  automatic replay on an upstream failure. Usage and API target selection use
+  the logical target. A sharded deployment offers only one runtime to the
+  scheduler.
+
+Focused offline checks (fake hardware and Docker; no model downloads):
+
+```bash
+uv run pytest tests/test_runtimes.py tests/test_scheduling.py tests/test_gateway.py
+node --test tests/hardware-selection.test.cjs
+```
 
 ## Make a focused change
 
@@ -168,8 +214,13 @@ git diff --check
 - **Browser:** both boards, narrow/wide layouts, focus/errors, more than ten
   keys/accounts, sticky headers/scrolling, clipboard success/denial, secret clearing.
 - **Runtimes:** CPU and supported NVIDIA/AMD isolation, concurrent targets, residency,
-  one model on two devices, independent stopping, target routing, shared inventory,
-  and stopped-container migration.
+  independent stopping, target routing, shared inventory, and stopped-container
+  migration. On a multi-GPU test host, load a small model that fits on each GPU
+  and verify that concurrent calls to one logical target reach distinct
+  replicas. Then use a model that exceeds one GPU's free VRAM but fits the
+  selected same-vendor GPUs together; verify one runtime, residency across the
+  selected GPUs, and no use of unselected GPUs. In both cases, stop the group
+  and confirm API discovery removes it and the picker releases all devices.
 - **Gateway:** trusted HTTPS and real models, terminal stream events, disconnect
   cleanup, queued expiry/revocation, parallel limits, quotas, and relevant vision/embedding cases.
 - **Benchmarks:** idle admission, temporary gateway rejection, cleanup, persisted rankings.

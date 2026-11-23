@@ -40,11 +40,6 @@ uv sync --locked
 uv run llameros
 ```
 
-To run one model on multiple GPUs, open **Start model on** in **Downloaded models**, select two or more free GPUs, and click **Load / start**. A multi-GPU launch reserves those devices exclusively until you stop the deployment. CPU is a separate choice.
-
-- If the model is estimated to fit on **every** selected GPU, Llameros warms one replica per GPU and balances Ollama, OpenAI-compatible, and Anthropic-compatible inference requests across the available replicas at the existing `/inference` endpoint. Discovery shows one logical model target for the deployment. Use that target only if you need to distinguish it from another deployment of the same model.
-- Otherwise, Llameros starts a single Ollama runtime with only the selected GPUs exposed and asks Ollama to spread the model across them. Sharding requires GPUs from the same vendor with dedicated VRAM and enough combined free memory. Memory estimates are advisory; model architecture, driver support, and actual warmup can still prevent launch.
-
 - Open `https://127.0.0.1:8443`. Verify and trust the certificate **before** entering
   your Linux credentials. There is no default password or separate password database.
 - The service account starts as admin; other eligible Linux accounts use the user
@@ -263,6 +258,37 @@ systemctl --user daemon-reload
 
 ## First model and daily workflow
 
+### Run a model on multiple GPUs
+
+1. On the admin board, download the model and open **Downloaded models → Start model on**.
+2. Select two or more supported GPUs with no resident models. GPUs in another
+   deployment are unavailable, and CPU can only be selected on its own.
+3. Click **Load / start** next to the model. Wait for the job to finish; the
+   deployment is labeled **Replicated** or **Sharded**.
+
+| Placement | When Llameros chooses it | What runs |
+| --- | --- | --- |
+| Replicated | The model is estimated to fit independently on **every** selected GPU. | One instance per GPU. Requests use the same API endpoint and are balanced across available replicas. |
+| Sharded | At least one selected GPU cannot fit the model alone, but the selected GPUs have enough combined free VRAM. Sharding requires dedicated-memory GPUs from the same vendor. | One Ollama instance sees only the selected GPUs and spreads the model across them. This is one instance, not a replica pool. |
+
+Fit estimates use current free memory, context length, and configured parallelism.
+They are not guarantees: Llameros verifies GPU residency during startup and does
+not publish a deployment that fails warmup. If placement fails, check the job
+message. Depending on the cause, choose GPUs with more free VRAM, reduce context
+or parallelism, or try a smaller model.
+
+Both placements appear as one logical model target under the existing
+[`/inference` API](#secure-inference-api). Use the model name as usual if it has
+only one loaded placement. If the same tag is loaded elsewhere, use the
+deployment's target from API discovery or the **Access model** card. Do not pass
+an individual replica's GPU ID to select that deployment.
+
+The selected GPUs are reserved until the deployment is stopped, even if a worker
+goes offline or the model expires. Let requests finish, then click **Stop** for
+the deployment to release all of its GPUs. This does not delete the downloaded
+model. If a failed start reports incomplete cleanup, stop that deployment before
+retrying.
+
 ### Optional external benchmark database
 
 Admin Configuration → Community benchmark server configures the HTTPS server IP,
@@ -350,8 +376,10 @@ Reference: [Ollama FAQ](https://docs.ollama.com/faq).
   - Ollama base: `https://127.0.0.1:8443/inference`
   - OpenAI-compatible base: `https://127.0.0.1:8443/inference/v1`
   - For remote access, use the HTTPS address under **Access model**.
-- Models must already be loaded. For multiple placements, select one with
-  `X-Llameros-Target` or JSON `target` (takes precedence); ambiguity returns HTTP 409.
+- Models must already be loaded. If the same tag has multiple placements, select
+  one with `X-Llameros-Target` or JSON `target` (takes precedence); ambiguity
+  returns HTTP 409. A [multi-GPU deployment](#run-a-model-on-multiple-gpus)
+  counts as one placement, regardless of its worker count.
 - Text-only bodies: 128 KiB maximum; inline-image bodies: 16 MiB default.
   Output: 1–4096 tokens (normally 256, subject to a key's output cap).
   Documents/PDFs are unsupported: extract plain text yourself.
@@ -363,14 +391,18 @@ Reference: [Ollama FAQ](https://docs.ollama.com/faq).
 
 ### Simultaneous users and request queues
 
-- Each target shares a FIFO queue across all users/keys/models:
+- Each runtime shares a FIFO queue across all users/keys/models:
   `ollama_num_parallel` active requests (default 2), 16 waiting, 120-second maximum
   queue wait. Different targets execute independently.
 - Full queue: HTTP 429 with `Retry-After: 1`; wait timeout: HTTP 504. Allow timeouts
   for queueing **plus** generation and respect retry delays. Streams hold their
   slot until completion/cleanup and may produce no tokens while waiting.
-- There is no least-busy routing or per-user fairness. Credentials are rechecked
-  before execution. Direct Ollama access bypasses queues, authorization, and quotas.
+- For replicas, the gateway prefers a worker that can start immediately; otherwise
+  it chooses the eligible worker with the fewest outstanding requests, rotating
+  among ties. Once assigned, a request stays in that worker's queue. A sharded
+  model has one queue. Queues do not enforce per-user fairness. Credentials are
+  rechecked before execution. Direct Ollama access bypasses queues, authorization,
+  and quotas.
 
 ### Configure parallel inference and memory headroom
 
