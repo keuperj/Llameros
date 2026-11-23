@@ -1,27 +1,49 @@
 'use strict';
+const placementLabel = r => ({
+  cpu: 'CPU', 'single-gpu': 'Single GPU', sharded: 'Sharded', replicated: 'Replicated (one worker)',
+})[r.placement?.mode] || 'Unknown';
+function measuredGPUs(row) {
+  if (!row.placement) return 'Unknown';
+  const counts = new Map();
+  for (const gpu of row.placement.gpus) {
+    const memory = gpu.accelerator_memory_gib ? `${gpu.accelerator_memory_gib} GiB` : 'unknown memory';
+    const label = `${gpu.accelerator} (${memory}${gpu.unified_memory ? ', unified' : ''})`;
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  return [...counts].map(([label, count]) => `${count} × ${label}`).join(' + ') || 'None';
+}
 const columns = [
-  ['Model', r => r.model], ['Kind', r => r.kind], ['Architecture', r => r.hardware.architecture],
+  ['Model', r => r.model], ['Kind', r => r.kind], ['Placement', placementLabel],
+  ['GPUs measured', r => r.placement?.gpu_count ?? 'Unknown'],
+  ['Measured GPU profiles', measuredGPUs],
+  ['Combined VRAM GiB bucket', r => r.placement ? r.placement.combined_vram_gib ?? '—' : 'Unknown'],
+  ['Architecture', r => r.hardware.architecture],
   ['Core bucket', r => r.hardware.logical_cores], ['RAM GiB bucket', r => r.hardware.memory_gib],
-  ['Accelerator class', r => r.hardware.accelerator], ['VRAM GiB bucket', r => r.hardware.accelerator_memory_gib],
-  ['Unified memory', r => String(r.hardware.unified_memory)], ['Context', r => r.context_length],
+  ['Legacy accelerator class', r => r.placement ? '—' : r.hardware.accelerator],
+  ['Legacy VRAM GiB bucket', r => r.placement ? '—' : r.hardware.accelerator_memory_gib],
+  ['Legacy unified memory', r => r.placement ? '—' : String(r.hardware.unified_memory)],
+  ['Context', r => r.context_length],
   ['Parallel', r => r.parallel], ['Flash Attention', r => String(r.flash_attention)],
   ['KV cache', r => r.kv_cache_type], ['Timing', r => r.timing], ['Tokens/s', r => r.tokens_per_second],
   ['Samples', r => r.samples], ['Minimum', r => r.minimum], ['Maximum', r => r.maximum], ['Protocol', r => r.protocol],
   ['Artifact digest', r => r.model_digest || 'unknown'],
 ];
-let rows = [], selected = 13, ascending = false;
+let rows = [], selected = columns.findIndex(([label]) => label === 'Tokens/s'), ascending = false;
 const filters = [
   ['filter-kind', r => r.kind, 'All workloads'],
-  ['filter-accelerator', r => r.hardware.accelerator, 'All accelerators'],
+  ['filter-placement', placementLabel, 'All placements'],
+  ['filter-accelerator', r => r.placement?.gpu_count
+    ? r.placement.gpus.map(gpu => gpu.accelerator) : r.hardware.accelerator, 'All accelerators'],
   ['filter-architecture', r => r.hardware.architecture, 'All architectures'],
   ['filter-timing', r => r.timing, 'All timing methods'],
   ['filter-context', r => r.context_length, 'All context sizes'],
   ['filter-cache', r => r.kv_cache_type, 'All cache types'],
 ];
+const filterValues = (getter, row) => [].concat(getter(row)).map(String);
 function populateFilters() {
   for (const [id, getter, label] of filters) {
     const select = document.getElementById(id), previous = select.value;
-    const values = [...new Set(rows.map(row => String(getter(row))))].sort((a, b) => a.localeCompare(b, undefined, {numeric:true}));
+    const values = [...new Set(rows.flatMap(row => filterValues(getter, row)))].sort((a, b) => a.localeCompare(b, undefined, {numeric:true}));
     const options = ['', ...values].map(value => {
       const option = document.createElement('option'); option.value = value; option.textContent = value || label; return option;
     });
@@ -32,14 +54,14 @@ function populateFilters() {
 function draw() {
   const terms = document.getElementById('result-search').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const visible = rows.filter(row => {
-    if (!filters.every(([id, getter]) => !document.getElementById(id).value || String(getter(row)) === document.getElementById(id).value)) return false;
+    if (!filters.every(([id, getter]) => !document.getElementById(id).value || filterValues(getter, row).includes(document.getElementById(id).value))) return false;
     const text = columns.map(([, get]) => get(row)).join(' ').toLowerCase();
     return terms.every(term => text.includes(term));
   });
   const getter = columns[selected][1];
   visible.sort((a, b) => {
     const x = getter(a), y = getter(b);
-    return (typeof x === 'number' ? x - y : String(x).localeCompare(String(y))) * (ascending ? 1 : -1);
+    return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, {numeric:true})) * (ascending ? 1 : -1);
   });
   document.querySelectorAll('th').forEach((node, i) => node.setAttribute('aria-sort', i === selected ? (ascending ? 'ascending' : 'descending') : 'none'));
   const fragment = document.createDocumentFragment();

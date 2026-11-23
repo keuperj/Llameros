@@ -31,6 +31,7 @@ from .benchmark_exchange import (
     ShareConfirmation,
     SharedBenchmark,
     SharingSettings,
+    benchmark_profile,
     exchange,
     hardware_profile,
     inspect_server_certificate,
@@ -896,7 +897,11 @@ def create_app(
                 # Download the same public pages for every machine; match hardware locally.
                 entries, offset = [], 0
                 while offset < 100000:
-                    data = exchange(policy, "GET", f"/api/v1/benchmarks?limit=1000&offset={offset}")
+                    data = exchange(
+                        policy,
+                        "GET",
+                        f"/api/v1/benchmarks?limit=100&offset={offset}&include_placement=true",
+                    )
                     page = data["entries"]
                     entries.extend(SharedBenchmark.model_validate(row) for row in page)
                     offset += len(page)
@@ -911,9 +916,33 @@ def create_app(
                     "note": "Community server unavailable or untrusted; local suggestions remain available",
                 }
         hw = hardware()
-        profiles = [hardware_profile(hw)]
+        profiles = [benchmark_profile(hw, "cpu")]
         if not cpu_only:
-            profiles.extend(hardware_profile(hw, gpu) for gpu in hw.get("gpus", []))
+            targets = Runtimes.hardware_targets(hw)
+            profiles.extend(
+                benchmark_profile(hw, "single-gpu", [gpu])
+                for gpu in targets.values()
+                if gpu["supported"] and gpu["vendor"] != "cpu"
+            )
+            if runtimes:
+                with runtimes.lock:
+                    deployments = list(runtimes.deployments.values())
+                for group in deployments:
+                    if not group.get("ready") or not all(
+                        device in targets for device in group["devices"]
+                    ):
+                        continue
+                    devices = [targets[device] for device in group["devices"]]
+                    try:
+                        if group["placement"] == "sharded":
+                            profiles.append(benchmark_profile(hw, "sharded", devices))
+                        else:
+                            profiles.extend(
+                                benchmark_profile(hw, "replicated", [gpu]) for gpu in devices
+                            )
+                    except ValueError:
+                        # Incomplete hardware discovery cannot establish an exact match.
+                        continue
         return {
             "models": rank_matches(
                 entries,
@@ -1151,20 +1180,40 @@ def create_app(
     def benchmark(body: ModelRequest):
         """Reserve all devices for manually stoppable speed and sustained-load tests."""
         name = validate_model(body.model)
-        client = runtimes.model_client(name, body.target) if runtimes else docker
-        if not runtimes and not is_loaded(name):
-            raise HTTPException(409, "Load the model before benchmarking")
-        target = client.target["id"] if runtimes else body.target or "cpu"
-        benchmark_hardware = hardware_profile(
-            hardware(), client.target if runtimes else None
-        ).model_dump()
+        if runtimes:
+            client, deployment = runtimes.model_runtime(name, body.target)
+        else:
+            if not is_loaded(name):
+                raise HTTPException(409, "Load the model before benchmarking")
+            client, deployment = docker, {}
+        target = deployment["target"] if runtimes else body.target or "cpu"
+        hw = hardware()
+        snapshot = {}
+        if runtimes:
+            try:
+                mode = deployment.get("placement", "cpu" if target == "cpu" else "single-gpu")
+                if mode == "sharded":
+                    targets = runtimes.hardware_targets(hw)
+                    measured = [targets[device] for device in deployment["devices"]]
+                else:
+                    measured = [] if mode == "cpu" else [client.target]
+                profile, placement = benchmark_profile(hw, mode, measured)
+                snapshot = {
+                    "share_hardware": profile.model_dump(),
+                    "share_placement": placement.model_dump(),
+                }
+            except (KeyError, ValueError):
+                # Still allow a local benchmark if its measured hardware cannot be described.
+                pass
+        else:
+            snapshot = {"share_hardware": hardware_profile(hw).model_dump()}
         benchmark_environment = {
             "flash_attention": cfg.ollama_flash_attention,
             "kv_cache_type": cfg.ollama_kv_cache_type,
         }
 
         def save_result(result):
-            result["share_hardware"] = benchmark_hardware
+            result.update(snapshot)
             result["share_environment"] = benchmark_environment
             store.save_benchmark(result)
 

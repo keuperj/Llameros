@@ -219,6 +219,10 @@ class Runtimes:
 
     def model_client(self, name, target="", *, worker=None):
         """Return the unique runtime containing a model, requiring a target when ambiguous."""
+        return self.model_runtime(name, target, worker=worker)[0]
+
+    def model_runtime(self, name, target="", *, worker=None):
+        """Resolve the worker and its logical deployment from the same status snapshot."""
         normalized = name if ":" in name else name + ":latest"
         matches = [
             model
@@ -232,7 +236,7 @@ class Runtimes:
         candidates = match.get("workers", [match["target"]])
         if worker is not None and worker not in candidates:
             raise ValueError("Selected model worker is no longer available")
-        return self.client(worker or candidates[0])
+        return self.client(worker or candidates[0]), match
 
     def start(self, progress=lambda value: None):
         """Start CPU and every detected supported GPU, retaining partial successes."""

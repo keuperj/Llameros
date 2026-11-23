@@ -5,10 +5,12 @@ from dataclasses import replace
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from test_benchmark_exchange import local_result
 from test_core import HARDWARE, sign_in, wait_job
 from test_gateway import issue, post
 
 from llameros.app import create_app
+from llameros.benchmark_exchange import shareable
 from llameros.config import Settings
 from llameros.diagnostics import RuntimeStartupSummary, diagnostic
 from llameros.docker import Docker, DockerError
@@ -37,6 +39,43 @@ GPUS = [
 
 def gpu_ids(manager):
     return sorted(key for key, target in manager.targets.items() if target["vendor"] == "nvidia")
+
+
+@pytest.mark.parametrize("mode, count", [("sharded", 2), ("replicated", 1)])
+def test_benchmark_reports_the_measured_runtime(pool, monkeypatch, mode, count):
+    manager, _, cfg, hw = pool
+    devices = gpu_ids(manager)
+    if mode == "sharded":
+        hw["gpus"] = [{**gpu, "free": 600_000_000} for gpu in GPUS[:2]]
+    deployment = manager.load_many("one", devices, 4096, lambda _: None)
+    target = deployment["target"]
+
+    async def measure(client, name, logical_target, *args):
+        assert client.target["id"] == (target if mode == "sharded" else devices[0])
+        return {**local_result(), "model": name, "target": logical_target}
+
+    monkeypatch.setattr("llameros.app.measure", measure)
+    app = create_app(
+        cfg, hardware_provider=lambda: hw, authenticator=lambda *args: True, sampling=False
+    )
+    with TestClient(
+        app, base_url="https://testserver", headers={"Origin": "https://testserver"}
+    ) as client:
+        sign_in(client)
+        assert (
+            client.post("/api/benchmark", json={"model": "one", "target": target}).status_code
+            == 202
+        )
+        job = wait_job(client)
+        assert job["state"] == "completed", job
+        [saved] = app.state.store.benchmarks()
+        assert saved["target"] == target
+        entry = shareable(saved)
+        assert entry.placement.mode == mode
+        assert entry.placement.gpu_count == count
+        assert entry.placement.combined_vram_gib == (16 if mode == "sharded" else None)
+        assert [gpu.accelerator_memory_gib for gpu in entry.placement.gpus] == [8] * count
+        assert "GPU-aaaa" not in entry.model_dump_json()
 
 
 @pytest.mark.parametrize("placement", ["replicated", "sharded"])

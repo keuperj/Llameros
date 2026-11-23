@@ -23,7 +23,8 @@ const BenchmarkSharing = {
         const rows = data.models.filter(row => row.kind === kind && row.timing === timing).slice(0, 6);
         if (!rows.length) continue;
         for (const row of rows) {
-          const detail = `${kind} · ${row.tokens_per_second.toFixed(1)} ${kind === 'chat' ? 'output' : 'input'} tokens/s (${timing})`;
+          const placement = {cpu: 'CPU', 'single-gpu': 'single GPU', sharded: `${row.placement?.gpu_count} GPUs sharded`, replicated: 'one replica worker'}[row.placement?.mode];
+          const detail = `${kind} · ${row.tokens_per_second.toFixed(1)} ${kind === 'chat' ? 'output' : 'input'} tokens/s (${timing})${placement ? ' · ' + placement : ''}`;
           const suggestion = suggestionRow(row.model, 'community', detail, async () => {
             document.getElementById('search').value = row.model;
             await catalogue();

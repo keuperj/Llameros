@@ -39,6 +39,7 @@ KEY_FIELDS = (
     "model_digest",
     "kind",
     "hardware",
+    "placement",
     "context_length",
     "parallel",
     "flash_attention",

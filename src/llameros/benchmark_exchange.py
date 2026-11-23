@@ -11,7 +11,14 @@ import statistics
 from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from .catalog import validate_model
 
@@ -57,27 +64,10 @@ class SharingSettings(StrictModel):
         return f"https://{host}:{self.port}"
 
 
-class HardwareProfile(StrictModel):
-    architecture: Literal["x86_64", "aarch64", "other"]
-    logical_cores: int
-    memory_gib: int
+class AcceleratorProfile(StrictModel):
     accelerator: str = Field(max_length=48)
     accelerator_memory_gib: int
     unified_memory: bool
-
-    @field_validator("logical_cores")
-    @classmethod
-    def cores(cls, value):
-        if value not in CORE_BUCKETS:
-            raise ValueError("Invalid core bucket")
-        return value
-
-    @field_validator("memory_gib", "accelerator_memory_gib")
-    @classmethod
-    def memory(cls, value):
-        if value not in (0, *MEMORY_BUCKETS):
-            raise ValueError("Invalid memory bucket")
-        return value
 
     @field_validator("accelerator")
     @classmethod
@@ -94,6 +84,65 @@ class HardwareProfile(StrictModel):
             raise ValueError("Only public accelerator product classes are supported")
         return value
 
+    @field_validator("accelerator_memory_gib")
+    @classmethod
+    def memory(cls, value):
+        if value not in (0, *MEMORY_BUCKETS):
+            raise ValueError("Invalid memory bucket")
+        return value
+
+
+class HardwareProfile(AcceleratorProfile):
+    architecture: Literal["x86_64", "aarch64", "other"]
+    logical_cores: int
+    memory_gib: int
+
+    @field_validator("logical_cores")
+    @classmethod
+    def cores(cls, value):
+        if value not in CORE_BUCKETS:
+            raise ValueError("Invalid core bucket")
+        return value
+
+    @field_validator("memory_gib")
+    @classmethod
+    def ram(cls, value):
+        return cls.memory(value)
+
+
+class BenchmarkPlacement(StrictModel):
+    """Describe the runtime measured, not all GPUs installed on the host."""
+
+    mode: Literal["cpu", "single-gpu", "sharded", "replicated"]
+    gpu_count: int = Field(ge=0, le=100)
+    gpus: list[AcceleratorProfile] = Field(max_length=100)
+    combined_vram_gib: int | None = None
+
+    @model_validator(mode="after")
+    def measured_devices(self):
+        if self.gpu_count != len(self.gpus) or any(gpu.accelerator == "cpu" for gpu in self.gpus):
+            raise ValueError("GPU count must match the measured GPU profiles")
+        if self.mode == "sharded":
+            vendors = {gpu.accelerator.split("-", 1)[0] for gpu in self.gpus}
+            memory = [gpu.accelerator_memory_gib for gpu in self.gpus]
+            if (
+                self.gpu_count < 2
+                or len(vendors) != 1
+                or not vendors <= {"nvidia", "amd", "intel"}
+                or any(gpu.unified_memory for gpu in self.gpus)
+                or not all(memory)
+                or self.combined_vram_gib not in MEMORY_BUCKETS
+                or not max(memory) <= self.combined_vram_gib <= bucket(sum(memory), MEMORY_BUCKETS)
+            ):
+                raise ValueError("Sharding requires same-vendor dedicated GPUs and combined VRAM")
+        elif (
+            self.gpu_count != (0 if self.mode == "cpu" else 1) or self.combined_vram_gib is not None
+        ):
+            raise ValueError("CPU measures zero GPUs; a single GPU or replica measures one GPU")
+        # GPU order and identities are not part of a public hardware profile.
+        self.gpus = sorted(self.gpus, key=lambda gpu: gpu.model_dump_json())
+        return self
+
 
 class SharedCase(StrictModel):
     name: str = Field(max_length=24)
@@ -109,6 +158,7 @@ class SharedBenchmark(StrictModel):
     model_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     kind: Literal["chat", "embedding"]
     hardware: HardwareProfile
+    placement: BenchmarkPlacement | None = None
     context_length: int = Field(ge=1, le=1048576)
     parallel: int = Field(ge=1, le=256)
     flash_attention: bool
@@ -117,9 +167,29 @@ class SharedBenchmark(StrictModel):
     timing: Literal["generation", "request", "mixed"]
     cases: list[SharedCase] = Field(min_length=6, max_length=6)
 
+    @model_serializer(mode="wrap")
+    def omit_unknown_placement(self, handler):
+        data = handler(self)
+        if self.placement is None:
+            data.pop("placement", None)  # Preserve existing wire payloads and content hashes.
+        return data
+
     @model_validator(mode="after")
     def measurements(self):
         from .benchmark import CHAT_CASES, EMBED_CASES
+
+        if self.placement is not None:
+            primary = (
+                self.placement.gpus[0]
+                if self.placement.gpus
+                else AcceleratorProfile(
+                    accelerator="cpu", accelerator_memory_gib=0, unified_memory=False
+                )
+            )
+            if any(
+                getattr(self.hardware, key) != value for key, value in primary.model_dump().items()
+            ):
+                raise ValueError("Hardware summary must match the canonical measured GPU profile")
 
         workloads = CHAT_CASES if self.kind == "chat" else EMBED_CASES
         if [case.name for case in self.cases] != [case[0] for case in workloads]:
@@ -175,10 +245,8 @@ def bucket(value, choices):
     return next((item for item in choices if (value or 0) <= item), choices[-1])
 
 
-def hardware_profile(hardware, target=None):
+def accelerator_profile(target=None):
     """Never copy names, UUIDs, devices, free memory, hostnames, or serial numbers."""
-    architecture = platform.machine().lower()
-    architecture = {"amd64": "x86_64", "arm64": "aarch64"}.get(architecture, architecture)
     accelerator = "cpu"
     if target and target.get("vendor") != "cpu":
         vendor = target.get("vendor")
@@ -191,16 +259,38 @@ def hardware_profile(hardware, target=None):
             )
             if match:
                 accelerator = "nvidia-" + match[1].upper()
-    return HardwareProfile(
-        architecture=architecture if architecture in {"x86_64", "aarch64"} else "other",
-        logical_cores=bucket(hardware.get("logical_cores"), CORE_BUCKETS),
-        memory_gib=bucket((hardware.get("memory_total") or 0) / 1024**3, MEMORY_BUCKETS),
+    return AcceleratorProfile(
         accelerator=accelerator,
         accelerator_memory_gib=bucket((target.get("total") or 0) / 1024**3, MEMORY_BUCKETS)
         if target and target.get("total")
         else 0,
         unified_memory=bool(target and target.get("unified_memory")),
     )
+
+
+def hardware_profile(hardware, target=None, *, accelerator=None):
+    architecture = platform.machine().lower()
+    architecture = {"amd64": "x86_64", "arm64": "aarch64"}.get(architecture, architecture)
+    return HardwareProfile(
+        architecture=architecture if architecture in {"x86_64", "aarch64"} else "other",
+        logical_cores=bucket(hardware.get("logical_cores"), CORE_BUCKETS),
+        memory_gib=bucket((hardware.get("memory_total") or 0) / 1024**3, MEMORY_BUCKETS),
+        **(accelerator or accelerator_profile(target)).model_dump(),
+    )
+
+
+def benchmark_profile(hardware, mode, targets=()):
+    placement = BenchmarkPlacement(
+        mode=mode,
+        gpu_count=len(targets),
+        gpus=[accelerator_profile(target) for target in targets],
+        combined_vram_gib=bucket(
+            sum((target.get("total") or 0) for target in targets) / 1024**3, MEMORY_BUCKETS
+        )
+        if mode == "sharded"
+        else None,
+    )
+    return hardware_profile(hardware, accelerator=placement.gpus[0] if targets else None), placement
 
 
 def shareable(row):
@@ -223,6 +313,7 @@ def shareable(row):
         model_digest=row.get("model_digest"),
         kind=row["kind"],
         hardware=HardwareProfile.model_validate(row["share_hardware"]),
+        placement=row.get("share_placement"),
         context_length=row["context_length"],
         parallel=row["parallel"],
         flash_attention=row["share_environment"]["flash_attention"],
@@ -294,11 +385,11 @@ def inspect_server_certificate(settings):
 
 
 def rank_matches(entries, profiles, context, parallel, flash_attention, kv_cache_type):
-    """Local matching: no hardware query or installed-model list leaves the instance."""
+    """Match (hardware, placement) pairs locally without ranking unknown GPU layouts."""
     groups = {}
     for entry in entries:
         if (
-            entry.hardware not in profiles
+            (entry.hardware, entry.placement) not in profiles
             or entry.context_length != context
             or entry.parallel != parallel
             or entry.flash_attention != flash_attention
@@ -311,6 +402,7 @@ def rank_matches(entries, profiles, context, parallel, flash_attention, kv_cache
             entry.model_digest,
             entry.timing,
             entry.hardware.model_dump_json(),
+            entry.placement.model_dump_json() if entry.placement else None,
         )
         groups.setdefault(key, {})[entry.model_dump_json()] = entry.tokens_per_second
     results = [
@@ -319,12 +411,13 @@ def rank_matches(entries, profiles, context, parallel, flash_attention, kv_cache
             "model": model,
             "model_digest": digest,
             "hardware": json.loads(hardware),
+            "placement": json.loads(placement) if placement else None,
             "timing": timing,
             "tokens_per_second": statistics.mean(values.values()),
             "samples": len(values),
             "minimum": min(values.values()),
             "maximum": max(values.values()),
         }
-        for (kind, model, digest, timing, hardware), values in groups.items()
+        for (kind, model, digest, timing, hardware, placement), values in groups.items()
     ]
     return sorted(results, key=lambda item: (item["kind"], -item["tokens_per_second"]))

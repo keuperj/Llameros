@@ -27,6 +27,7 @@
         <label class="result-search">Search results<input id="result-search" type="search" maxlength="256" placeholder="Model, hardware, artifact or settings" autocomplete="off"></label>
         <label>Workload<select id="filter-kind"><option value="">All workloads</option></select></label>
         <label>Accelerator<select id="filter-accelerator"><option value="">All accelerators</option></select></label>
+        <label>Placement<select id="filter-placement"><option value="">All placements</option></select></label>
         <label>Architecture<select id="filter-architecture"><option value="">All architectures</option></select></label>
         <label>Timing<select id="filter-timing"><option value="">All timing methods</option></select></label>
         <label>Context<select id="filter-context"><option value="">All context sizes</option></select></label>
@@ -37,7 +38,7 @@
       <div class="scroll table-wrap" tabindex="0" role="region" aria-label="Public benchmark results"><table><caption>All approved shared entries · select a column heading to sort · scroll horizontally for hardware and settings</caption><thead><tr id="headings"></tr></thead><tbody id="entries"></tbody></table></div>
     </section>
     <details class="card methodology"><summary>Read the measurements responsibly</summary><p>These are voluntarily shared, unverified community measurements, not model quality scores. CPU/core/memory categories are coarse; equal categories do not imply identical machines. Request and generation timing are not comparable.</p><p>Identical submissions are deduplicated; entries are not counts of independent users. Tags may change over time; artifact identity is shown when available. There is no claim of representative or tamper-proof results. Anyone can upload results; pending or rejected submissions remain private.</p></details>
-  <section class="card"><h3>Confirmed community averages</h3><p>Anyone can submit results; every report requires admin approval. The table shows arithmetic averages of approved, distinct reports for matching hardware, model artifact, workload, settings and timing. Sample counts are not independent users. Pending and rejected reports never contribute.</p></section></main>
+  <section class="card"><h3>Confirmed community averages</h3><p>Anyone can submit results; every report requires admin approval. Averages group distinct reports by placement, measured hardware, model artifact, workload, settings and timing. Unknown placement means the report predates placement reporting. Sharded results measure one runtime across its assigned GPUs; replicated results measure one worker, not throughput across the pool. Sample counts are not independent users. Pending and rejected reports never contribute.</p></section></main>
   <footer><span>LLAMEROS · USER-SPACE CONTROL · LOCAL-FIRST</span><div class="footer-links"><a href="https://github.com/keuperj/Llameros" target="_blank" rel="noopener noreferrer">View on GitHub <span aria-hidden="true">↗</span></a><a href="https://www.llm-praxis.de/" target="_blank" rel="noopener noreferrer">maintained by LLM-Praxis</a></div><div class="footer-logos"><img src="brand/bmftr.png" alt="Federal Ministry of Research, Technology and Space" width="73" height="40"><img src="brand/forschung-an-haw.png" alt="Forschung an HAW" width="60" height="40"></div></footer>
 </body>
 </html>

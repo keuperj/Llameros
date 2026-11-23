@@ -12,6 +12,7 @@ from test_users import multiuser as multiuser
 from llameros.benchmark_exchange import (
     SharedBenchmark,
     SharingSettings,
+    benchmark_profile,
     hardware_profile,
     rank_matches,
     shareable,
@@ -170,11 +171,16 @@ def test_server_https_and_global_rate_limit(tmp_path):
 
 
 def test_local_ranking_separates_workloads_settings_and_timing():
-    entry = shareable(local_result())
+    entry = shareable({**local_result(), "share_placement": benchmark_profile(HARDWARE, "cpu")[1]})
     embedding = entry.model_copy(update={"kind": "embedding", "tokens_per_second": 1000.0})
     incompatible = entry.model_copy(update={"context_length": 8192, "tokens_per_second": 9999.0})
     ranked = rank_matches(
-        [entry, entry, embedding, incompatible], [entry.hardware], 4096, 2, True, "q4_0"
+        [entry, entry, embedding, incompatible],
+        [(entry.hardware, entry.placement)],
+        4096,
+        2,
+        True,
+        "q4_0",
     )
     assert len(ranked) == 2
     assert ranked[0]["kind"] == "chat" and ranked[0]["tokens_per_second"] == 42.0
@@ -247,19 +253,21 @@ def test_admin_consent_disabled_preview_and_exact_payload(multiuser, monkeypatch
 def test_recommendations_fetch_public_pages_without_hardware_queries(multiuser, monkeypatch):
     app, admin, user = multiuser
     calls = []
-    entry = shareable(local_result()).model_dump()
+    legacy = shareable(local_result()).model_dump()
+    entry = {**legacy, "placement": benchmark_profile(HARDWARE, "cpu")[1].model_dump()}
 
     def fetch(*args):
         calls.append(args)
-        return {"entries": [entry], "total": 1}
+        return {"entries": [entry, legacy], "total": 2}
 
     monkeypatch.setattr("llameros.app.exchange", fetch)
     admin.post("/api/benchmark-sharing", json={"enabled": True})
     result = admin.get("/api/benchmark-sharing/recommendations").json()
+    assert len(result["models"]) == 1
     assert result["models"][0]["model"] == entry["model"]
     admin.get("/api/benchmark-sharing/recommendations")
     assert len(calls) == 1
-    assert calls[0][1:] == ("GET", "/api/v1/benchmarks?limit=1000&offset=0")
+    assert calls[0][1:] == ("GET", "/api/v1/benchmarks?limit=100&offset=0&include_placement=true")
 
 
 def test_protocol_rejects_arbitrary_hardware_strings():

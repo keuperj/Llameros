@@ -61,7 +61,7 @@ test('public search and combined filters are local, case insensitive and resetta
 test('sorting respects filters and refresh preserves available selections', async () => {
   const {get, setEntries} = await harness();
   get('filter-kind').value = 'chat'; get('filter-kind').listeners.change();
-  get('headings').children[13].children[0].click();
+  get('headings').children.find(th => th.children[0].textContent === 'Tokens/s').children[0].click();
   assert.equal(get('entries').children[0].children[0].textContent, 'gemma3:4b');
   setEntries([row('qwen3:8b','nvidia-RTX 4090',80)]);
   await get('load').click();
@@ -70,4 +70,29 @@ test('sorting respects filters and refresh preserves available selections', asyn
   get('filter-accelerator').value = 'cpu';
   await get('load').click();
   assert.equal(get('filter-accelerator').value, '');
+});
+
+test('placement and measured hardware are displayed and filterable without assuming legacy GPU count', async () => {
+  const {get, setEntries} = await harness();
+  const gpu = accelerator => ({accelerator, accelerator_memory_gib: 48, unified_memory: false});
+  setEntries([
+    row('legacy', 'nvidia-A100', 30),
+    {...row('shard', 'nvidia-A100', 100), placement: {
+      mode: 'sharded', gpu_count: 2, gpus: [gpu('nvidia-A100'), gpu('nvidia-L40')], combined_vram_gib: 96,
+    }},
+    {...row('replica', 'nvidia-A100', 60), placement: {
+      mode: 'replicated', gpu_count: 1, gpus: [gpu('nvidia-A100')], combined_vram_gib: null,
+    }},
+  ]);
+  await get('load').click();
+  const cells = index => get('entries').children[index].children.slice(2, 6).map(td => td.textContent);
+  assert.deepEqual(cells(0), ['Sharded', 2, '1 × nvidia-A100 (48 GiB) + 1 × nvidia-L40 (48 GiB)', 96]);
+  assert.deepEqual(cells(1), ['Replicated (one worker)', 1, '1 × nvidia-A100 (48 GiB)', '—']);
+  assert.deepEqual(cells(2), ['Unknown', 'Unknown', 'Unknown', 'Unknown']);
+  get('filter-accelerator').value = 'nvidia-L40'; get('filter-accelerator').listeners.change();
+  assert.equal(get('entries').children.length, 1);
+  get('clear-filters').click();
+  get('filter-placement').value = 'Replicated (one worker)'; get('filter-placement').listeners.change();
+  assert.equal(get('entries').children.length, 1);
+  assert.equal(cells(0)[0], 'Replicated (one worker)');
 });

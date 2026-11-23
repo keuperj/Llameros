@@ -104,11 +104,20 @@ def create_app(
         )
 
     @app.get("/api/v1/benchmarks")
-    def entries(offset: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
+    def entries(
+        offset: int = Query(0, ge=0),
+        limit: int = Query(200, ge=1, le=1000),
+        include_placement: bool = False,
+    ):
+        # Older strict clients cannot parse the new field. Do not give them new
+        # results with the field removed: that would mix placement modes.
+        where = "status='approved'"
+        if not include_placement:
+            where += " AND json_extract(data, '$.placement') IS NULL"
         with sqlite3.connect(database) as db:
-            total = db.execute("SELECT count(*) FROM entries WHERE status='approved'").fetchone()[0]
+            total = db.execute(f"SELECT count(*) FROM entries WHERE {where}").fetchone()[0]
             rows = db.execute(
-                "SELECT data FROM entries WHERE status='approved' ORDER BY digest LIMIT ? OFFSET ?",
+                f"SELECT data FROM entries WHERE {where} ORDER BY digest LIMIT ? OFFSET ?",
                 (limit, offset),
             )
             return {"entries": [json.loads(row[0]) for row in rows], "total": total}

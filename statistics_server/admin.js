@@ -36,7 +36,12 @@ function renderRows(rows) {
     if (row.flags.includes('disagrees-with-approved-results')) tr.className = 'result-disagreement';
     tr.append(node('td', `${item.model || 'Legacy entry'} · ${item.model_digest || 'unknown artifact'} · ${row.status}`));
     const hw = item.hardware || {};
-    tr.append(node('td', `${hw.architecture || 'unknown'} · ${hw.logical_cores ?? '?'} cores · ${hw.memory_gib ?? '?'} GiB RAM · ${hw.accelerator || 'unknown'} · ${hw.accelerator_memory_gib ?? '?'} GiB VRAM`));
+    const placement = item.placement;
+    const gpuProfiles = placement?.gpus.map(gpu => `${gpu.accelerator} (${gpu.accelerator_memory_gib || '?'} GiB${gpu.unified_memory ? ', unified' : ''})`).join(' + ');
+    const layout = placement
+      ? `${placement.mode}${placement.mode === 'replicated' ? ' (one worker)' : ''} · ${placement.gpu_count} GPUs measured${gpuProfiles ? ' · ' + gpuProfiles : ''}${placement.combined_vram_gib ? ' · ' + placement.combined_vram_gib + ' GiB combined VRAM bucket' : ''}`
+      : `unknown placement · ${hw.accelerator || 'unknown'} · ${hw.accelerator_memory_gib ?? '?'} GiB VRAM bucket`;
+    tr.append(node('td', `${hw.architecture || 'unknown'} · ${hw.logical_cores ?? '?'} cores · ${hw.memory_gib ?? '?'} GiB RAM · ${layout}`));
     tr.append(node('td', `${item.tokens_per_second ?? '?'} tokens/s · ${item.kind || 'unknown'} · ${item.timing || 'unknown'} · context ${item.context_length ?? '?'} · parallel ${item.parallel ?? '?'} · Flash Attention ${item.flash_attention ?? '?'} · cache ${item.kv_cache_type || '?'}`));
     tr.append(node('td', row.flags.length ? row.flags.join(', ') : 'No automatic warnings (not proof)'));
     const evidence = node('td'), details = node('details');

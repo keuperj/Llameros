@@ -119,10 +119,13 @@ This client destination does not change the service's local bind address.
 
 The integration defaults **off**; no statistics requests occur while disabled.
 Enabling allows public benchmark downloads during model search. Matching is
-performed locally against coarse hardware, context, parallelism, Flash Attention
-and cache precision; the hardware profile and search text are **not** sent as
+performed locally against placement, measured hardware, context, parallelism,
+Flash Attention and cache precision; the hardware profile and search text are **not** sent as
 recommendation queries. Downloads are cached for ten minutes. Local popularity
 and fit suggestions remain available if the community server fails.
+Reports without placement remain public but are not used for hardware-matched
+recommendations. Sharded and replica-worker recommendations are only matched
+against known local deployments with the same measured hardware profile.
 
 Uploads are never automatic. In admin Benchmarks select **Share benchmarks**,
 review the exact JSON and destination, and explicitly confirm. Only completed
@@ -139,6 +142,11 @@ Stored public fields:
 - architecture class, rounded-up core/RAM/accelerator-memory buckets;
 - recognized accelerator product class (unknown products fall back to vendor),
   and unified-memory flag;
+- optional `placement`: `mode` (`cpu`, `single-gpu`, `sharded`, or `replicated`),
+  `gpu_count`, and `gpus` (one public accelerator profile per measured GPU, no
+  identities); `combined_vram_gib` is the bucket for total dedicated VRAM, only
+  for sharded runs. A replicated run measures **one worker**, not concurrent pool
+  throughput. Omitted placement is unknown, not single-GPU.
 - context length, parallel setting, Flash Attention, KV-cache precision;
 - six standard case names, token counts and durations (rounded to microseconds), timing methods, and throughput recomputed and rounded to one decimal.
 
@@ -176,7 +184,7 @@ local fit before downloading.
 Only approved records are returned by the public API and website, so pending or
 rejected records cannot affect model search. Arithmetic averages and min/max ranges are shown
 for distinct approved reports, not unique installations. Grouping separates
-hardware, artifact digest (including an explicit unknown group), workload,
+hardware, placement (including unknown), artifact digest (including an explicit unknown group), workload,
 settings and timing method. Local recommendation caches expire after ten minutes;
 rejecting a previously approved entry may take that long to disappear on clients.
 
@@ -307,10 +315,11 @@ If that queue has changed, it returns HTTP 409 without approving any reports.
 
 - `POST /api/v1/benchmarks`: `{ "entries": [ ... ] }`; returns counts of new and
   duplicate records and `status: "pending"`. Unknown fields are rejected.
-- `GET /api/v1/benchmarks?offset=0&limit=200`: approved public entries and total count;
-  maximum page size 1,000.
+- `GET /api/v1/benchmarks?offset=0&limit=200&include_placement=true`: approved public
+  entries and total count; maximum page size 1,000. The default legacy view omits
+  whole placement-aware reports so older strict clients can still read legacy uploads.
 - `GET /api/v1/averages?offset=0&limit=200`: arithmetic averages, sample counts and
-  min/max of approved reports, grouped by matching hardware, artifact, workload,
+  min/max of approved reports, grouped by matching placement, hardware, artifact, workload,
   settings and timing. Recomputed from originals after confirmation or rejection.
   The raw benchmark endpoint remains available for six-case evidence and clients.
 - `/`: sortable public averages table, with all rows fetched in bounded pages. No remote
