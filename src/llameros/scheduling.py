@@ -45,18 +45,19 @@ class InferenceScheduler:
         self.parallel = parallel
         self.queue_users = 0
         self.tickets = []
+        self.dispatch_sequence = 0
 
     def conflicts(self, targets=None):
         """Check outstanding reservations against targets; callers coordinate with the job lock."""
         return any(targets is None or ticket.target in targets for ticket in self.tickets)
 
     async def acquire(self, target, model, request=None, username=""):
-        """Wait for this target's FIFO permit and return its ticket.
+        """Reserve a target or the least busy eligible replica, then wait for its FIFO permit.
 
         Reject lifecycle conflicts, queue overflow, disconnects, or timeout with HTTP errors;
         cancellation releases the reservation.
         """
-        ticket = Ticket(target, model, time.monotonic(), username=username)
+        candidates = (target,) if isinstance(target, str) else tuple(target)
         with self.jobs.lock:
             job = self.jobs.job
             if job["state"] == "running" and job.get("action") == "benchmark":
@@ -65,27 +66,43 @@ class InferenceScheduler:
                 )
             if job["state"] == "running" and job.get("action") != "api-inference":
                 targets = job.get("targets")
-                if targets is None or target in targets:
+                candidates = tuple(
+                    t for t in candidates if targets is not None and t not in targets
+                )
+                if not candidates:
                     raise HTTPException(409, "A lifecycle operation is using this hardware")
-            if sum(t.target == target for t in self.tickets) >= self.capacity + self.parallel:
+            if len(candidates) > 1:
+                offset = self.dispatch_sequence % len(candidates)
+                candidates = candidates[offset:] + candidates[:offset]
+                self.dispatch_sequence += 1
+            eligible = []
+            user_limited = False
+            for candidate in candidates:
+                active = sum(t.target == candidate and t.active for t in self.tickets)
+                waiting = [t for t in self.tickets if t.target == candidate and not t.active]
+                if active + len(waiting) >= self.capacity + self.parallel:
+                    continue
+                will_wait = bool(waiting) or active >= self.parallel
+                users = {t.username for t in waiting}
+                if (
+                    will_wait
+                    and self.queue_users
+                    and username not in users
+                    and len(users) >= self.queue_users
+                ):
+                    user_limited = True
+                    continue
+                eligible.append((will_wait, active + len(waiting), candidate))
+            if not eligible:
                 raise HTTPException(
-                    429, "Hardware inference queue is full", headers={"Retry-After": "1"}
+                    429,
+                    "Distinct-user queue limit reached"
+                    if user_limited
+                    else "Hardware inference queue is full",
+                    headers={"Retry-After": "1"},
                 )
-            waiting = [t for t in self.tickets if t.target == target and not t.active]
-            will_wait = (
-                bool(waiting)
-                or sum(t.target == target and t.active for t in self.tickets) >= self.parallel
-            )
-            users = {t.username for t in waiting}
-            if (
-                will_wait
-                and self.queue_users
-                and username not in users
-                and len(users) >= self.queue_users
-            ):
-                raise HTTPException(
-                    429, "Distinct-user queue limit reached", headers={"Retry-After": "1"}
-                )
+            will_wait, _, target = min(eligible, key=lambda entry: entry[:2])
+            ticket = Ticket(target, model, time.monotonic(), username=username)
             if will_wait and self.jobs.store is not None:
                 self.jobs.store.queue_peak(
                     [t.username for t in self.tickets if not t.active] + [username]

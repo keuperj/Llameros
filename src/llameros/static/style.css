@@ -19,6 +19,9 @@ details.card > summary:focus-visible{outline:2px solid var(--green);outline-offs
 .columns>.card{min-width:0}
 .columns>.downloaded-card[open]{height:auto;min-height:0;contain:size;align-self:stretch;overflow:auto;scrollbar-gutter:stable}
 .downloaded-card select{min-width:0;max-width:100%}
+.device-picker{border:1px solid var(--line);border-radius:8px;margin:12px 0;padding:8px 12px}
+.device-picker>summary{cursor:pointer}.device-picker>div{display:grid;gap:6px;padding:8px 0}
+.device-picker .checkbox-label{white-space:normal;overflow-wrap:anywhere}
 .downloaded-card button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
 @media(max-width:800px){.columns:has(>.downloaded-card){grid-template-columns:minmax(0,1fr)}.columns>.downloaded-card[open]{height:600px;min-height:320px;contain:none}}
 #scheduler-form{display:block}

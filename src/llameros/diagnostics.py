@@ -18,10 +18,16 @@ class RuntimeStartupError(RuntimeError):
         super().__init__("Runtime container startup failed")
 
 
+class GPUPlacementError(ValueError):
+    """An actionable placement failure with a fixed, locally authored message."""
+
+
 def diagnostic(exc: Exception) -> str:
     """Never include upstream text, URLs, paths, prompts, or credentials."""
     if isinstance(exc, RuntimeStartupSummary):
         return " ".join(exc.diagnostics)
+    if isinstance(exc, GPUPlacementError):
+        return str(exc)
     if isinstance(exc, RuntimeStartupError):
         # IDs originate from the fixed CPU identity or a SHA-256 GPU identity.
         target = "CPU" if exc.target_id == "cpu" else "GPU"

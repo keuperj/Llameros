@@ -428,6 +428,42 @@ function options(select, values, placeholder) {
   select.replaceChildren(); if (placeholder) select.add(new Option(placeholder, ''));
   values.forEach(value => select.add(new Option(value, value)));
 }
+
+function selectedLoadTargets() {
+  return [...$('load-target-options').querySelectorAll('input:checked')].map(input => input.value);
+}
+
+function renderLoadTargets(runtime) {
+  const picker = $('load-target-options');
+  const previous = selectedLoadTargets();
+  const free = (runtime.slots || []).filter(slot => slot.available)
+    .sort((a, b) => Number(a.vendor === 'cpu') - Number(b.vendor === 'cpu'));
+  const multi = new Set(runtime.multi_available || []);
+  const valid = previous.filter(id => free.some(slot => slot.id === id));
+  const selected = new Set(valid.length > 1 ? valid.filter(id => multi.has(id)) : valid);
+  if (!selected.size && free.length) selected.add(free[0].id);
+  function updateLabel() {
+    const labels = free.filter(slot => selected.has(slot.id)).map(slot => slot.label);
+    $('load-target-label').textContent = labels.length > 1 ? `${labels.length} GPUs selected` : labels[0] || 'No free hardware';
+  }
+  const focus = picker.contains(document.activeElement) ? document.activeElement.value : '';
+  picker.replaceChildren();
+  for (const slot of free) {
+    const input = element('input', '');
+    input.type = 'checkbox'; input.value = slot.id; input.checked = selected.has(slot.id);
+    const row = element('label', '', 'checkbox-label'); row.append(input, document.createTextNode(slot.label)); picker.append(row);
+    input.addEventListener('change', () => {
+      if (input.checked) {
+        if (!multi.has(slot.id) || [...selected].some(id => !multi.has(id))) selected.clear();
+        selected.add(slot.id);
+      } else if (selected.size > 1) selected.delete(slot.id);
+      for (const option of picker.querySelectorAll('input')) option.checked = selected.has(option.value);
+      updateLabel();
+    });
+    if (focus === slot.id) input.focus({preventScroll: true});
+  }
+  updateLabel();
+}
 /**
  * Enable model information only for a valid official catalogue selection.
  */
@@ -760,17 +796,11 @@ async function refresh() {
     for (const slot of data.ollama.slots || []) {
       const card = element('div', '', 'metric');
       const names = (slot.loaded || []).map(model => model.name || model.model);
-      card.append(element('small', slot.label), element('strong', slot.error ? 'Unavailable' : names.length ? `${names.length} model(s) loaded` : 'Free'), element('small', slot.error || names.join(', ') || 'No model assigned by Llameros'));
+      card.append(element('small', slot.label), element('strong', slot.error ? 'Unavailable' : names.length ? `${names.length} model(s) loaded` : slot.deployment ? 'Reserved' : 'Free'), element('small', slot.error || names.join(', ') || (slot.deployment ? 'Assigned to a multi-GPU deployment' : 'No model assigned by Llameros')));
       if (slot.vendor !== 'cpu') card.append(element('small', `${bytes(slot.free)} available / ${bytes(slot.total)} ${slot.unified_memory ? 'unified memory (shared with CPU)' : 'VRAM'} · ${slot.utilization == null ? 'utilization unknown' : slot.utilization + '% utilization'}`));
       $('hardware').append(card);
     }
-    const targetPrevious = $('load-target').value;
-    const freeSlots = (data.ollama.slots || []).filter(slot => slot.available)
-      .sort((a, b) => Number(a.vendor === 'cpu') - Number(b.vendor === 'cpu'));
-    options($('load-target'), freeSlots.map(slot => slot.id), freeSlots.length ? null : 'No free hardware');
-    for (const option of $('load-target').options) { const slot = freeSlots.find(slot => slot.id === option.value); if (slot) option.textContent = slot.label; }
-    if (freeSlots.some(slot => slot.id === targetPrevious)) $('load-target').value = targetPrevious;
-    $('load-target').disabled = busy || !freeSlots.length;
+    renderLoadTargets(data.ollama);
     const runtimeStatus = JobProgress.runtimeState(data.ollama);
     $('runtime').textContent = runtimeStatus.text; $('runtime').dataset.state = runtimeStatus.state;
     const resource = data.ollama.resources;
@@ -797,7 +827,10 @@ async function refresh() {
     $('installed').replaceChildren();
     if (!models.length) $('installed').append(element('p', ['unknown', 'unavailable'].includes(inventory.source) ? 'No inventory available. Start Ollama to check this storage location.' : 'No downloaded models found in the selected storage location.'));
     models.forEach(model => {
-      const row = element('div', '', 'model'), active = loaded.filter(m => m.name === model.name);
+      const row = element('div', '', 'model'), active = [
+        ...loaded.filter(m => m.name === model.name),
+        ...(data.ollama.deployments || []).filter(group => group.name === model.name && !group.workers.length),
+      ];
       row.append(element('strong', model.name), element('small', `${bytes(model.size)}${active.length ? ' · loaded: ' + active.map(item => item.hardware || 'default runtime').join(', ') : ' · downloaded'}${model.modified_at ? ' · ' + new Date(model.modified_at).toLocaleDateString() : ''}`));
       const actions = element('div', '', 'actions');
       if (typeof TokenLimits !== 'undefined') actions.append(TokenLimits.button('model', model.name, model.name));
@@ -807,7 +840,14 @@ async function refresh() {
           const button = element('button', action === 'load' ? 'Load / start' : '■ Stop' + (target.hardware ? ' · ' + target.hardware : ''));
           button.dataset.action = action; button.dataset.model = model.name;
           actionFeedback.bind(button, JSON.stringify(['model', action, model.name, target.target || '']));
-          button.addEventListener('click', safe(async (event, control) => { await submitAction(control, '/api/models/' + action, {model: model.name, target: action === 'load' ? $('load-target').value : target.target || ''}); await refresh(); })); actions.append(button);
+          button.addEventListener('click', safe(async (event, control) => {
+            const selection = selectedLoadTargets();
+            if (action === 'load' && !selection.length) return;
+            const placement = action === 'load' && selection.length > 1
+              ? {targets: selection} : {target: action === 'load' ? selection[0] : target.target || ''};
+            await submitAction(control, '/api/models/' + action, {model: model.name, ...placement});
+            await refresh();
+          })); actions.append(button);
         }
       }
       row.append(actions); $('installed').append(row);

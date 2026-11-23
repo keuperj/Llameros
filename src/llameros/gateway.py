@@ -253,7 +253,7 @@ def install_gateway(
             }
         return {
             "models": [
-                {k: v for k, v in model.items() if k not in {"base_url", "openai_url"}}
+                {k: v for k, v in model.items() if k not in {"base_url", "openai_url", "workers"}}
                 for model in loaded
             ]
         }
@@ -736,12 +736,20 @@ def install_gateway(
                     409, "Choose exactly one permitted loaded model and hardware target"
                 )
             target = matches[0]["target"]
+            workers = matches[0].get("workers") if runtimes else None
             keys.limits.check(quota_scopes)
-            ticket = await jobs.scheduler.acquire(target, model, request, username=key["user"])
+            ticket = await jobs.scheduler.acquire(
+                workers or target, model, request, username=key["user"]
+            )
             # Keys may be revoked while waiting; do not start new upstream work afterward.
             await run_in_threadpool(bearer, request)
             runtime = (
-                await run_in_threadpool(runtimes.model_client, model, target)
+                await run_in_threadpool(
+                    runtimes.model_client,
+                    model,
+                    target,
+                    **({"worker": ticket.target} if workers else {}),
+                )
                 if runtimes
                 else docker
             )

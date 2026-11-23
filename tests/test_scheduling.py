@@ -33,6 +33,28 @@ def test_queue_peak_excludes_active_requests_and_counts_across_targets():
     asyncio.run(scenario())
 
 
+def test_replica_pool_skips_busy_worker_and_reserves_physical_targets():
+    async def scenario():
+        jobs = Jobs(None, parallel=1)
+        scheduler = jobs.scheduler
+        scheduler.capacity = 0
+        first = await scheduler.acquire("gpu-a", "model")
+        second = await scheduler.acquire(["gpu-a", "gpu-b"], "model")
+        assert second.target == "gpu-b"
+        with pytest.raises(HTTPException) as error:
+            await scheduler.acquire(["gpu-a", "gpu-b"], "model")
+        assert error.value.status_code == 429
+        with pytest.raises(HTTPException) as error:
+            jobs.submit("unload", "model", lambda _: None, targets={"multi-ab", "gpu-a", "gpu-b"})
+        assert error.value.status_code == 409
+        scheduler.release(first, "completed")
+        scheduler.release(second, "completed")
+        assert not scheduler.tickets
+        jobs.pool.shutdown()
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("parallel", [2, 4])
 def test_parallel_per_device_fifo_and_cleanup(parallel):
     async def scenario():

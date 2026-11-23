@@ -5,6 +5,7 @@ import copy
 import hashlib
 import json
 import logging
+import re
 import secrets
 import threading
 import time
@@ -71,6 +72,12 @@ class ModelRequest(BaseModel):
 
     model: str = Field(min_length=1, max_length=210)
     target: str = Field(default="", max_length=80, pattern=r"^[a-z0-9-]*$")
+
+
+class ModelActionRequest(ModelRequest):
+    """Multi-device selection is available only for model loads."""
+
+    targets: list[str] = Field(default_factory=list, max_length=100)
 
 
 class GenerateRequest(ModelRequest):
@@ -1024,12 +1031,36 @@ def create_app(
         )
 
     @app.post("/api/models/{action}", dependencies=protected, status_code=202)
-    def model_action(action: str, body: ModelRequest):
+    def model_action(action: str, body: ModelActionRequest):
         """Queue validated pull/load/unload work with the appropriate device reservation."""
         name = validate_model(body.model)
         if action not in {"pull", "load", "unload", "delete"}:
             raise HTTPException(404, "Unknown model action")
         target_id = body.target
+        devices = body.targets
+        if devices:
+            if not runtimes or action != "load" or target_id:
+                raise HTTPException(400, "Use either target or targets when loading a model")
+            if (
+                len(set(devices)) != len(devices)
+                or any(
+                    not re.fullmatch(r"gpu-[a-f0-9]{16}", device) and device != "cpu"
+                    for device in devices
+                )
+                or (len(devices) > 1 and "cpu" in devices)
+            ):
+                raise HTTPException(400, "Select either CPU alone or distinct GPU targets")
+            if len(devices) == 1:
+                target_id = devices[0]
+            else:
+                return jobs.submit(
+                    action,
+                    name,
+                    lambda progress: runtimes.load_many(
+                        name, devices, cfg.context_length, progress
+                    ),
+                    targets={*devices, runtimes.deployment_id(devices)},
+                )
         if runtimes and action == "load" and not target_id:
             runtimes.refresh()
             target_id = next(
@@ -1065,11 +1096,7 @@ def create_app(
                 docker.pull(name, progress)
                 return {"message": "Model downloaded"}
             if runtimes and action == "unload":
-                client = runtimes.model_client(name, body.target)
-                progress({"status": "Unloading model from selected hardware"})
-                return client.api(
-                    "POST", "/api/generate", {"model": name, "stream": False, "keep_alive": 0}
-                )
+                return runtimes.unload(name, body.target, progress)
             if runtimes and action == "load":
                 # Start the selected runtime first. Its live inventory and all
                 # model operations must use that container, never the CPU adapter.
@@ -1110,11 +1137,14 @@ def create_app(
                 },
             )
 
+        reservations = {target_id} if target_id and action in {"load", "unload"} else None
+        if runtimes and target_id and action == "unload":
+            reservations = runtimes.reservation_targets(target_id)
         return jobs.submit(
             action,
             name,
             work,
-            targets={target_id} if target_id and action in {"load", "unload"} else None,
+            targets=reservations,
         )
 
     @app.post("/api/benchmark", dependencies=protected, status_code=202)

@@ -28,13 +28,15 @@ const JobProgress = {
   modelControls(runtime, busy, model) {
     const active = this.controls(runtime, busy).active;
     const ready = !busy && !!runtime && runtime.running === true && !runtime.error;
-    return {load: ready && !active.includes(model) && (runtime.slots ? runtime.slots.some(slot => slot.available) : active.length === 0), unload: ready && active.includes(model)};
+    const deployed = (runtime?.deployments || []).some(group => group.name === model);
+    return {load: ready && !deployed && !active.includes(model) && (runtime.slots ? runtime.slots.some(slot => slot.available) : active.length === 0), unload: (ready && active.includes(model)) || (!busy && deployed)};
   },
   /** Deletion fails closed when any hardware slot has unknown residency. */
   canDelete(runtime, busy, model) {
     const normalize = name => name && (name.includes(':') ? name : name + ':latest');
     return !busy && !!runtime && !runtime.error && typeof runtime.running === 'boolean'
       && !(runtime.slots || []).some(slot => slot.supported !== false && slot.error)
+      && !(runtime.deployments || []).some(group => normalize(group.name) === normalize(model))
       && !(runtime.loaded || []).some(item => normalize(item.name || item.model) === normalize(model));
   },
   /** Sum reported model sizes; shared blobs may be counted for multiple tags. */

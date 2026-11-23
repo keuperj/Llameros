@@ -2,9 +2,11 @@
 
 from dataclasses import replace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from test_core import HARDWARE, sign_in, wait_job
+from test_gateway import issue, post
 
 from llameros.app import create_app
 from llameros.config import Settings
@@ -31,6 +33,143 @@ GPUS = [
     },
     {"id": "intel", "name": "Intel integrated", "vendor": "intel", "free": None},
 ]
+
+
+def gpu_ids(manager):
+    return sorted(key for key, target in manager.targets.items() if target["vendor"] == "nvidia")
+
+
+@pytest.mark.parametrize("placement", ["replicated", "sharded"])
+def test_multi_gpu_placement_and_stop(pool, placement):
+    manager, states, cfg, hw = pool
+    devices = gpu_ids(manager)
+    if placement == "sharded":
+        hw["gpus"] = [{**gpu, "free": 600_000_000} for gpu in GPUS[:2]]
+    deployment = manager.load_many("one", devices, 4096, lambda _: None)
+    target = deployment["target"]
+    assert deployment["placement"] == placement
+    workers = devices if placement == "replicated" else [target]
+    status = manager.status()
+    assert status["multi_available"] == []
+    assert len(status["loaded"]) == 1
+    assert status["loaded"][0]["target"] == target
+    assert set(status["loaded"][0]["workers"]) == set(workers)
+    assert {name for name, state in states.items() if state["running"]} == {
+        cfg.container_name + "-" + worker for worker in workers
+    }
+    with pytest.raises(ValueError, match="free"):
+        manager.load("two", 1, devices[0], 4096, lambda _: None)
+    with pytest.raises(ValueError, match="Stop the model"):
+        manager.delete("one", lambda _: None)
+    restarted = Runtimes(cfg, lambda: hw)
+    assert restarted.reservation_targets(target) == {target, *devices}
+    assert restarted.status()["loaded"][0]["target"] == target
+    if placement == "sharded":
+        selected = restarted.model_client("one", target).target
+        args = Docker(replace(cfg, gpu="nvidia"), target=selected).run_args()
+        assert args[args.index("--gpus") + 1] == '"device=' + ",".join(selected["devices"]) + '"'
+        assert "OLLAMA_SCHED_SPREAD=1" in args
+    restarted.unload("one", target, lambda _: None)
+    status = restarted.status()
+    assert not status["loaded"] and not status["deployments"]
+    assert set(status["multi_available"]) == set(devices)
+
+
+def test_multi_gpu_rejects_insufficient_memory_and_rolls_back_failed_replica(pool, monkeypatch):
+    manager, states, cfg, hw = pool
+    devices = gpu_ids(manager)
+    hw["gpus"] = [{**gpu, "free": 300_000_000} for gpu in GPUS[:2]]
+    with pytest.raises(ValueError, match="combined free VRAM"):
+        manager.load_many("one", devices, 4096, lambda _: None)
+    hw["gpus"] = GPUS
+    slot_type = type(manager.client(devices[0]))
+    original = slot_type.api
+
+    def api(slot, method, path, body=None, **kwargs):
+        if slot.target["id"] == devices[1] and path == "/api/generate":
+            raise DockerError("Warmup failed")
+        return original(slot, method, path, body, **kwargs)
+
+    monkeypatch.setattr(slot_type, "api", api)
+    with pytest.raises(DockerError, match="Warmup failed"):
+        manager.load_many("one", devices, 4096, lambda _: None)
+    assert not manager.deployments
+    assert not any(state["running"] or state["loaded"] for state in states.values())
+
+
+def test_multi_gpu_rejects_partial_gpu_offload(pool, monkeypatch):
+    manager, states, _, _ = pool
+    devices = gpu_ids(manager)
+    manager.client(devices[0], register=True)
+    slot_type = type(manager.client(devices[0]))
+    original = slot_type.api
+
+    def api(slot, method, path, body=None, **kwargs):
+        result = original(slot, method, path, body, **kwargs)
+        if path == "/api/ps":
+            return {"models": [{**m, "size_vram": m["size"] // 2} for m in result["models"]]}
+        return result
+
+    monkeypatch.setattr(slot_type, "api", api)
+    with pytest.raises(ValueError, match="full model into GPU memory"):
+        manager.load_many("one", devices, 4096, lambda _: None)
+    assert not manager.status()["deployments"]
+    assert not any(state["loaded"] for state in states.values())
+
+
+def test_replicated_deployment_api_balances_and_skips_unavailable_workers(pool, monkeypatch):
+    manager, states, cfg, hw = pool
+    devices = gpu_ids(manager)
+    called = []
+    original = Runtimes.model_client
+
+    def model_client(self, name, target, *, worker=None):
+        result = original(self, name, target, worker=worker)
+        if worker:
+            called.append(worker)
+        return result
+
+    monkeypatch.setattr(Runtimes, "model_client", model_client)
+    app = create_app(
+        cfg,
+        hardware_provider=lambda: hw,
+        sampling=False,
+        authenticator=lambda *args: True,
+        gateway_transport=httpx.MockTransport(lambda _: httpx.Response(200, json={"done": True})),
+    )
+    with TestClient(app, base_url="https://testserver") as client:
+        key, csrf = issue(client, models=["one:latest"])
+        admin = {"Origin": "https://testserver", "X-CSRF-Token": csrf}
+        bearer = {"Authorization": "Bearer " + key["key"]}
+        for invalid in (["cpu", devices[0]], [devices[0], devices[0]]):
+            assert (
+                client.post(
+                    "/api/models/load", headers=admin, json={"model": "one", "targets": invalid}
+                ).status_code
+                == 400
+            )
+        result = client.post(
+            "/api/models/load", headers=admin, json={"model": "one", "targets": devices}
+        )
+        assert result.status_code == 202, result.text
+        job = wait_job(client)
+        assert job["state"] == "completed", job
+        target = job["result"]["target"]
+        discovery = client.get("/inference/v1/models", headers=bearer).json()["data"]
+        assert [(entry["id"], entry["target"]) for entry in discovery] == [("one:latest", target)]
+        assert post(client, key["key"], model="one").status_code == 200
+        assert post(client, key["key"], model="one", target=target).status_code == 200
+        assert set(called) == set(devices)
+        states[cfg.container_name + "-" + devices[0]].update(running=False, loaded=[])
+        assert post(client, key["key"], model="one").status_code == 200
+        assert called[-1] == devices[1]
+        assert post(client, key["key"], model="one", target=devices[0]).status_code == 409
+        result = client.post(
+            "/api/models/unload", headers=admin, json={"model": "one", "target": target}
+        )
+        assert result.status_code == 202, result.text
+        assert wait_job(client)["state"] == "completed"
+        assert not client.get("/inference/v1/models", headers=bearer).json()["data"]
 
 
 @pytest.fixture
@@ -91,6 +230,7 @@ def pool(tmp_path, monkeypatch):
                 ] + [
                     {
                         "name": body["model"],
+                        "size": 300_000_000,
                         "size_vram": 300_000_000 if self.target["vendor"] != "cpu" else 0,
                     }
                 ]

@@ -40,6 +40,11 @@ uv sync --locked
 uv run llameros
 ```
 
+To run one model on multiple GPUs, open **Start model on** in **Downloaded models**, select two or more free GPUs, and click **Load / start**. A multi-GPU launch reserves those devices exclusively until you stop the deployment. CPU is a separate choice.
+
+- If the model is estimated to fit on **every** selected GPU, Llameros warms one replica per GPU and balances Ollama, OpenAI-compatible, and Anthropic-compatible inference requests across the available replicas at the existing `/inference` endpoint. Discovery shows one logical model target for the deployment. Use that target only if you need to distinguish it from another deployment of the same model.
+- Otherwise, Llameros starts a single Ollama runtime with only the selected GPUs exposed and asks Ollama to spread the model across them. Sharding requires GPUs from the same vendor with dedicated VRAM and enough combined free memory. Memory estimates are advisory; model architecture, driver support, and actual warmup can still prevent launch.
+
 - Open `https://127.0.0.1:8443`. Verify and trust the certificate **before** entering
   your Linux credentials. There is no default password or separate password database.
 - The service account starts as admin; other eligible Linux accounts use the user

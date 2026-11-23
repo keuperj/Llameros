@@ -296,14 +296,20 @@ class Docker:
         if self.target:
             args += ["--label", f"io.llameros.target={self.target['id']}"]
         if cfg.gpu == "nvidia" and self.target:
-            args += ["--gpus", f"device={self.target['device']}"]
+            devices = self.target.get("devices") or [self.target["device"]]
+            if any(not re.fullmatch(r"GPU-[A-Za-z0-9-]+", device) for device in devices):
+                raise DockerError("Invalid NVIDIA GPU UUID")
+            selection = "device=" + ",".join(devices)
+            # Docker's --gpus flag is parsed as CSV, even without a shell.
+            args += ["--gpus", f'"{selection}"' if len(devices) > 1 else selection]
         elif cfg.gpu == "amd" and self.target:
-            device = self.target["device"]
-            if not re.fullmatch(r"/dev/dri/renderD\d+", device):
+            devices = self.target.get("devices") or [self.target["device"]]
+            if any(not re.fullmatch(r"/dev/dri/renderD\d+", device) for device in devices):
                 raise DockerError("Invalid AMD render device")
-            args += ["--device", "/dev/kfd", "--device", device]
-            for path in ("/dev/kfd", device):
-                args += ["--group-add", str(Path(path).stat().st_gid)]
+            for path in ["/dev/kfd", *devices]:
+                args += ["--device", path]
+            for gid in sorted({Path(path).stat().st_gid for path in ["/dev/kfd", *devices]}):
+                args += ["--group-add", str(gid)]
         elif cfg.gpu == "nvidia":
             args += ["--gpus", "all"]
         elif cfg.gpu == "amd":
@@ -317,6 +323,8 @@ class Docker:
                 "-e",
                 "NVIDIA_VISIBLE_DEVICES=void",
             ]
+        if self.target and self.target.get("placement") == "sharded":
+            args += ["-e", "OLLAMA_SCHED_SPREAD=1"]
         return [*args, self.image]
 
     def require_isolation(self, data):
