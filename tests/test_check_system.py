@@ -33,7 +33,7 @@ def preflight(tmp_path):
 esac""",
     )
 
-    def run(*args, **settings):
+    def run(*args, launcher=(), **settings):
         env = dict(os.environ)
         env.pop("DOCKER_HOST", None)
         env.pop("DOCKER_CONTEXT", None)
@@ -44,13 +44,17 @@ esac""",
             TEST_ENDPOINT="unix:///run/user/1000/docker.sock",
         )
         env.update(settings)
-        return subprocess.run([SCRIPT, *args], env=env, capture_output=True, text=True, timeout=15)
+        return subprocess.run(
+            [*launcher, SCRIPT, *args], env=env, capture_output=True, text=True, timeout=15
+        )
 
     return run
 
 
-def test_reports_active_rootless_daemon_and_skips_gpu_in_cpu_mode(preflight):
-    result = preflight("--gpu", "cpu")
+@pytest.mark.parametrize("launcher", [(), ("sh",)], ids=["direct", "sh"])
+def test_reports_active_rootless_daemon_and_skips_gpu_in_cpu_mode(preflight, launcher):
+    result = preflight("--gpu", "cpu", launcher=launcher)
+    assert result.stderr == ""
     assert "Docker Engine 29.0: rootless" in result.stdout
     assert "GPU checks skipped" in result.stdout
     assert "[OK]   Python " in result.stdout
@@ -93,5 +97,8 @@ def test_missing_nvidia_components_produce_mode_specific_hints(preflight, mode, 
         assert result.returncode == 1
 
 
-def test_invalid_gpu_mode(preflight):
-    assert preflight("--gpu", "intel").returncode == 2
+@pytest.mark.parametrize("launcher", [(), ("sh",)], ids=["direct", "sh"])
+def test_invalid_gpu_mode(preflight, launcher):
+    result = preflight("--gpu", "intel", launcher=launcher)
+    assert result.returncode == 2
+    assert result.stderr.startswith("Usage: ./CheckSystem.sh")

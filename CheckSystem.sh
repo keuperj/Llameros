@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # Ubuntu preflight for Llameros. Reports only; no installs or service changes.
+# An explicit `sh CheckSystem.sh` bypasses the shebang. Keep this block POSIX.
+if [ -z "${BASH_VERSION:-}" ]; then
+    if ! command -v bash >/dev/null 2>&1; then
+        printf '%s\n' 'CheckSystem.sh requires Bash. Install Bash or add it to PATH.' >&2
+        exit 127
+    fi
+    exec bash -- "$0" "$@"
+fi
+
 set -u
 export LC_ALL=C
 
