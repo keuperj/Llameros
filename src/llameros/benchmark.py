@@ -26,6 +26,24 @@ def stress_summary(worker_count, scope="runtime"):
     }
 
 
+async def check_replica_pool(send, workload, workers, timeout, progress, stress):
+    """Exercise every replica concurrently without counting the burst as a sustained rate."""
+    check = stress["replica_check"] = {"offered": len(workers), "completed": 0, "failed": 0}
+    progress({"status": f"Checking {len(workers)} replica workers concurrently", "phase": "stress"})
+
+    async def request(worker):
+        try:
+            async with asyncio.timeout(timeout):
+                await send(worker, *workload)
+        except Exception:
+            check["failed"] += 1
+        else:
+            check["completed"] += 1
+
+    await asyncio.gather(*(request(worker) for worker in workers))
+    return check["failed"] == 0
+
+
 async def stress_test(
     send, workloads, scheduler, progress, result, checkpoint, *, workers, minute=60
 ):
@@ -38,6 +56,9 @@ async def stress_test(
     rate = 1.0
     direction = None
     stress = result.setdefault("stress", stress_summary(len(workers)))
+    pool_label = (
+        f" · {len(workers)} available replicas" if stress["scope"] == "replica-pool" else ""
+    )
     while True:
         interval = minute / rate
         duration = max(minute, len(workloads) * interval)
@@ -94,7 +115,7 @@ async def stress_test(
                 task.add_done_callback(tasks.discard)
                 progress(
                     {
-                        "status": f"Stress test · {rate:g} requests/min · {stats['offered']}/{count} offered · {stats['failed']} failures",
+                        "status": f"Stress test{pool_label} · {rate:g} requests/min · {stats['offered']}/{count} offered · {stats['failed']} failures",
                         "phase": "stress",
                         "rpm": rate,
                     }
@@ -328,6 +349,28 @@ async def measure(
                         body["input"]
                     ):
                         raise ValueError("Incomplete embedding stress response")
+
+                if len(clients) > 1:
+                    # Use the longest observed case so the check exercises each worker beyond a
+                    # tiny probe. Keep the ordinary open-loop workload and its score unchanged.
+                    slowest = max(
+                        range(len(workloads)), key=lambda i: result["cases"][i]["wall_seconds"]
+                    )
+                    if not await check_replica_pool(
+                        stress_post,
+                        workloads[slowest],
+                        tuple(clients),
+                        scheduler.timeout,
+                        progress,
+                        result["stress"],
+                    ):
+                        result["stress"]["status"] = "failed"
+                        result["error"] = (
+                            "A replica failed the concurrent check; no pool rate measured."
+                        )
+                        checkpoint(result)
+                        return
+                    checkpoint(result)
 
                 await stress_test(
                     stress_post,

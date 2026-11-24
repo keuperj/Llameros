@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import httpx
 from test_users import multiuser as multiuser
 
-from llameros.benchmark import measure, stress_test
+from llameros.benchmark import check_replica_pool, measure, stress_test
 from llameros.scheduling import InferenceScheduler
 
 
@@ -16,12 +16,13 @@ def scheduler(capacity=0, timeout=1):
     return InferenceScheduler(jobs, capacity=capacity, timeout=timeout, parallel=1)
 
 
-def test_replica_stress_uses_both_transports_concurrently_without_mixing_speed_scores(monkeypatch):
+def test_replica_stress_checks_four_workers_without_mixing_speed_scores(monkeypatch):
     from llameros import benchmark
 
     calls = []
     active = set()
     overlapped = asyncio.Event()
+    worker_ids = ("gpu-a", "gpu-b", "gpu-c", "gpu-d")
     pool_running = False
     first_round_finished = False
     closed = []
@@ -41,7 +42,7 @@ def test_replica_stress_uses_both_transports_concurrently_without_mixing_speed_s
                 return httpx.Response(500)
             if pool_running:
                 active.add(uds)
-                if len(active) == 2:
+                if len(active) == len(worker_ids):
                     overlapped.set()
                 try:
                     await asyncio.wait_for(overlapped.wait(), 1)
@@ -63,11 +64,10 @@ def test_replica_stress_uses_both_transports_concurrently_without_mixing_speed_s
 
     monkeypatch.setattr(benchmark.httpx, "AsyncHTTPTransport", transport)
     monkeypatch.setattr(benchmark, "stress_test", accelerated)
-    first = SimpleNamespace(socket_path=lambda: "gpu-a")
-    second = SimpleNamespace(socket_path=lambda: "gpu-b")
+    workers = {name: SimpleNamespace(socket_path=lambda name=name: name) for name in worker_ids}
     result = asyncio.run(
         measure(
-            first,
+            workers["gpu-a"],
             "model",
             "deployment",
             4096,
@@ -75,24 +75,39 @@ def test_replica_stress_uses_both_transports_concurrently_without_mixing_speed_s
             lambda _: None,
             policy={"queue_size": 2, "queue_timeout": 2, "queue_users": 0},
             checkpoint=checkpoint,
-            replica_workers={"a": first, "b": second},
+            replica_workers=workers,
             budget=4,
         )
     )
     assert result["status"] == "completed"
     assert result["tokens_per_second"] == 10
     assert [node for stress, node in calls if not stress] == ["gpu-a"] * 6
-    assert {node for stress, node in calls if stress} == {"gpu-a", "gpu-b"}
+    pool_calls = [node for stress, node in calls if stress]
+    assert set(pool_calls[:4]) == set(worker_ids)
+    assert set(pool_calls[4:10]) == set(worker_ids)  # first sustained round
     assert overlapped.is_set()
     stress = result["stress"]
     assert (stress["scope"], stress["worker_count"], stress["status"]) == (
         "replica-pool",
-        2,
+        4,
         "completed",
     )
+    assert stress["replica_check"] == {"offered": 4, "completed": 4, "failed": 0}
     assert stress["rounds"][0]["completed"] == 6
     assert stress["best_rpm"] == 1
-    assert closed == [True, True]
+    assert closed == [True] * 4
+
+
+def test_replica_check_reports_worker_failure_and_still_exercises_the_others():
+    async def send(worker, path, body):
+        if worker == "b":
+            raise ValueError("invalid response")
+
+    stress = {}
+    assert not asyncio.run(
+        check_replica_pool(send, ("/chat", {}), "abcd", 1, lambda _: None, stress)
+    )
+    assert stress["replica_check"] == {"offered": 4, "completed": 3, "failed": 1}
 
 
 def test_open_loop_stops_at_first_scaling_up_failure_and_cleans_up():

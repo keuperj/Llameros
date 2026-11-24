@@ -40,7 +40,9 @@ const BenchmarkResults = {
           const stress = row.stress;
           if (stress.stop_reason) details.append(element('p', stress.stop_reason === 'failure-scaling-up' ? 'Automatically stopped at the first failed rate while scaling up.' : 'Automatically stopped at the first successful rate while scaling down.'));
           const scope = stress.scope === 'replica-pool' ? ` (replica pool · ${stress.worker_count} available ${stress.worker_count === 1 ? 'worker' : 'workers'})` : '';
-          details.append(element('p', `Stress test${scope}: ${stress.status} · highest clean tested rate ${stress.best_rpm.toFixed(2)} requests/min · ${stress.round_count} rounds. Observed estimate, not a guarantee of permanent capacity. Latest 200 rounds retained.`));
+          if (stress.replica_check) details.append(element('p', `Concurrent replica check: ${stress.replica_check.completed}/${stress.replica_check.offered} workers completed · ${stress.replica_check.failed} failed.`));
+          const rate = stress.round_count ? `highest clean tested rate ${stress.best_rpm.toFixed(2)} requests/min` : 'no sustained rate measured';
+          details.append(element('p', `Stress test${scope}: ${stress.status} · ${rate} · ${stress.round_count} rounds. Observed estimate, not a guarantee of permanent capacity. Latest 200 rounds retained.`));
           for (const round of stress.rounds) details.append(element('p', `${round.rpm.toFixed(2)} requests/min: ${round.successful ? 'passed' : 'failed'} · ${round.completed}/${round.offered} completed · ${round.overflow} overflows · ${round.timeouts} timeouts · ${round.failed} total failures · ${round.wall_seconds.toFixed(1)}s`));
         }
         for (const sample of row.cases) details.append(element('p', `${sample.name}: ${sample.tokens_per_second.toFixed(1)} tokens/s · ${sample.tokens} tokens · ${sample.wall_seconds.toFixed(2)}s wall time · ${sample.timing} timing`));

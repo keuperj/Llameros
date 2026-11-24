@@ -42,12 +42,21 @@ def gpu_ids(manager):
 
 
 @pytest.mark.parametrize(
-    "mode, count, degraded",
-    [("sharded", 2, False), ("replicated", 1, False), ("replicated", 1, True)],
+    "mode, device_count, degraded",
+    [
+        ("sharded", 2, False),
+        ("replicated", 2, False),
+        ("replicated", 4, False),
+        ("replicated", 4, True),
+    ],
 )
-def test_benchmark_reports_the_measured_runtime(pool, monkeypatch, mode, count, degraded):
+def test_benchmark_reports_the_measured_runtime(pool, monkeypatch, mode, device_count, degraded):
     manager, _, cfg, hw = pool
+    if device_count == 4:
+        hw["gpus"] = [*hw["gpus"], *({**GPUS[0], "id": f"GPU-extra-{i}"} for i in range(2))]
+        manager.refresh()
     devices = gpu_ids(manager)
+    assert len(devices) == device_count
     if mode == "sharded":
         hw["gpus"] = [{**gpu, "free": 600_000_000} for gpu in GPUS[:2]]
     deployment = manager.load_many("one", devices, 4096, lambda _: None)
@@ -74,16 +83,20 @@ def test_benchmark_reports_the_measured_runtime(pool, monkeypatch, mode, count, 
         app, base_url="https://testserver", headers={"Origin": "https://testserver"}
     ) as client:
         sign_in(client)
-        assert (
-            client.post("/api/benchmark", json={"model": "one", "target": target}).status_code
-            == 202
-        )
+        response = client.post("/api/benchmark", json={"model": "one", "target": target})
+        if degraded:
+            assert response.status_code == 409
+            assert "Only 3 of 4 replica workers are ready" in response.json()["detail"]
+            assert not app.state.store.benchmarks()
+            return
+        assert response.status_code == 202
         job = wait_job(client)
         assert job["state"] == "completed", job
         [saved] = app.state.store.benchmarks()
         assert saved["target"] == target
         entry = shareable(saved)
         assert entry.placement.mode == mode
+        count = device_count if mode == "sharded" else 1
         assert entry.placement.gpu_count == count
         assert entry.placement.combined_vram_gib == (16 if mode == "sharded" else None)
         assert [gpu.accelerator_memory_gib for gpu in entry.placement.gpus] == [8] * count

@@ -140,7 +140,7 @@ function renderAccess(allowManagement = true) {
         actionFeedback.bind(benchmark, JSON.stringify(['benchmark', name, model.target || 'cpu']));
         benchmark.addEventListener('click', safe(async (event, control) => {
           const replicas = model.placement === 'replicated'
-            ? ' The six speed tests measure one worker; the stress test balances requests across available replicas.' : '';
+            ? ' The six speed tests measure one worker. The stress test first checks every replica concurrently, then balances sustained requests across the pool.' : '';
           if (!window.confirm(`Benchmark this model?${replicas} After six speed tests, the stress test stops on the first failure while scaling up, or the first success while scaling down. You can also select Stop benchmark. The inference API is unavailable for all users during the run.`)) return;
           await submitAction(control, '/api/benchmark', {model: name, target: model.target || ''}); await refresh();
         }));

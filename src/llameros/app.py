@@ -1208,6 +1208,11 @@ def create_app(
         if runtimes:
             client, deployment = runtimes.model_runtime(name, body.target)
             if deployment.get("placement") == "replicated":
+                if len(deployment["workers"]) != deployment["worker_count"]:
+                    raise HTTPException(
+                        409,
+                        f"Only {len(deployment['workers'])} of {deployment['worker_count']} replica workers are ready. Restore all replicas before benchmarking the pool.",
+                    )
                 workers = {
                     worker: client if worker == client.target["id"] else runtimes.client(worker)
                     for worker in deployment["workers"]
