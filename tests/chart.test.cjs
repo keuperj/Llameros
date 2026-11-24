@@ -28,3 +28,26 @@ test('GPU history tracks each device across reorderings and leaves unknown sampl
   vm.runInContext('draw([])', context);
   assert.equal(legend.children.length, 2);
 });
+
+test('benchmark samples are highlighted on a timestamp-scaled hardware plot', () => {
+  const bands = [], points = [], legend = {children: [], replaceChildren() { this.children = []; },
+    append(node) { this.children.push(node); }};
+  const ctx = {clearRect() {}, beginPath() {}, stroke() {}, fillText() {}, moveTo() {}, lineTo() {},
+    fillRect(...args) { (this.fillStyle.startsWith('rgba') ? bands : points).push(args); }};
+  const context = vm.createContext({$: id => id === 'chart-legend' ? legend : ({width: 1100, height: 180, getContext: () => ctx}),
+    element: (tag, text) => ({textContent: text, style: {}})});
+  vm.runInContext(source.slice(source.indexOf('function draw(samples)'), source.lastIndexOf("safe(async () =>")), context);
+  context.samples = [
+    {timestamp: 100, hardware: {cpu_percent: 10}},
+    {timestamp: 120, benchmark: true, hardware: {cpu_percent: 70, gpus: [{utilization: 90}]}},
+    {timestamp: 121, benchmark: true, hardware: {cpu_percent: 50}},
+    {timestamp: 150, hardware: {cpu_percent: 15}},
+  ];
+  vm.runInContext('draw(samples)', context);
+  assert.equal(bands.length, 1);
+  assert.equal(points.length, 3); // two CPU readings and one isolated GPU reading
+  const [left, , width] = bands[0];
+  assert.ok(left > 425 && left + width < 520);
+  assert.ok(points.every(([x]) => x >= left && x <= left + width));
+  assert.equal(legend.children.at(-1).textContent, '▧ Benchmark');
+});

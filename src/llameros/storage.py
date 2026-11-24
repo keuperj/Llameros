@@ -188,13 +188,15 @@ class Store:
                 for row in db.execute("SELECT * FROM security_events ORDER BY id DESC LIMIT 1000")
             ]
 
-    def sample(self, data: dict, retention_days: int):
+    def sample(self, data: dict, retention_days: int, *, timestamp: float | None = None):
         """Store one resource snapshot and prune history older than retention_days."""
+        now = time.time()
         with self.connect() as db:
             db.execute(
-                "INSERT INTO samples(timestamp,data) VALUES(?,?)", (time.time(), json.dumps(data))
+                "INSERT INTO samples(timestamp,data) VALUES(?,?)",
+                (now if timestamp is None else timestamp, json.dumps(data)),
             )
-            cutoff = time.time() - retention_days * 86400
+            cutoff = now - retention_days * 86400
             for table in ("samples", "events", "generations"):
                 if table != "events":
                     db.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))

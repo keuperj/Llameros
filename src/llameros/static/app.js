@@ -773,7 +773,12 @@ async function refresh() {
       await refreshKeys();
     }
     if (userBoard) { await refreshUserBoard(); return; }
-    const [data, history, inventory, keyUsage, activity, tokens, scheduler, ollamaConfig, sharingConfig] = await Promise.all([api('/api/status'), api('/api/history'), api('/api/models'), api('/api/keys/usage'), api('/api/activity?timeframe=' + $('activity-timeframe').value), api('/api/token-history'), api('/api/scheduler'), api('/api/ollama'), api('/api/benchmark-sharing')]);
+    const historyRequest = api('/api/history').then(history => {
+      // Hardware telemetry is independent of slower Docker/Ollama status requests.
+      if (csrf && epoch === sessionEpoch && !userBoard) draw(history.samples);
+      return history;
+    });
+    const [data, history, inventory, keyUsage, activity, tokens, scheduler, ollamaConfig, sharingConfig] = await Promise.all([api('/api/status'), historyRequest, api('/api/models'), api('/api/keys/usage'), api('/api/activity?timeframe=' + $('activity-timeframe').value), api('/api/token-history'), api('/api/scheduler'), api('/api/ollama'), api('/api/benchmark-sharing')]);
     if (!csrf) return;
     UserActivity.render(tokens);
     SchedulerConfig.render(scheduler);
@@ -875,11 +880,10 @@ async function refresh() {
     renderEvents(serverEvents);
     actionFeedback.restore();
     updateControls();
-    draw(history.samples);
   } finally { if (epoch === sessionEpoch) refreshing = false; }
 }
 /**
- * Draw CPU/RAM and individual GPU histories; unavailable metrics leave gaps.
+ * Draw CPU/RAM and individual GPU histories over time, highlighting benchmark samples.
  *
  * @param {Array<Object>} samples - Timestamped host samples; missing values are tolerated.
  */
@@ -898,19 +902,37 @@ function draw(samples) {
   for (const [, color, label] of series) {
     const item = element('span', '● ' + label); item.style.color = color; legend.append(item);
   }
-  ctx.clearRect(0, 0, w, h); ctx.strokeStyle = '#303e35'; ctx.fillStyle = '#a1b2a6'; ctx.font = '12px system-ui';
+  const left = 42, right = w - 3, start = samples[0]?.timestamp;
+  const duration = samples[samples.length - 1]?.timestamp - start;
+  const timed = duration > 0 && samples.every(sample => Number.isFinite(sample.timestamp));
+  const xAt = i => left + (timed ? (samples[i].timestamp - start) / duration
+    : i / Math.max(1, samples.length - 1)) * (right - left);
+  ctx.clearRect(0, 0, w, h);
+  if (samples.some(sample => sample.benchmark)) {
+    const item = element('span', '▧ Benchmark'); item.style.color = '#c7adff'; legend.append(item);
+    ctx.fillStyle = 'rgba(180, 143, 255, 0.22)';
+    const pad = timed ? Math.max(2, (right - left) / duration / 2) : 2;
+    for (let i = 0; i < samples.length; i++) {
+      if (!samples[i].benchmark) continue;
+      const x = Math.max(left - 2, xAt(i) - pad);
+      while (samples[i + 1]?.benchmark) i++;
+      ctx.fillRect(x, 15, Math.min(w, xAt(i) + pad) - x, h - 35);
+    }
+  }
+  ctx.strokeStyle = '#303e35'; ctx.fillStyle = '#a1b2a6'; ctx.font = '12px system-ui';
   for (const pct of [0, 50, 100]) { const y = 15 + (100 - pct) / 100 * (h - 35); ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(w, y); ctx.stroke(); ctx.fillText(pct + '%', 0, y + 4); }
   if (!samples.length) { ctx.fillText('Resource history appears after the first sample.', 60, 90); return; }
   for (const [seriesIndex, [key, color]] of series.entries()) {
-    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.strokeStyle = ctx.fillStyle = color; ctx.lineWidth = 2;
     let connected = false;
     samples.forEach((sample, i) => {
       const hardware = sample.hardware || {};
       const value = seriesIndex < 2 ? hardware[key]
         : (hardware.gpus || []).find((gpu, index) => gpuId(gpu, index) === key)?.utilization;
       if (!Number.isFinite(value) || value < 0 || value > 100) { connected = false; return; }
-      const x = 42 + i / Math.max(1, samples.length - 1) * (w - 45), y = 15 + (100 - value) / 100 * (h - 35);
+      const x = xAt(i), y = 15 + (100 - value) / 100 * (h - 35);
       if (connected) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      if (sample.benchmark) ctx.fillRect(x - 1, y - 1, 2, 2);
       connected = true;
     }); ctx.stroke();
   }

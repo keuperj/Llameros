@@ -1,6 +1,7 @@
 """Offline core regression tests for Llameros behavior and integration boundaries."""
 
 import json
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -309,6 +310,73 @@ def test_lifecycle_generation_and_history(client):
     assert "test-secret" not in json.dumps(history)
     assert client.post("/api/container/stop", json={}).status_code == 202
     assert wait_job(client)["state"] == "completed"
+
+
+def test_running_benchmark_samples_hardware_without_waiting_for_runtime_status(
+    tmp_path, monkeypatch
+):
+    docker = FakeDocker()
+    docker.loaded = [{"name": "gemma3:270m"}]
+    active, release = threading.Event(), threading.Event()
+    status_during_benchmark = []
+
+    def status():
+        if active.is_set() and not release.is_set():
+            status_during_benchmark.append(True)
+        return FakeDocker.status(docker)
+
+    async def measure(*args):
+        active.set()
+        assert release.wait(10), "test did not release the benchmark"
+        return {"model": "gemma3:270m", "target": "cpu"}
+
+    def hardware():
+        return {
+            **HARDWARE,
+            "gpus": [{"id": "gpu-a", "utilization": 85}, {"id": "gpu-b", "utilization": 91}],
+        }
+
+    monkeypatch.setattr(docker, "status", status)
+    monkeypatch.setattr("llameros.app.measure", measure)
+    app = create_app(
+        Settings(state_dir=tmp_path, sample_seconds=60),
+        docker=docker,
+        authenticator=lambda *args: True,
+        hardware_provider=hardware,
+    )
+
+    def wait_samples(client, predicate):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            samples = client.get("/api/history").json()["samples"]
+            if predicate(samples):
+                return samples
+            time.sleep(0.02)
+        pytest.fail("Expected hardware samples did not arrive")
+
+    with TestClient(
+        app, base_url="https://testserver", headers={"Origin": "https://testserver"}
+    ) as client:
+        sign_in(client)
+        baseline = wait_samples(client, bool)[0]
+        assert "benchmark" not in baseline and "ollama" in baseline
+        try:
+            assert client.post("/api/benchmark", json={"model": "gemma3:270m"}).status_code == 202
+            assert active.wait(2)
+            samples = wait_samples(
+                client, lambda rows: sum(row.get("benchmark", False) for row in rows) >= 2
+            )
+            assert client.get("/api/job").json()["state"] == "running"
+            assert not status_during_benchmark
+            assert all(row["hardware"] == hardware() and "ollama" not in row for row in samples[1:])
+        finally:
+            release.set()
+        assert wait_job(client)["state"] == "completed"
+        assert client.get("/api/history").json()["samples"][: len(samples)] == samples
+        personal = client.get("/api/user/dashboard").json()["history"]["samples"]
+        assert personal[1]["benchmark"] is True
+        assert [gpu["utilization"] for gpu in personal[1]["hardware"]["gpus"]] == [85, 91]
+        assert "gpu-a" not in str(personal)
 
 
 def test_catalog_and_validation(client):

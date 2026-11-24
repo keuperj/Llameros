@@ -12,6 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -289,34 +290,56 @@ def create_app(
     jobs.scheduler.capacity = scheduler_policy.queue_size
     jobs.scheduler.timeout = scheduler_policy.queue_timeout
     jobs.scheduler.queue_users = scheduler_policy.queue_users
+    wake_sampler = None
+
+    def benchmarking():
+        return jobs.job["state"] == "running" and jobs.job.get("action") == "benchmark"
 
     def sample_once():
         """Persist one host/runtime observation while containing expected probe failures."""
         with jobs.lock:
-            store.queue_peak(
-                [ticket.username for ticket in jobs.scheduler.tickets if not ticket.active]
-            )
+            benchmark = benchmarking()
+            if not benchmark:
+                store.queue_peak(
+                    [ticket.username for ticket in jobs.scheduler.tickets if not ticket.active]
+                )
+        timestamp = time.time()
         data = {"hardware": hardware()}
-        try:
-            data["ollama"] = runtime_status()
-        except Exception as exc:
-            data["ollama"] = {"running": False, "error": diagnostic(exc)}
-        store.sample(data, cfg.retention_days)
+        if benchmark:
+            # Avoid contending with the benchmark for Ollama or waiting on Docker stats.
+            data["benchmark"] = True
+        else:
+            try:
+                data["ollama"] = runtime_status()
+            except Exception as exc:
+                data["ollama"] = {"running": False, "error": diagnostic(exc)}
+        store.sample(data, cfg.retention_days, timestamp=timestamp)
 
-    async def sampler():
+    async def sampler(wake):
         """Collect periodic observations until application shutdown requests cancellation."""
         while True:
+            wake.clear()
             try:
                 await run_in_threadpool(sample_once)
             except Exception:
                 log.exception("Resource sampling failed")
-            await asyncio.sleep(cfg.sample_seconds)
+            with jobs.lock:
+                delay = min(cfg.sample_seconds, 1) if benchmarking() else cfg.sample_seconds
+            with suppress(TimeoutError):
+                await asyncio.wait_for(wake.wait(), delay)
 
     @asynccontextmanager
     async def lifespan(app):
         """Start optional telemetry and stop the sampler/executor during application shutdown."""
-        task = asyncio.create_task(sampler()) if sampling else None
+        nonlocal wake_sampler
+        task = None
+        if sampling:
+            wake = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            wake_sampler = partial(loop.call_soon_threadsafe, wake.set)
+            task = asyncio.create_task(sampler(wake))
         yield
+        wake_sampler = None
         if task:
             task.cancel()
             with suppress(asyncio.CancelledError):
@@ -535,7 +558,7 @@ def create_app(
     def user_dashboard(session=Depends(require_session)):
         """Return running-model allowlisted fields, overall model totals, and owner-only key usage.
 
-        Include CPU/RAM samples but omit activity logs, direct runtime URLs, and other users'
+        Include host utilization samples but omit activity logs, direct runtime URLs, and other users'
         key metadata.
         """
         try:
@@ -567,6 +590,7 @@ def create_app(
                 "samples": [
                     {
                         "timestamp": sample["timestamp"],
+                        **({"benchmark": True} if sample.get("benchmark") else {}),
                         "hardware": {
                             "gpus": [
                                 {
@@ -1234,7 +1258,10 @@ def create_app(
             save_result(result)
             return result
 
-        return jobs.submit("benchmark", name, work)
+        accepted = jobs.submit("benchmark", name, work)
+        if notify := wake_sampler:
+            notify()
+        return accepted
 
     @app.post("/api/benchmark/stop", dependencies=protected)
     def stop_benchmark():
