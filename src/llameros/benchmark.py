@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from concurrent.futures import Future
+from contextlib import AsyncExitStack
 from types import SimpleNamespace
 
 import httpx
@@ -14,7 +15,20 @@ from .runtime_transport import RUNTIME_BASE_URL
 from .scheduling import InferenceScheduler
 
 
-async def stress_test(send, workloads, scheduler, progress, result, checkpoint, *, minute=60):
+def stress_summary(worker_count, scope="runtime"):
+    return {
+        "status": "running",
+        "best_rpm": 0,
+        "rounds": [],
+        "round_count": 0,
+        "worker_count": worker_count,
+        "scope": scope,
+    }
+
+
+async def stress_test(
+    send, workloads, scheduler, progress, result, checkpoint, *, workers, minute=60
+):
     """Open-loop arrivals; stop at the first outcome reversal or manual cancellation.
 
     Every stage offers at least six requests and one minute of arrivals. Outstanding
@@ -23,7 +37,7 @@ async def stress_test(send, workloads, scheduler, progress, result, checkpoint, 
     """
     rate = 1.0
     direction = None
-    stress = result["stress"] = {"status": "running", "best_rpm": 0, "rounds": [], "round_count": 0}
+    stress = result.setdefault("stress", stress_summary(len(workers)))
     while True:
         interval = minute / rate
         duration = max(minute, len(workloads) * interval)
@@ -45,8 +59,8 @@ async def stress_test(send, workloads, scheduler, progress, result, checkpoint, 
             ticket = None
             try:
                 async with asyncio.timeout(scheduler.timeout):
-                    ticket = await scheduler.acquire("benchmark", "benchmark", username="synthetic")
-                    await send(*workloads[index % len(workloads)])
+                    ticket = await scheduler.acquire(workers, "benchmark", username="synthetic")
+                    await send(ticket.target, *workloads[index % len(workloads)])
                 stats["completed"] += 1
             except Exception as exc:
                 stats["failed"] += 1
@@ -151,9 +165,10 @@ async def measure(
     checkpoint=lambda result: None,
     *,
     transport=None,
+    replica_workers=None,
     budget=None,
 ):
-    """Measure six sequential workloads then adapt load to its first outcome reversal.
+    """Measure six workloads on one runtime, then adapt load across the available replica pool.
 
     No production overall deadline; budget is an optional test-only deadline.
     Cancellation closes HTTP tasks and the isolated scheduler's reservations.
@@ -172,9 +187,8 @@ async def measure(
         "method": "single-request-v1",
     }
 
-    async def run():
-        nonlocal transport
-        if transport is None:
+    async def connect(stack, runtime, prepared_transport=None):
+        if prepared_transport is None:
             # Docker inspection is blocking. Do not let asyncio.run's executor
             # shutdown block manual cancellation if Docker itself stalls.
             ready = Future()
@@ -188,21 +202,28 @@ async def measure(
             threading.Thread(target=prepare, daemon=True).start()
             while not ready.done():
                 await asyncio.sleep(0.02)
-            socket = ready.result()
-            transport = httpx.AsyncHTTPTransport(uds=socket)
-        async with httpx.AsyncClient(
-            base_url=RUNTIME_BASE_URL, transport=transport, trust_env=False, timeout=None
-        ) as client:
+            prepared_transport = httpx.AsyncHTTPTransport(uds=ready.result())
+        return await stack.enter_async_context(
+            httpx.AsyncClient(
+                base_url=RUNTIME_BASE_URL,
+                transport=prepared_transport,
+                trust_env=False,
+                timeout=None,
+            )
+        )
 
-            async def post(path, body):
-                response = await client.post(path, json=body)
-                response.raise_for_status()
-                data = response.json()
-                if not isinstance(data, dict) or data.get("error"):
-                    raise ValueError("Invalid benchmark response")
-                return data
+    async def post(client, path, body):
+        response = await client.post(path, json=body)
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict) or data.get("error"):
+            raise ValueError("Invalid benchmark response")
+        return data
 
-            info = await post("/api/show", {"model": model})
+    async def run():
+        async with AsyncExitStack() as stack:
+            client = await connect(stack, runtime, transport)
+            info = await post(client, "/api/show", {"model": model})
             capabilities = info.get("capabilities", [])
             # Optional public model artifact identity; never derive one from private paths.
             try:
@@ -245,7 +266,7 @@ async def measure(
                     path = "/api/embed"
                 workloads.append((path, body))
                 before = time.monotonic()
-                data = await post(path, body)
+                data = await post(client, path, body)
                 elapsed = time.monotonic() - before
                 token_field = "eval_count" if result["kind"] == "chat" else "prompt_eval_count"
                 tokens = data.get(token_field)
@@ -285,9 +306,22 @@ async def measure(
                 )
                 scheduler.queue_users = policy["queue_users"]
                 result["stress_policy"] = dict(policy)
+                result["stress"] = (
+                    stress_summary(len(replica_workers), "replica-pool")
+                    if replica_workers
+                    else stress_summary(1)
+                )
+                clients = (
+                    {
+                        worker: client if node is runtime else await connect(stack, node)
+                        for worker, node in replica_workers.items()
+                    }
+                    if replica_workers
+                    else {target: client}
+                )
 
-                async def stress_post(path, body):
-                    data = await post(path, body)
+                async def stress_post(worker, path, body):
+                    data = await post(clients[worker], path, body)
                     if result["kind"] == "chat" and not data.get("done"):
                         raise ValueError("Incomplete stress response")
                     if result["kind"] == "embedding" and len(data.get("embeddings", [])) != len(
@@ -295,7 +329,15 @@ async def measure(
                     ):
                         raise ValueError("Incomplete embedding stress response")
 
-                await stress_test(stress_post, workloads, scheduler, progress, result, checkpoint)
+                await stress_test(
+                    stress_post,
+                    workloads,
+                    scheduler,
+                    progress,
+                    result,
+                    checkpoint,
+                    workers=tuple(clients),
+                )
 
     async def cancellable_run():
         task = asyncio.create_task(run())

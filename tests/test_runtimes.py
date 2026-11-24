@@ -41,17 +41,29 @@ def gpu_ids(manager):
     return sorted(key for key, target in manager.targets.items() if target["vendor"] == "nvidia")
 
 
-@pytest.mark.parametrize("mode, count", [("sharded", 2), ("replicated", 1)])
-def test_benchmark_reports_the_measured_runtime(pool, monkeypatch, mode, count):
+@pytest.mark.parametrize(
+    "mode, count, degraded",
+    [("sharded", 2, False), ("replicated", 1, False), ("replicated", 1, True)],
+)
+def test_benchmark_reports_the_measured_runtime(pool, monkeypatch, mode, count, degraded):
     manager, _, cfg, hw = pool
     devices = gpu_ids(manager)
     if mode == "sharded":
         hw["gpus"] = [{**gpu, "free": 600_000_000} for gpu in GPUS[:2]]
     deployment = manager.load_many("one", devices, 4096, lambda _: None)
     target = deployment["target"]
+    available = devices
+    if degraded:
+        manager.client(devices[0]).stop()
+        available = devices[1:]
 
-    async def measure(client, name, logical_target, *args):
-        assert client.target["id"] == (target if mode == "sharded" else devices[0])
+    async def measure(client, name, logical_target, *args, **kwargs):
+        assert client.target["id"] == (target if mode == "sharded" else available[0])
+        if mode == "replicated":
+            assert list(kwargs["replica_workers"]) == available
+            assert kwargs["replica_workers"][available[0]] is client
+        else:
+            assert "replica_workers" not in kwargs
         return {**local_result(), "model": name, "target": logical_target}
 
     monkeypatch.setattr("llameros.app.measure", measure)

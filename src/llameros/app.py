@@ -1204,8 +1204,17 @@ def create_app(
     def benchmark(body: ModelRequest):
         """Reserve all devices for manually stoppable speed and sustained-load tests."""
         name = validate_model(body.model)
+        stress_options = {}
         if runtimes:
             client, deployment = runtimes.model_runtime(name, body.target)
+            if deployment.get("placement") == "replicated":
+                workers = {
+                    worker: client if worker == client.target["id"] else runtimes.client(worker)
+                    for worker in deployment["workers"]
+                }
+                if any(node is None for node in workers.values()):
+                    raise HTTPException(409, "A selected replica worker is no longer available")
+                stress_options["replica_workers"] = workers
         else:
             if not is_loaded(name):
                 raise HTTPException(409, "Load the model before benchmarking")
@@ -1253,6 +1262,7 @@ def create_app(
                     jobs.benchmark_stop,
                     scheduler_policy.model_dump(),
                     save_result,
+                    **stress_options,
                 )
             )
             save_result(result)

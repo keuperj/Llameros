@@ -20,7 +20,7 @@ test('rankings render tables with expandable details preserved across refresh', 
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/llameros/static/benchmarks.js'), 'utf8'), context);
   context.rows = [{model: '<model>', target: 'cpu', kind: 'chat', status: 'completed', tokens_per_second: 42,
     timestamp: 1, context_length: 4096, parallel: 2, cases: [],
-    stress: {status:'stopped', best_rpm:8, round_count:1, rounds:[{rpm:8,successful:true,completed:6,offered:6,overflow:0,timeouts:0,failed:0,wall_seconds:60}]}},
+    stress: {scope:'replica-pool', worker_count:2, status:'stopped', best_rpm:8, round_count:1, rounds:[{rpm:8,successful:true,completed:6,offered:6,overflow:0,timeouts:0,failed:0,wall_seconds:60}]}},
     {model: 'failed', target: 'cpu', kind: 'chat', status: 'failed', tokens_per_second: null, timestamp: 1, cases: [], error: 'Runtime error'}];
   vm.runInContext('BenchmarkResults.render(rows)', context);
   assert.equal(descendants(panel).filter(node => node.tag === 'table').length, 1);
@@ -28,6 +28,8 @@ test('rankings render tables with expandable details preserved across refresh', 
   assert.equal(descendants(panel).filter(node => node.tag === 'details').length, 2);
   assert.ok(descendants(panel).some(node => node.tag === 'td' && node.textContent === '<model>'));
   assert.ok(descendants(panel).some(node => node.tag === 'p' && node.textContent.includes('highest clean tested rate 8.00')));
+  assert.ok(descendants(panel).some(node => node.textContent === 'Speed score: one replica worker.'));
+  assert.ok(descendants(panel).some(node => node.textContent.startsWith('Stress test (replica pool · 2 available workers)')));
   descendants(panel).find(node => node.tag === 'details').open = true;
   vm.runInContext('BenchmarkResults.render(rows)', context);
   assert.equal(descendants(panel).find(node => node.tag === 'details').open, true);
