@@ -2,7 +2,9 @@
 
 import json
 import sqlite3
+import ssl
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -16,6 +18,7 @@ from llameros.benchmark_exchange import (
     hardware_profile,
     rank_matches,
     shareable,
+    upload_failure,
 )
 from statistics_server.app import create_app
 from statistics_server.database import moderate, review_entries
@@ -28,6 +31,87 @@ def test_default_benchmark_destination_remains_opt_in():
     assert settings.url == "https://92.205.18.100:9443"
     assert settings.enabled is False
     assert settings.ca_certificate == ""
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [
+        (422, "supports placement metadata"),
+        (429, "Wait at least a minute"),
+        (503, "database capacity"),
+    ],
+)
+def test_upload_status_uses_safe_local_message(status, expected):
+    request = httpx.Request("POST", "https://statistics.test/api/v1/benchmarks")
+    response = httpx.Response(status, request=request, text="untrusted private response")
+    error = httpx.HTTPStatusError("untrusted private response", request=request, response=response)
+    message = upload_failure(error, has_placement=True)
+    assert f"HTTP {status}" in message and expected in message
+    assert "untrusted" not in message
+
+
+def test_certificate_message_requires_actual_certificate_verification_failure():
+    error = httpx.ConnectError("private connection details")
+    assert "certificate" not in upload_failure(error, has_placement=True)
+    error.__cause__ = ssl.SSLCertVerificationError("private certificate details")
+    message = upload_failure(error, has_placement=True)
+    assert "certificate verification failed" in message
+    assert "private" not in message
+
+
+def test_statistics_server_refuses_stale_upload_schema(tmp_path, monkeypatch):
+    from statistics_server import app
+
+    class LegacyUpload:
+        @staticmethod
+        def model_json_schema():
+            return {"$defs": {"SharedBenchmark": {"properties": {"hardware": {}}}}}
+
+    monkeypatch.setattr(app, "PublicUpload", LegacyUpload)
+    with pytest.raises(RuntimeError, match="reinstall-package llameros"):
+        create_app(tmp_path)
+    assert not list(tmp_path.iterdir())
+
+
+def test_dashboard_surfaces_upload_rejection_without_retrying_or_stripping_placement(
+    multiuser, monkeypatch
+):
+    app, admin, _ = multiuser
+    hardware, placement = benchmark_profile(HARDWARE, "cpu")
+    app.state.store.save_benchmark(
+        {
+            **local_result(),
+            "share_hardware": hardware.model_dump(),
+            "share_placement": placement.model_dump(),
+        }
+    )
+    assert admin.post("/api/benchmark-sharing", json={"enabled": True}).status_code == 200
+    preview = admin.get("/api/benchmark-sharing/preview").json()
+    assert preview["entries"][0]["placement"]["mode"] == "cpu"
+    calls = []
+
+    def reject(policy, method, path, payload):
+        calls.append(payload)
+        request = httpx.Request(method, policy.url + path)
+        httpx.Response(422, request=request, text="untrusted peer data").raise_for_status()
+
+    monkeypatch.setattr("llameros.app.exchange", reject)
+    payload = {
+        "entries": preview["entries"],
+        "destination": preview["destination"],
+        "confirmed": True,
+    }
+    response = admin.post("/api/benchmark-sharing/share", json=payload)
+    assert response.status_code == 502
+    assert "HTTP 422" in response.json()["detail"]
+    assert "untrusted" not in response.text
+    assert calls == [{"entries": preview["entries"]}]
+
+    monkeypatch.setattr("llameros.app.exchange", lambda *args: {"unexpected": "private receipt"})
+    response = admin.post("/api/benchmark-sharing/share", json=payload)
+    assert response.status_code == 502
+    assert "invalid upload receipt" in response.json()["detail"]
+    assert "private receipt" not in response.text
     assert SharingSettings(host="127.0.0.1", port=9444).url == "https://127.0.0.1:9444"
 
 

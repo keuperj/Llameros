@@ -370,6 +370,7 @@ at the network layer; do not promise complete anonymity.
 | Stops after logout | Check lingering for the correct account and that its user unit is enabled. |
 | Unit fails immediately | Interpreter/package paths, private user-owned state, `systemctl --user status` and `journalctl --user`. |
 | `ImportError: cannot import name 'PublicUpload'` from `site-packages/llameros` | Checkout and installed package are out of sync. Stop the service, run `uv sync --locked --no-editable --reinstall-package llameros` from the updated checkout, verify imports, then reset the failed state and start as above. No database or bind-address change is needed for this error. |
+| Placement-aware uploads return HTTP 422, or startup reports an outdated upload schema | Check the running upload validator, not just the public table or read API. A newer server checkout can serve those while an older installed package rejects placement. Follow section 6 to reinstall and restart from the same revision; keep the database and TLS files. |
 | Address already in use | Stop duplicate manual/old system-service processes or change port. |
 | Cannot bind at boot | Confirm the IP is ready, fix network readiness and restart. |
 | TLS rejected | Check IP SAN, expiration and fingerprint; distribute correct public PEM, never disable verification. |

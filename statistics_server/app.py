@@ -12,11 +12,22 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
 import llameros
-from llameros.benchmark_exchange import PublicUpload
+from llameros.benchmark_exchange import PublicUpload, SharedBenchmark
 from llameros.body_limits import BodyLimits
 
 from .admin import install_admin
 from .database import approved_averages, flags_for, initialize
+
+
+def verify_upload_schema():
+    """Do not start a placement-aware server with a stale installed protocol package."""
+    schema = PublicUpload.model_json_schema()
+    entry_schema = schema.get("$defs", {}).get(SharedBenchmark.__name__, {})
+    if "placement" not in entry_schema.get("properties", {}):
+        raise RuntimeError(
+            "Installed Llameros upload schema does not support placement. From the server checkout, "
+            "run uv sync --locked --no-editable --reinstall-package llameros before starting the service."
+        )
 
 
 def create_app(
@@ -30,6 +41,7 @@ def create_app(
     authenticator=None,
     account_checker=None,
 ):
+    verify_upload_schema()
     database = initialize(state_dir)
     lock = threading.Lock()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)

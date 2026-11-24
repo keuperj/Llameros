@@ -32,12 +32,14 @@ from .benchmark_exchange import (
     ShareConfirmation,
     SharedBenchmark,
     SharingSettings,
+    UploadReceipt,
     benchmark_profile,
     exchange,
     hardware_profile,
     inspect_server_certificate,
     rank_matches,
     shareable,
+    upload_failure,
 )
 from .body_limits import BodyLimits
 from .catalog import Catalog, validate_model
@@ -894,18 +896,21 @@ def create_app(
         if any(entry.model_dump() not in available for entry in body.entries):
             raise HTTPException(409, "Results changed; preview and confirm again")
         try:
-            return exchange(
-                policy,
-                "POST",
-                "/api/v1/benchmarks",
-                {
-                    "entries": [entry.model_dump() for entry in body.entries],
-                },
+            receipt = UploadReceipt.model_validate(
+                exchange(
+                    policy,
+                    "POST",
+                    "/api/v1/benchmarks",
+                    {
+                        "entries": [entry.model_dump() for entry in body.entries],
+                    },
+                )
             )
-        except (ValueError, httpx.HTTPError):
+            return receipt.model_dump()
+        except (ValueError, httpx.HTTPError, OSError) as exc:
             raise HTTPException(
                 502,
-                "Statistics upload failed; check server availability and certificate trust. For self-signed servers, retrieve and confirm the public certificate in Community benchmark server settings, then save before sharing. Exact duplicate reports are ignored.",
+                upload_failure(exc, has_placement=any(entry.placement for entry in body.entries)),
             ) from None
 
     @app.get("/api/benchmark-sharing/recommendations", dependencies=protected)

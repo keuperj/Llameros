@@ -240,6 +240,12 @@ class PublicUpload(BenchmarkBatch):
     entries: list[SharedBenchmark] = Field(min_length=1, max_length=10)
 
 
+class UploadReceipt(StrictModel):
+    accepted: int = Field(ge=0, le=10)
+    duplicates: int = Field(ge=0, le=10)
+    status: Literal["pending"] = "pending"
+
+
 def bucket(value, choices):
     """Use coarse, bounded categories rather than exact machine measurements."""
     return next((item for item in choices if (value or 0) <= item), choices[-1])
@@ -344,6 +350,42 @@ def exchange(settings, method, path, payload=None):
                 if len(raw) > 2 * 1024 * 1024:
                     raise ValueError("Statistics response too large")
     return json.loads(raw)
+
+
+def upload_failure(exc, *, has_placement):
+    """Describe known failure classes without exposing peer-supplied text or TLS internals."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status in (400, 422):
+            hint = (
+                " Ask the server operator to verify that the running upload validator supports placement metadata."
+                if has_placement
+                else " Ask the server operator to check benchmark protocol compatibility."
+            )
+            return f"Statistics server rejected the benchmark payload (HTTP {status}).{hint}"
+        hints = {
+            401: "Check that the public upload endpoint does not require authentication.",
+            403: "Check that the server or its proxy allows public benchmark uploads.",
+            404: "Check that the configured server exposes the public benchmark upload endpoint.",
+            405: "Check that the server allows POST on the benchmark upload endpoint.",
+            413: "Ask the server operator to check upload size limits.",
+            429: "The upload limit has been reached. Wait at least a minute before trying again.",
+            503: "The service may be temporarily unavailable or at database capacity. Check with the operator.",
+        }
+        hint = hints.get(
+            status, "Ask the server operator to check the service and any reverse proxy."
+        )
+        return f"Statistics upload failed (HTTP {status}). {hint}"
+    if isinstance(exc, httpx.TimeoutException):
+        return "Statistics upload timed out. The server may already have received it; retrying the same results is safe because duplicates are ignored."
+    cause = exc
+    while cause is not None:
+        if isinstance(cause, ssl.SSLCertVerificationError):
+            return "Statistics server certificate verification failed. Compare the fingerprint with the operator, retrieve and confirm the certificate, and save the settings."
+        cause = cause.__cause__ or cause.__context__
+    if isinstance(exc, (httpx.RequestError, OSError)):
+        return "Could not exchange data with the statistics server. Check the saved address, port, and server availability. Retrying the same results is safe because duplicates are ignored."
+    return "Statistics server returned an invalid upload receipt. The server may already have received the results; retrying the same results is safe because duplicates are ignored."
 
 
 def sharing_tls_context(settings):
