@@ -317,22 +317,21 @@ including when the project version has not changed. `--locked` preserves the
 tested dependency resolution; do not regenerate the lockfile on the server to
 work around an update failure.
 
-Verify the imports with the same interpreter used by the service. This does not
+Verify the upload schema with the same interpreter used by the service. This does not
 start a listener or initialize the database:
 
 ```sh
 .venv/bin/python - <<'PY'
 import llameros.benchmark_exchange as exchange
-from statistics_server.app import create_app
+from statistics_server.app import verify_upload_schema
 
-assert exchange.PublicUpload
-assert callable(create_app)
 print("Benchmark exchange loaded from:", exchange.__file__)
-print("PublicUpload and statistics server imports: OK")
+verify_upload_schema()
+print("Statistics upload schema: OK")
 PY
 ```
 
-If the import check fails, leave the service stopped and resolve the installation
+If the schema check fails, leave the service stopped and resolve the installation
 error first. If you intentionally changed the installed user unit, run
 `systemctl --user daemon-reload`; source-only updates do not require it. Do not
 overwrite a locally customized unit with the template during routine updates.
@@ -369,6 +368,7 @@ at the network layer; do not promise complete anonymity.
 | Cannot connect to user bus | Log in directly via SSH/desktop as the intended account; do not use `sudo systemctl --user`. |
 | Stops after logout | Check lingering for the correct account and that its user unit is enabled. |
 | Unit fails immediately | Interpreter/package paths, private user-owned state, `systemctl --user status` and `journalctl --user`. |
+| Status shows only `exit-code` or `activating (auto-restart)` | Run `journalctl --user -u llameros-statistics.service -b -n 80 --no-pager -o cat` on the statistics host to see the original Python error. Run the schema check above from the service checkout to distinguish a stale package from a different startup failure. |
 | `ImportError: cannot import name 'PublicUpload'` from `site-packages/llameros` | Checkout and installed package are out of sync. Stop the service, run `uv sync --locked --no-editable --reinstall-package llameros` from the updated checkout, verify imports, then reset the failed state and start as above. No database or bind-address change is needed for this error. |
 | Placement-aware uploads return HTTP 422, or startup reports an outdated upload schema | Check the running upload validator, not just the public table or read API. A newer server checkout can serve those while an older installed package rejects placement. Follow section 6 to reinstall and restart from the same revision; keep the database and TLS files. |
 | Address already in use | Stop duplicate manual/old system-service processes or change port. |

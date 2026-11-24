@@ -85,14 +85,15 @@ As the service's login user, without sudo:
 1. Stop the service and CLI writes, record the current source revision and lockfile,
    and back up private state using `DEPLOYMENT.md`.
 2. Update the checkout to the intended tested revision, preserving local changes.
-3. From the repository root, explicitly reinstall and verify imports:
+3. From the repository root, explicitly reinstall and verify the upload schema:
 
    ```sh
    uv sync --locked --no-editable --reinstall-package llameros
-   .venv/bin/python -c 'from llameros.benchmark_exchange import PublicUpload; from statistics_server.app import create_app; print("Statistics server imports: OK")'
+   .venv/bin/python -c 'from statistics_server.app import verify_upload_schema; verify_upload_schema(); print("Statistics upload schema: OK")'
    ```
 
-   Run the import check only if installation succeeded. If either command fails,
+   Run the schema check only if installation succeeded. It does not open a listener
+   or touch server state. If either command fails,
    leave the service stopped and resolve the error before continuing.
 4. Reload systemd only if you changed the installed unit, then start and inspect:
 
